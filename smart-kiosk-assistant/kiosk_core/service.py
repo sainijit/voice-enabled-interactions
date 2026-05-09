@@ -5,14 +5,14 @@ from pathlib import Path
 import sounddevice as sd
 from fastapi import UploadFile
 
-from kiosk_core.audio_session import FileAudioSession, MicrophoneSession
+from kiosk_core.audio_session import BrowserStreamSession, FileAudioSession, MicrophoneSession
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
 
 
 class SessionService:
     def __init__(self):
         self._lock = threading.Lock()
-        self._sessions: dict[str, MicrophoneSession | FileAudioSession] = {}
+        self._sessions: dict[str, MicrophoneSession | FileAudioSession | BrowserStreamSession] = {}
         self._active_session_id: str | None = None
 
     def start_session(self, request: SessionStartRequest) -> dict[str, object]:
@@ -77,7 +77,34 @@ class SessionService:
             )
         return devices
 
-    def _get_session_obj(self, session_id: str) -> MicrophoneSession | FileAudioSession:
+    def start_stream_session(self, request: SessionStartRequest) -> dict[str, object]:
+        with self._lock:
+            if self._active_session_id is not None:
+                active = self._sessions[self._active_session_id]
+                if active.snapshot()["status"] in {"running", "stopping"}:
+                    raise ValueError("Another audio session is already active")
+
+            session = BrowserStreamSession(request=request, on_complete=self._on_session_complete)
+            self._sessions[session.session_id] = session
+            self._active_session_id = session.session_id
+            session.start()
+            return session.snapshot()
+
+    def push_audio_chunk(self, session_id: str, wav_bytes: bytes) -> None:
+        session = self._get_session_obj(session_id)
+        if not isinstance(session, BrowserStreamSession):
+            raise ValueError("Session is not a browser stream session")
+        if session.snapshot()["status"] not in {"running", "stopping"}:
+            raise ValueError("Session is not active")
+        session.push_audio(wav_bytes)
+
+    def signal_stream_end(self, session_id: str) -> None:
+        session = self._get_session_obj(session_id)
+        if not isinstance(session, BrowserStreamSession):
+            raise ValueError("Session is not a browser stream session")
+        session.signal_end()
+
+    def _get_session_obj(self, session_id: str) -> MicrophoneSession | FileAudioSession | BrowserStreamSession:
         with self._lock:
             session = self._sessions.get(session_id)
         if session is None:

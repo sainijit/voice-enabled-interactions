@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import time
 import wave
@@ -8,6 +9,9 @@ from typing import Any, Generator
 
 import gradio as gr
 import httpx
+import numpy as np
+
+from kiosk_core import config as kiosk_config
 
 
 KIOSK_CORE_URL = os.getenv("KIOSK_CORE_UI_BASE_URL", "http://127.0.0.1:8012")
@@ -142,9 +146,60 @@ STYLE = """
 """
 
 
-def _read_sample_rate(audio_path: str) -> int:
-    with wave.open(audio_path, "rb") as wav_file:
-        return int(wav_file.getframerate())
+def _numpy_to_wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
+    """Convert a 1-D int16 numpy array to raw WAV bytes."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio.astype(np.int16).tobytes())
+    return buf.getvalue()
+
+
+def _open_stream_session(sample_rate: int) -> dict[str, Any]:
+    """Open a browser stream session on kiosk-core."""
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
+        response = client.post(
+            f"{KIOSK_CORE_URL}/api/v1/sessions/start-stream",
+            json={
+                "sample_rate": sample_rate,
+                "chunk_seconds": kiosk_config.DEFAULT_CHUNK_SECONDS,
+                "silence_timeout_seconds": 1.5,
+                "max_session_seconds": 60.0,
+                "silence_threshold": 900,
+                "language": "en",
+                "temperature": 0.0,
+                "analyzer_url": ANALYZER_URL,
+                "rag_url": RAG_URL,
+                "tts_url": TTS_URL,
+                "tts_model": "qwen-tts",
+                "tts_language": "English",
+            },
+        )
+    response.raise_for_status()
+    return response.json()
+
+
+def _push_chunk(session_id: str, wav_bytes: bytes) -> None:
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
+        client.post(
+            f"{KIOSK_CORE_URL}/api/v1/sessions/{session_id}/audio",
+            content=wav_bytes,
+            headers={"Content-Type": "audio/wav"},
+        ).raise_for_status()
+
+
+def _end_stream(session_id: str) -> None:
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
+        client.post(f"{KIOSK_CORE_URL}/api/v1/sessions/{session_id}/audio/end").raise_for_status()
+
+
+def _poll_session(session_id: str) -> dict[str, Any]:
+    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
+        response = client.get(f"{KIOSK_CORE_URL}/api/v1/sessions/{session_id}")
+    response.raise_for_status()
+    return response.json()
 
 
 def _build_status(session: dict[str, Any] | None, phase: str) -> str:
@@ -178,43 +233,16 @@ def _latest_audio_update(session: dict[str, Any], previous_count: int) -> tuple[
     return gr.skip(), previous_count
 
 
-def _start_session(audio_path: str) -> dict[str, Any]:
-    sample_rate = _read_sample_rate(audio_path)
-    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
-        with open(audio_path, "rb") as audio_file:
-            response = client.post(
-                f"{KIOSK_CORE_URL}/api/v1/sessions/start-file",
-                files={"file": (Path(audio_path).name, audio_file, "audio/wav")},
-                data={
-                    "sample_rate": str(sample_rate),
-                    "chunk_seconds": "4.0",
-                    "silence_timeout_seconds": "1.5",
-                    "max_session_seconds": "20.0",
-                    "silence_threshold": "900",
-                    "language": "en",
-                    "temperature": "0.0",
-                    "analyzer_url": ANALYZER_URL,
-                    "rag_url": RAG_URL,
-                    "tts_url": TTS_URL,
-                    "tts_model": "qwen-tts",
-                    "tts_language": "English",
-                    "realtime_factor": "10.0",
-                },
-            )
-    response.raise_for_status()
-    return response.json()
+# ── Streaming event handlers ──────────────────────────────────────────────────
+
+# gr.State schema: {"session_id": str|None, "buffer": list[np.ndarray], "sample_rate": int}
+_CHUNK_SECONDS = kiosk_config.DEFAULT_CHUNK_SECONDS  # pushed to kiosk-core and used as stream_every
 
 
-def _poll_session(session_id: str) -> dict[str, Any]:
-    with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as client:
-        response = client.get(f"{KIOSK_CORE_URL}/api/v1/sessions/{session_id}")
-    response.raise_for_status()
-    return response.json()
-
-
-def begin_recording() -> tuple[dict[str, Any], str, str, dict[str, Any], str]:
+def on_start_recording() -> tuple[dict, str, str, dict, str]:
+    """Called when the user starts recording. Resets UI and stream state."""
     return (
-        gr.update(value=None, interactive=True),
+        {"session_id": None, "buffer": [], "sample_rate": 16000},
         "",
         "",
         gr.update(value=None, autoplay=False),
@@ -222,80 +250,124 @@ def begin_recording() -> tuple[dict[str, Any], str, str, dict[str, Any], str]:
     )
 
 
-def process_turn(audio_path: str | None) -> Generator[tuple[dict[str, Any], str, str, dict[str, Any], str], None, None]:
-    if not audio_path:
-        yield (
-            gr.update(interactive=True, value=None),
-            "",
-            "",
-            gr.update(value=None, autoplay=False),
-            "No microphone audio was captured. Try again.",
-        )
-        return
+def on_stream_chunk(
+    stream_state: dict,
+    audio_chunk,   # (sample_rate: int, data: np.ndarray) from Gradio streaming
+) -> tuple[dict, str, str, dict, str]:
+    """Called every ~CHUNK_SECONDS while the mic is open.
+    Accumulates audio and pushes to kiosk-core once we have a full chunk.
+    """
+    if audio_chunk is None:
+        return stream_state, "", "", gr.skip(), _build_status(None, "listening")
 
-    yield (
-        gr.update(interactive=False, value=audio_path),
-        "",
-        "",
-        gr.update(value=None, autoplay=False),
-        "Uploading audio and starting session...",
-    )
+    sample_rate, data = audio_chunk
+    if data is None or len(data) == 0:
+        return stream_state, "", "", gr.skip(), _build_status(None, "listening")
 
+    # Flatten to mono int16
+    if data.ndim > 1:
+        data = data[:, 0]
+    data = data.astype(np.int16)
+
+    state = dict(stream_state)
+    state["sample_rate"] = sample_rate
+    state["buffer"] = list(state.get("buffer", [])) + [data]
+
+    # Open session on first chunk
+    if state["session_id"] is None:
+        try:
+            started = _open_stream_session(sample_rate)
+            state["session_id"] = started["session_id"]
+        except Exception as exc:  # noqa: BLE001
+            return state, "", "", gr.skip(), f"Failed to open session: {exc}"
+
+    # Check if buffer has accumulated enough for a push
+    buffer_samples = sum(len(b) for b in state["buffer"])
+    if buffer_samples >= int(sample_rate * _CHUNK_SECONDS):
+        audio = np.concatenate(state["buffer"], axis=0)
+        state["buffer"] = []
+        wav_bytes = _numpy_to_wav_bytes(audio, sample_rate)
+        try:
+            _push_chunk(state["session_id"], wav_bytes)
+        except Exception:  # noqa: BLE001
+            pass  # Drop the chunk — session will continue with next push
+
+    # Poll for live transcript updates
+    transcript = ""
     try:
-        started = _start_session(audio_path)
-        session_id = str(started["session_id"])
-    except Exception as exc:  # noqa: BLE001
-        yield (
-            gr.update(interactive=True, value=None),
-            "",
-            "",
-            gr.update(value=None, autoplay=False),
-            f"Failed to start kiosk session: {exc}",
-        )
+        session = _poll_session(state["session_id"])
+        transcript = str(session.get("transcript", "")).strip()
+    except Exception:  # noqa: BLE001
+        pass
+
+    return state, transcript, "", gr.skip(), _build_status(None, "listening")
+
+
+def on_stop_recording(
+    stream_state: dict,
+) -> Generator[tuple[dict, str, str, dict, str], None, None]:
+    """Called when the user stops recording.
+    Flushes remaining buffer, signals EOS, then polls until the session finishes.
+    """
+    state = dict(stream_state)
+    session_id = state.get("session_id")
+    sample_rate = state.get("sample_rate", 16000)
+
+    if not session_id:
+        yield state, "", "", gr.update(value=None, autoplay=False), "No audio was captured. Try again."
         return
 
+    # Flush remaining buffer
+    remaining = state.get("buffer", [])
+    if remaining:
+        audio = np.concatenate(remaining, axis=0)
+        wav_bytes = _numpy_to_wav_bytes(audio, sample_rate)
+        try:
+            _push_chunk(session_id, wav_bytes)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Signal end-of-stream
+    try:
+        _end_stream(session_id)
+    except Exception as exc:  # noqa: BLE001
+        yield state, "", "", gr.update(value=None, autoplay=False), f"Failed to finalise session: {exc}"
+        return
+
+    yield state, "", "", gr.update(value=None, autoplay=False), "Processing speech..."
+
+    # Poll until done
     previous_audio_count = 0
     while True:
         try:
             session = _poll_session(session_id)
         except Exception as exc:  # noqa: BLE001
-            yield (
-                gr.update(interactive=True, value=None),
-                "",
-                "",
-                gr.update(value=None, autoplay=False),
-                f"Failed to read session state: {exc}",
-            )
+            yield state, "", "", gr.update(value=None, autoplay=False), f"Polling error: {exc}"
             return
 
         transcript = str(session.get("transcript", "")).strip()
         response_text = str(session.get("response", "")).strip()
         audio_update, previous_audio_count = _latest_audio_update(session, previous_audio_count)
-        status_text = _build_status(session, "processing")
         running = str(session.get("status", "")) in {"running", "stopping"}
 
-        yield (
-            gr.update(interactive=not running, value=None if not running else audio_path),
-            transcript,
-            response_text,
-            audio_update,
-            status_text,
-        )
+        yield state, transcript, response_text, audio_update, _build_status(session, "processing")
 
         if not running:
             break
         time.sleep(POLL_INTERVAL_SECONDS)
 
-
 def create_app() -> gr.Blocks:
     with gr.Blocks(title="Kiosk Core UI") as app:
+        # Per-session streaming state: session_id, audio buffer, sample_rate
+        stream_state = gr.State({"session_id": None, "buffer": [], "sample_rate": 16000})
+
         with gr.Column(elem_classes=["kiosk-shell"]):
             with gr.Column(elem_classes=["kiosk-hero"]):
                 gr.HTML(
                     """
                     <div class="kiosk-title">
                       <h1>Kiosk Voice Assistant</h1>
-                      <p>Speak a question, watch the transcription appear, then follow the live answer and audio playback.</p>
+                      <p>Speak a question — transcription and answer appear as you speak.</p>
                     </div>
                     <div class="assistant-orb-wrap">
                       <div class="assistant-orb">
@@ -307,9 +379,9 @@ def create_app() -> gr.Blocks:
 
                 mic_input = gr.Audio(
                     sources=["microphone"],
-                    type="filepath",
-                    format="wav",
-                    label="Tap the microphone, speak, then stop recording",
+                    type="numpy",
+                    streaming=True,
+                    label="Tap the microphone and speak. Stop recording when done.",
                     elem_id="kiosk-mic-input",
                     waveform_options=gr.WaveformOptions(show_recording_waveform=True),
                 )
@@ -340,15 +412,23 @@ def create_app() -> gr.Blocks:
                 buttons=[],
             )
 
+            _outputs = [stream_state, transcript_box, response_box, tts_audio, status_box]
+
             mic_input.start_recording(
-                fn=begin_recording,
+                fn=on_start_recording,
                 inputs=None,
-                outputs=[mic_input, transcript_box, response_box, tts_audio, status_box],
+                outputs=_outputs,
+            )
+            mic_input.stream(
+                fn=on_stream_chunk,
+                inputs=[stream_state, mic_input],
+                outputs=_outputs,
+                stream_every=_CHUNK_SECONDS,
             )
             mic_input.stop_recording(
-                fn=process_turn,
-                inputs=[mic_input],
-                outputs=[mic_input, transcript_box, response_box, tts_audio, status_box],
+                fn=on_stop_recording,
+                inputs=[stream_state],
+                outputs=_outputs,
             )
 
     return app

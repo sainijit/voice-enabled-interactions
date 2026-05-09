@@ -308,6 +308,69 @@ class BaseAudioSession:
         return temp_path
 
 
+class BrowserStreamSession(BaseAudioSession):
+    """Session that receives audio chunks pushed from the browser via HTTP.
+
+    Call push_audio(wav_bytes) from the HTTP handler each time a chunk arrives.
+    The session applies the same RMS silence detection and chunk-flushing logic
+    as MicrophoneSession.  It ends automatically when:
+      - silence_timeout_seconds of silence follows detected speech, OR
+      - max_session_seconds of captured audio have been processed, OR
+      - stop() is called explicitly (e.g. user clicks stop-recording in browser).
+    """
+
+    def __init__(
+        self,
+        request: SessionStartRequest,
+        on_complete: Callable[[str], None] | None = None,
+    ):
+        super().__init__(request=request, on_complete=on_complete)
+        self._thread = threading.Thread(target=self._run, name=f"browser-session-{self.session_id}", daemon=True)
+        self._source_kind = "browser"
+        # Sentinel: None means end-of-stream
+        self._push_queue: Queue[np.ndarray | None] = Queue()
+
+    def push_audio(self, wav_bytes: bytes) -> None:
+        """Called from the HTTP handler for each incoming audio chunk."""
+        audio = np.frombuffer(wav_bytes, dtype=np.int16)
+        # Split into frame-sized pieces so _process_frame_stream sees uniform frames
+        for start in range(0, len(audio), self._frame_samples):
+            frame = audio[start : start + self._frame_samples]
+            if len(frame) > 0:
+                self._push_queue.put(frame.copy())
+
+    def signal_end(self) -> None:
+        """Signal that the browser has stopped recording (enqueue sentinel)."""
+        self._push_queue.put(None)
+
+    def _run(self) -> None:
+        final_status = "completed"
+        end_reason = self.end_reason or "completed"
+        try:
+            final_status, end_reason = self._process_frame_stream(self._iter_push_frames())
+            if final_status == "completed" and not self._speech_started:
+                end_reason = "no_speech_detected"
+        except Exception as exc:
+            final_status = "failed"
+            end_reason = "error"
+            with self._lock:
+                self.error = str(exc)
+            logger.exception("Browser stream session %s failed", self.session_id)
+        finally:
+            self._finalize_run(final_status, end_reason)
+
+    def _iter_push_frames(self):
+        while not self._stop_event.is_set():
+            try:
+                frame = self._push_queue.get(timeout=0.25)
+            except Empty:
+                continue
+            if frame is None:
+                # End-of-stream sentinel from signal_end()
+                break
+            yield frame
+
+
 class MicrophoneSession(BaseAudioSession):
     def __init__(
         self,

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
 from kiosk_core.service import SessionService
@@ -31,7 +31,45 @@ def get_session(session_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.post("/api/v1/sessions/start")
+@app.post("/api/v1/sessions/start-stream")
+def start_stream_session(request: SessionStartRequest) -> dict[str, object]:
+    """Open a browser streaming session.  The caller then pushes audio chunks
+    via POST /api/v1/sessions/{session_id}/audio and signals end-of-stream
+    via POST /api/v1/sessions/{session_id}/audio/end."""
+    try:
+        return service.start_stream_session(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/sessions/{session_id}/audio")
+async def push_audio_chunk(session_id: str, request: Request) -> dict[str, str]:
+    """Push a raw 16-bit mono PCM WAV chunk into an active browser stream session."""
+    wav_bytes = await request.body()
+    if not wav_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio body")
+    try:
+        service.push_audio_chunk(session_id, wav_bytes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "accepted"}
+
+
+@app.post("/api/v1/sessions/{session_id}/audio/end")
+def end_audio_stream(session_id: str) -> dict[str, str]:
+    """Signal end-of-stream so the session can finalise and run RAG+TTS."""
+    try:
+        service.signal_stream_end(session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"status": "eos_accepted"}
+
+
+@app.post("/api/v1/sessions/start", response_model=None)
 def start_session(request: SessionStartRequest) -> dict[str, object]:
     try:
         return service.start_session(request)
