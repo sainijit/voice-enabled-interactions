@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import ctypes
 import gc
 import logging
 import pathlib
-import queue
 import threading
 import time
 import uuid
 from dataclasses import dataclass
 from typing import Generator
 
-import openvino_genai as ov_genai
+from components.ov_ir_llm import OVIRTextGenPipeline
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from transformers import AutoTokenizer
@@ -26,66 +26,6 @@ logger = logging.getLogger(__name__)
 _SHARED_PIPELINE: "RagPipeline | None" = None
 _SHARED_PIPELINE_LOCK = threading.Lock()
 
-
-# ---------------------------------------------------------------------------
-# Streaming helper — matches the smart-classroom ov_genai_util pattern exactly,
-# using put() which is the correct openvino_genai.StreamerBase interface.
-# ---------------------------------------------------------------------------
-class YieldingTextStreamer(ov_genai.StreamerBase):
-    def __init__(self, tokenizer, skip_special_tokens: bool = True) -> None:
-        super().__init__()
-        self.tokenizer = tokenizer
-        self.skip_special_tokens = skip_special_tokens
-        self._queue: queue.Queue[str | None] = queue.Queue()
-        self._token_cache: list[int] = []
-        self._print_len = 0
-        self._exc: Exception | None = None
-
-    def put(self, token_id: int) -> bool:
-        self._token_cache.append(token_id)
-        text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
-        new_text = text[self._print_len:]
-        if not new_text:
-            return False
-        if self._is_safe_to_emit(new_text):
-            self._queue.put(new_text)
-            self._print_len = len(text)
-        else:
-            last_token_text = self.tokenizer.decode([token_id], skip_special_tokens=True)
-            if last_token_text.startswith(" "):
-                prev_chunk = text[self._print_len: len(text) - len(last_token_text)]
-                if prev_chunk:
-                    self._queue.put(prev_chunk)
-                    self._print_len += len(prev_chunk)
-        return False
-
-    def end(self) -> None:
-        if self._token_cache:
-            text = self.tokenizer.decode(self._token_cache, skip_special_tokens=self.skip_special_tokens)
-            remaining = text[self._print_len:]
-            if remaining:
-                self._queue.put(remaining)
-        self._queue.put(None)
-        self._token_cache.clear()
-        self._print_len = 0
-
-    def __iter__(self):
-        while True:
-            token = self._queue.get()
-            if token is None:
-                break
-            yield token
-
-    @staticmethod
-    def _is_safe_to_emit(text: str) -> bool:
-        last = text[-1]
-        cp = ord(last)
-        return (
-            last.isspace()
-            or last == "\n"
-            or last in {".", ",", "!", "?", ";", ":"}
-            or 0x4E00 <= cp <= 0x9FFF  # CJK
-        )
 
 
 class ChromaEmbeddingAdapter:
@@ -130,6 +70,7 @@ class RagPipeline:
         )
 
         llm_cfg = config.models.llm
+        self._llm_cfg = llm_cfg
         self._model_path = get_llm_model_path()
         self._device = str(getattr(llm_cfg, "device", "CPU")).upper()
         self._temperature = float(getattr(llm_cfg, "temperature", 0.0))
@@ -138,16 +79,6 @@ class RagPipeline:
             getattr(config.answering, "max_generations_before_reload", 25)
         )
         self._generations_since_reload = 0
-
-        # Plugin properties — primarily CACHE_DIR so periodic reloads skip
-        # kernel compilation on the GPU and complete in seconds.
-        self._plugin_config: dict[str, str] = {}
-        cache_dir = getattr(llm_cfg, "cache_dir", None)
-        if cache_dir:
-            cache_path = pathlib.Path(cache_dir).expanduser().resolve()
-            cache_path.mkdir(parents=True, exist_ok=True)
-            self._plugin_config["CACHE_DIR"] = str(cache_path)
-            logger.info("[LLM] OpenVINO model cache enabled at %s", cache_path)
 
         # Tokenizer and pipeline are loaded once at startup and shared behind a lock.
         logger.info(
@@ -167,19 +98,43 @@ class RagPipeline:
             llm_tokenizer=self._tokenizer,
         )
 
-    def _load_llm(self) -> ov_genai.LLMPipeline:
-        logger.info(
-            "[LLM] Loading ov_genai.LLMPipeline from %s on %s (plugin_config=%s)",
-            self._model_path, self._device, self._plugin_config or "{}",
-        )
-        if self._plugin_config:
-            return ov_genai.LLMPipeline(self._model_path, self._device, **self._plugin_config)
-        return ov_genai.LLMPipeline(self._model_path, self._device)
+    def _build_ov_config(self) -> dict:
+        cfg: dict[str, str] = {}
+        if self._device == "GPU":
+            # cfg["KV_CACHE_PRECISION"] = "u8"
+            # cfg["DYNAMIC_QUANTIZATION_GROUP_SIZE"] = "32"
+            # cfg["NUM_STREAMS"] = "1"
+            # cfg["GPU_HOST_TASK_PRIORITY"] = "HIGH"
+            pass
+        # cfg["PERFORMANCE_HINT"] = "LATENCY"
+        cache_dir = getattr(self._llm_cfg, "cache_dir", None)
+        if cache_dir:
+            cache_path = pathlib.Path(cache_dir).expanduser().resolve()
+            cache_path.mkdir(parents=True, exist_ok=True)
+            cfg["CACHE_DIR"] = str(cache_path)
+        logger.info("[LLM] ov_config=%s", cfg)
+        return cfg
 
-    def _destroy_llm(self, model: ov_genai.LLMPipeline) -> None:
+    def _load_llm(self) -> OVIRTextGenPipeline:
+        logger.info(
+            "[LLM] Loading OVIRTextGenPipeline from %s on %s",
+            self._model_path, self._device,
+        )
+        return OVIRTextGenPipeline(
+            model_path=self._model_path,
+            tokenizer=self._tokenizer,
+            device=self._device,
+            ov_config=self._build_ov_config(),
+        )
+
+    def _destroy_llm(self, model: OVIRTextGenPipeline) -> None:
         try:
-            del model
+            model.destroy()
             gc.collect()
+            try:
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:  # noqa: BLE001
+                pass
             logger.info("[LLM] Pipeline destroyed, memory reclaimed")
         except Exception as exc:  # noqa: BLE001
             logger.warning("[LLM] Failed to fully destroy pipeline: %s", exc)
@@ -200,6 +155,7 @@ class RagPipeline:
                 "OUT OF MEMORY",
                 "NOT ENOUGH MEMORY",
                 "ALLOCATE",
+                "EXCEEDED MAX SIZE OF MEMORY ALLOCATION",
             )
         )
 
@@ -207,20 +163,31 @@ class RagPipeline:
         if getattr(self, "_llm", None) is not None:
             self._destroy_llm(self._llm)
             self._llm = None
+        # Give the GPU driver time to actually reclaim pages before reloading.
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(3)
         self._llm = self._load_llm()
         self._generations_since_reload = 0
 
     def _post_generation_locked(self) -> None:
-        """Run cleanup after a successful generation while holding _llm_lock.
+        """Cleanup after a successful generation.
 
-        Increments the generation counter, runs gc.collect to release Python
-        references to intermediate tensors, and recycles the LLMPipeline once
-        the configured threshold is reached to avoid GPU memory fragmentation
-        / KV cache buildup that eventually triggers CL_OUT_OF_RESOURCES.
+        OVIRTextGenPipeline has no persistent GPU state — each generate() call
+        allocates and frees its own InferRequest.  We still run gc.collect and
+        malloc_trim to promptly return Python/libc heap pages to the OS, and
+        proactively reload the compiled model at the configured threshold to
+        prevent any long-term GPU allocator fragmentation.
         """
         self._generations_since_reload += 1
         try:
             gc.collect()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
         except Exception:  # noqa: BLE001
             pass
         if (
@@ -228,7 +195,7 @@ class RagPipeline:
             and self._generations_since_reload >= self._max_generations_before_reload
         ):
             logger.info(
-                "[LLM] Reached %d generations since last reload; recycling pipeline proactively",
+                "[LLM] Reached %d generations; recycling pipeline proactively",
                 self._generations_since_reload,
             )
             self._reload_llm_locked()
@@ -418,12 +385,11 @@ class RagPipeline:
 
     def _generation_kwargs(self, max_tokens: int | None, temperature: float | None) -> dict:
         temp = temperature if temperature is not None else self._temperature
-        kwargs: dict = {
-            "temperature": max(temp, 1e-7),
+        return {
+            "max_new_tokens": max_tokens if max_tokens is not None else self._default_max_new_tokens,
+            "temperature": temp,
             "do_sample": temp > 0.0,
         }
-        kwargs["max_new_tokens"] = max_tokens if max_tokens is not None else self._default_max_new_tokens
-        return kwargs
 
     def _generate_text(self, prompt: str, max_tokens: int | None = None, temperature: float | None = None) -> str:
         gen_kwargs = self._generation_kwargs(max_tokens=max_tokens, temperature=temperature)
@@ -441,36 +407,11 @@ class RagPipeline:
         return str(result)
 
     def _stream_generate(self, prompt: str, max_tokens: int | None = None, temperature: float | None = None) -> Generator[str, None, None]:
-        gen_kwargs = self._generation_kwargs(max_tokens=max_tokens, temperature=temperature)
-
-        streamer = YieldingTextStreamer(self._tokenizer)
-
-        def _run_generation() -> None:
-            try:
-                with self._llm_lock:
-                    try:
-                        self._llm.generate(prompt, streamer=streamer, **gen_kwargs)
-                    except Exception as exc:  # noqa: BLE001
-                        if not self._is_resource_exhaustion(exc):
-                            raise
-                        logger.warning("[LLM] Stream generation hit resource exhaustion; recycling pipeline and retrying once: %s", exc)
-                        self._reload_llm_locked()
-                        self._llm.generate(prompt, streamer=streamer, **gen_kwargs)
-                    self._post_generation_locked()
-            except Exception as exc:  # noqa: BLE001
-                logger.error("[LLM] Stream generation failed: %s", exc)
-                streamer._exc = exc
-            finally:
-                streamer.end()
-
-        thread = threading.Thread(target=_run_generation, daemon=True)
-        thread.start()
-
-        for token in streamer:
-            yield token
-
-        if streamer._exc is not None:
-            raise streamer._exc
+        # OVIRTextGenPipeline does not support token-level streaming.
+        # Generate the full response then yield it as one chunk.
+        result = self._generate_text(prompt, max_tokens=max_tokens, temperature=temperature)
+        if result:
+            yield result
 
     @staticmethod
     def source_payload(record: RetrievalRecord) -> dict:
