@@ -6,10 +6,15 @@ Mic audio is captured by the **browser** via the Web Audio API and uploaded to k
 
 For the terminal-based key-press mic loop instead, see [run-standalone.md](run-standalone.md).
 
-Clone the repo with its dependency submodule before starting:
+Clone the repo with its dependency submodule:
 
 ```bash
 git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
+```
+
+Move into the kiosk directory:
+
+```bash
 cd voice-enabled-interactions/smart-kiosk-assistant
 ```
 
@@ -28,7 +33,8 @@ git submodule update --init --recursive
 From the `smart-kiosk-assistant/` directory:
 
 ```bash
-docker compose up -d --build
+docker compose build
+docker compose up -d
 ```
 
 This starts five containers:
@@ -70,7 +76,8 @@ docker compose logs -f kiosk-ui
 docker compose restart
 
 # After code or dependency change
-docker compose up -d --build
+docker compose build
+docker compose up -d
 
 # Full teardown
 docker compose down
@@ -84,7 +91,7 @@ By default the internal service URLs are already wired through the Compose netwo
 KIOSK_CORE_ANALYZER_URL=http://192.168.1.10:8010/v1/audio/transcriptions \
 KIOSK_CORE_TTS_URL=http://192.168.1.10:8011/v1/audio/speech \
 KIOSK_CORE_RAG_URL=http://192.168.1.10:8020/api/v1/query \
-docker compose up -d --build
+docker compose build && docker compose up -d
 ```
 
 See [configuration.md](configuration.md) for all variables.

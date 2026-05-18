@@ -12,12 +12,23 @@ A voice-driven, retrieval-augmented kiosk assistant for retail, QSR, and similar
 
 ## Run
 
-Clone with the `edge-ai-libraries/` submodule, then start the stack:
+Clone with the `edge-ai-libraries/` submodule:
 
 ```bash
 git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
+```
+
+Move into the kiosk directory:
+
+```bash
 cd voice-enabled-interactions/smart-kiosk-assistant
-docker compose up -d --build
+```
+
+Build and start the stack:
+
+```bash
+docker compose build
+docker compose up -d
 ```
 
 Open the UI at [http://127.0.0.1:7860](http://127.0.0.1:7860).
