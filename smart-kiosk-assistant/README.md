@@ -2,6 +2,23 @@
 
 `kiosk-core` is an orchestration service that wires together the audio-analyzer, RAG, and TTS microservices into a single voice assistant pipeline. It exposes a REST API for session control and ships a Gradio browser UI for interactive use.
 
+## Clone With Dependencies
+
+The audio-analyzer and text-to-speech services are linked through the repository-level `edge-ai-libraries/` Git submodule.
+
+Clone with:
+
+```bash
+git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
+cd voice-enabled-interactions
+```
+
+If you already cloned the repo without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
 ## Two Ways to Run
 
 ### Mode A — Gradio UI (browser, fully containerised)
@@ -9,6 +26,7 @@
 Mic audio is captured by the **browser** (Web Audio API) and uploaded to kiosk-core as a file. No host mic passthrough required.
 
 ```bash
+git submodule update --init --recursive
 docker compose up -d --build
 # → kiosk-core API   http://127.0.0.1:8012
 # → Gradio UI        http://127.0.0.1:7860  ← open in browser, speak
@@ -49,6 +67,14 @@ kiosk-core calls these downstream services:
 | audio-analyzer | `http://127.0.0.1:8010/v1/audio/transcriptions` | Speech-to-text |
 | RAG service | `http://127.0.0.1:8020/api/v1/query` | Knowledge-base Q&A |
 | text-to-speech | `http://127.0.0.1:8011/v1/audio/speech` | Speech synthesis |
+
+In container mode, `docker compose up` from `smart-kiosk-assistant/` now starts all five services together:
+
+- `audio-analyzer`
+- `text-to-speech`
+- `rag-service`
+- `kiosk-core`
+- `kiosk-ui`
 
 All URLs are overridable via environment variables. See [docs/configuration.md](docs/configuration.md).
 
