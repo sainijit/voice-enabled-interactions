@@ -1301,7 +1301,7 @@ def launch_app() -> Any:
     os.makedirs(_generated_audio, exist_ok=True)
     return create_app().launch(
         server_name="0.0.0.0",
-        server_port=7865,
+        server_port=7860,
         css=STYLE,
         allowed_paths=[_generated_audio],
     )
