@@ -6,14 +6,23 @@ Mic audio is captured by the **browser** via the Web Audio API and uploaded to k
 
 For the terminal-based key-press mic loop instead, see [run-standalone.md](run-standalone.md).
 
+Clone the repo with its dependency submodule before starting:
+
+```bash
+git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
+cd voice-enabled-interactions/smart-kiosk-assistant
+```
+
+If the repo is already cloned, run `git submodule update --init --recursive` from the repo root.
+
 ## Before You Start
 
 The three downstream services must be running on the host before starting this stack:
 
 | Service | Default port | Start command |
 |---|---|---|
-| audio-analyzer | `8010` | `cd audio_analyzer && docker compose up -d` |
-| text-to-speech | `8011` | `cd text-to-speech && docker compose up -d` |
+| audio-analyzer | `8010` | `cd ../edge-ai-libraries/microservices/audio-analyzer && docker compose up -d` |
+| text-to-speech | `8011` | `cd ../edge-ai-libraries/microservices/text-to-speech && docker compose up -d` |
 | RAG service | `8020` | `cd rag-service && docker compose up -d` |
 
 The Compose file uses `host.docker.internal` (mapped to the host gateway) so containers can reach host-side services by port.
