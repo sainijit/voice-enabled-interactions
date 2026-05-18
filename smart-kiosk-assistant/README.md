@@ -2,6 +2,23 @@
 
 `kiosk-core` is an orchestration service that wires together the audio-analyzer, RAG, and TTS microservices into a single voice assistant pipeline. It exposes a REST API for session control and ships a Gradio browser UI for interactive use.
 
+## Clone With Dependencies
+
+The audio-analyzer and text-to-speech services are linked through the repository-level `edge-ai-libraries/` Git submodule.
+
+Clone with:
+
+```bash
+git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
+cd voice-enabled-interactions
+```
+
+If you already cloned the repo without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
 ## Two Ways to Run
 
 ### Mode A — Gradio UI (browser, fully containerised)
@@ -49,6 +66,11 @@ kiosk-core calls these downstream services:
 | audio-analyzer | `http://127.0.0.1:8010/v1/audio/transcriptions` | Speech-to-text |
 | RAG service | `http://127.0.0.1:8020/api/v1/query` | Knowledge-base Q&A |
 | text-to-speech | `http://127.0.0.1:8011/v1/audio/speech` | Speech synthesis |
+
+With the submodule checked out, start the two edge services from:
+
+- `../edge-ai-libraries/microservices/audio-analyzer/`
+- `../edge-ai-libraries/microservices/text-to-speech/`
 
 All URLs are overridable via environment variables. See [docs/configuration.md](docs/configuration.md).
 
