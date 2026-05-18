@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -14,6 +15,21 @@ from utils.latency_store import llm_latency
 router = APIRouter()
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+_MAX_INGEST_TOKENS = int(os.getenv("RAG_MAX_INGEST_TOKENS", "25000"))
+_ALLOWED_INGEST_SUFFIXES = {".txt", ".md"}
+
+
+def _validate_token_budget(pipeline, text: str) -> None:
+    """Reject ingest requests that exceed the configured token budget."""
+    token_count = pipeline.count_tokens(text)
+    if token_count > _MAX_INGEST_TOKENS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Content too large: {token_count} tokens (limit is "
+                f"{_MAX_INGEST_TOKENS}). Please shorten the document and try again."
+            ),
+        )
 
 
 @router.get("/health")
@@ -41,6 +57,7 @@ def rag_performance():
 @router.post("/api/v1/context", response_model=IngestResponse)
 def ingest_context(request: ContextRequest) -> IngestResponse:
     pipeline = get_shared_pipeline()
+    _validate_token_budget(pipeline, request.text)
     added = pipeline.ingest_text(request.text, source=request.source, metadata=request.metadata)
     return IngestResponse(chunks_added=added, source=request.source)
 
@@ -49,8 +66,11 @@ def ingest_context(request: ContextRequest) -> IngestResponse:
 async def ingest_context_file(file: UploadFile = File(...)) -> IngestResponse:
     filename = file.filename or "upload"
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".txt", ".md"}:
-        raise HTTPException(status_code=415, detail="Only .txt and .md files are supported")
+    if suffix not in _ALLOWED_INGEST_SUFFIXES:
+        raise HTTPException(
+            status_code=415,
+            detail="Only .txt and .md files are supported",
+        )
 
     raw = await file.read()
     if len(raw) > _MAX_UPLOAD_BYTES:
@@ -64,6 +84,7 @@ async def ingest_context_file(file: UploadFile = File(...)) -> IngestResponse:
         raise HTTPException(status_code=422, detail="Context file must be UTF-8 encoded") from exc
 
     pipeline = get_shared_pipeline()
+    _validate_token_budget(pipeline, text)
     added = pipeline.ingest_text(text, source=filename)
     return IngestResponse(chunks_added=added, source=filename)
 

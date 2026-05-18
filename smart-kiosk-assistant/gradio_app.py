@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import io
+import json as _json
 import os
+import threading
 import time
+import urllib.parse as _urlparse
 import wave
 from typing import Any, Generator
 from urllib.parse import urlparse
@@ -21,6 +24,12 @@ ANALYZER_URL            = os.getenv("KIOSK_CORE_UI_ANALYZER_URL",       "http://
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_UI_TIMEOUT_SECONDS",       "120.0"))
 POLL_INTERVAL_SECONDS   = float(os.getenv("KIOSK_CORE_UI_POLL_INTERVAL_SECONDS", "0.35"))
 _CHUNK_SECONDS          = kiosk_config.DEFAULT_CHUNK_SECONDS
+_SAMPLE_KB_DIR          = os.path.join(os.path.dirname(__file__), "knowledge-base-samples")
+_SAMPLE_KB_OPTIONS      = {
+    "QSR": os.path.join(_SAMPLE_KB_DIR, "qsr-12k.md"),
+    "Retail Store": os.path.join(_SAMPLE_KB_DIR, "retail-store-12k.md"),
+}
+_DEFAULT_SAMPLE_KB      = next(iter(_SAMPLE_KB_OPTIONS))
 
 # ── Derived base URLs for KPI endpoints ──────────────────────────────────────
 def _svc_base(full_url: str) -> str:
@@ -130,12 +139,14 @@ footer { display: none !important; }
     gap: 0 !important;
     align-items: stretch !important;
     margin-top: 6px !important;
+    margin-bottom: 6px !important;
     flex-wrap: nowrap !important;
     background: linear-gradient(160deg, #EEF5FF 0%, #E6F0FA 100%) !important;
     border: 1.5px solid #C8D8EA !important;
     border-radius: 16px !important;
     box-shadow: 0 2px 8px rgba(0,104,181,0.07) !important;
     overflow: hidden !important;
+    min-height: 90px !important;
 }
 .audio-pair > div {
     flex: 1 1 0 !important;
@@ -143,6 +154,7 @@ footer { display: none !important; }
     display: flex !important;
     flex-direction: column !important;
     align-self: stretch !important;
+    min-height: 90px !important;
 }
 /* Inside each column, force the gr.Audio root and its block to fill the
    column's full height so vertical centering actually has room to work */
@@ -170,14 +182,14 @@ footer { display: none !important; }
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
-    padding: 12px 14px !important;
+    padding: 16px 14px !important;
     height: 100% !important;
     box-sizing: border-box !important;
 }
 #kiosk-mic > .block {
     display: block !important;
     position: relative !important;
-    min-height: 140px !important;
+    min-height: 90px !important;
 }
 /* Absolutely center the Speak button (and any mic controls) inside the
    mic half so it stays in the middle even when the TTS side stretches
@@ -199,6 +211,7 @@ footer { display: none !important; }
 /* Vertical divider between mic and TTS halves */
 #kiosk-tts > .block {
     border-left: 1px solid #C8D8EA !important;
+    min-height: 90px !important;
 }
 
 /* Hide labels on both audio widgets */
@@ -383,87 +396,124 @@ footer { display: none !important; }
     align-items: center !important;
     justify-content: center !important;
 }
-/* Replace music-note SVG with a compact assistant placeholder */
-#kiosk-tts [aria-label="Empty value"] .icon svg {
-    display: none !important;
+/* .block must be relative so the absolute-positioned indicator resolves against it */
+#kiosk-tts > .block {
+    display: block !important;
+    position: relative !important;
 }
-#kiosk-tts [aria-label="Empty value"] {
-    width: 100% !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+/* All Gradio intermediate wrappers between .block and our indicator: make them
+   fill the full block height but do NOT introduce their own alignment so only
+   our absolute centering takes effect */
+#kiosk-tts > .block > *:not(.kiosk-tts-indicator):not(audio) {
+    position: static !important;
+    display: block !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
     margin: 0 !important;
 }
-#kiosk-tts [aria-label="Empty value"] .icon {
-    width: auto;
-    height: auto;
+/* The indicator is absolutely centered inside .block, exactly like the Speak button */
+#kiosk-tts .kiosk-tts-indicator {
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+}
+#kiosk-tts audio,
+#kiosk-tts .controls,
+#kiosk-tts .play-pause-button,
+#kiosk-tts button.icon,
+#kiosk-tts input[type=range],
+#kiosk-tts .timestamps,
+#kiosk-tts .timestamp,
+#kiosk-tts .waveform-container,
+#kiosk-tts [aria-label="Empty value"] {
+    display: none !important;
+}
+#kiosk-tts .kiosk-tts-indicator {
+    width: min(100%, 220px);
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
     margin: 0 auto;
-    padding: 10px 14px;
+    padding: 0 16px;
     border-radius: 999px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255,255,255,0.78);
-    border: 1px solid #D8E8F5;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    gap: 6px;
+    background: #0068B5;
+    color: #FFFFFF;
+    border: none;
+    box-shadow: 0 3px 12px rgba(0,104,181,0.32);
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
 }
-#kiosk-tts [aria-label="Empty value"] .icon::after {
-    content: "🎙 Assistant voice";
-    font-size: 1.08rem;
+#kiosk-tts .kiosk-tts-icon {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform-origin: center bottom;
+    flex: 0 0 auto;
+}
+#kiosk-tts .kiosk-tts-icon svg {
+    width: 24px;
+    height: 24px;
+    fill: #FFFFFF;
+    stroke: #FFFFFF;
+}
+#kiosk-tts .kiosk-tts-title {
+    color: #FFFFFF;
+    font-size: 0.85rem;
     font-weight: 500;
-    display: block;
     line-height: 1;
-    color: #6E879B;
-    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-#kiosk-tts .controls {
-    background: transparent !important;
-    padding: 4px 2px !important;
-    gap: 6px !important;
-    display: flex !important;
-    align-items: center !important;
+#kiosk-tts .kiosk-tts-subtitle {
+    display: none;
 }
-#kiosk-tts .controls button,
-#kiosk-tts .play-pause-button,
-#kiosk-tts button.icon {
-    background: rgba(255,255,255,0.8) !important;
-    color: #0068B5 !important;
-    border: 1px solid #C8D8EA !important;
-    border-radius: 50% !important;
-    width: 38px !important; height: 38px !important; min-width: 38px !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    box-shadow: 0 1px 5px rgba(0,104,181,0.12) !important;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease !important;
-    cursor: pointer !important;
+#kiosk-tts .kiosk-tts-bars {
+    display: none;
 }
-#kiosk-tts .controls button:hover,
-#kiosk-tts .play-pause-button:hover,
-#kiosk-tts button.icon:hover {
-    background: #D0E8F8 !important;
-    border-color: #0068B5 !important;
-    transform: scale(1.07) !important;
+#kiosk-tts .kiosk-tts-bars span {
+    width: 3px;
+    height: 7px;
+    border-radius: 999px;
+    background: #8DB6D8;
+    opacity: 0.7;
+    transform-origin: center bottom;
 }
-#kiosk-tts .controls button svg,
-#kiosk-tts .play-pause-button svg,
-#kiosk-tts button.icon svg {
-    stroke: #0068B5 !important;
-    fill: #0068B5 !important;
-    width: 17px !important;
-    height: 17px !important;
+#kiosk-tts.kiosk-tts-queued .kiosk-tts-icon,
+#kiosk-tts.kiosk-tts-playing .kiosk-tts-icon {
+    animation: tts-bounce 0.95s ease-in-out infinite;
 }
-/* Volume slider */
-#kiosk-tts input[type=range] {
-    accent-color: #0068B5 !important;
+#kiosk-tts.kiosk-tts-playing .kiosk-tts-icon {
+    transform: scale(1.04);
 }
-/* Timestamps */
-#kiosk-tts .timestamps,
-#kiosk-tts .timestamp {
-    color: #4A6070 !important;
-    font-size: 0.72rem !important;
-    font-family: Inter, monospace !important;
+#kiosk-tts.kiosk-tts-queued .kiosk-tts-subtitle::before {
+    content: "Kiosk Speaking";
+}
+#kiosk-tts.kiosk-tts-playing .kiosk-tts-subtitle::before {
+    content: "Kiosk Speaking";
+}
+#kiosk-tts.kiosk-tts-idle .kiosk-tts-subtitle::before {
+    content: "Ready to respond";
+}
+@keyframes tts-bounce {
+    0%, 100% { transform: translateY(0) scale(1); }
+    35% { transform: translateY(-7px) scale(1.03); }
+    65% { transform: translateY(0) scale(0.985); }
+}
+@keyframes tts-bars {
+    0%, 100% { transform: scaleY(0.7); }
+    40% { transform: scaleY(1.8); }
+    70% { transform: scaleY(1.15); }
 }
 
 /* Remaining Gradio shell overrides */
@@ -586,70 +636,139 @@ def _esc(t: str) -> str:
 _INGEST_NOTE_HTML = """
 <div class="ingest-note">
   Upload a <strong>.txt</strong> or <strong>.md</strong> file to update the assistant&#39;s knowledge base.
+  Or pick a built-in sample knowledge base below and ingest it in one click.
   <strong>This replaces the existing knowledge base.</strong>
 </div>
 """
 
 
-def _ingest_doc(file) -> Generator:
-    """Clear the current knowledge base and ingest the uploaded document."""
+def _selected_sample_path(sample_name: str | None) -> str | None:
+    if not sample_name:
+        return None
+    return _SAMPLE_KB_OPTIONS.get(sample_name)
+
+
+def _sample_download_value(sample_name: str | None) -> str | None:
+    sample_path = _selected_sample_path(sample_name)
+    return sample_path if sample_path and os.path.exists(sample_path) else None
+
+
+def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sample_label: str = "Use Sample & Ingest") -> Generator:
+    """Clear the current knowledge base and ingest the selected document."""
     if file is None:
         yield (
             '<div class="ingest-status warn">⚠️ Please select a file first.</div>',
+            gr.update(value=None),
+            gr.update(),
             gr.update(),
             gr.update(),
         )
         return
 
-    # Immediately lock the mic and button while work is in progress
-    yield (
+    # Immediately lock the mic and both ingest buttons while work is in progress
+    loading_html = (
         '<div class="ingest-status loading">'
         '⏳ Refreshing knowledge base &#8212; the assistant will be back shortly&#8230;'
-        '</div>',
-        gr.update(interactive=False),
+        '<br><small>This may take a few minutes depending on content size. '
+        'Please do not refresh the page.</small>'
+        '</div>'
+    )
+    yield (
+        loading_html,
+        gr.update(value=None, interactive=False),
+        gr.update(value=None, interactive=False),
+        gr.update(interactive=False, value="Ingesting…"),
         gr.update(interactive=False, value="Ingesting…"),
     )
 
     filename = os.path.basename(file) if isinstance(file, str) else os.path.basename(file.name)
     filepath = file if isinstance(file, str) else file.name
 
-    try:
-        # 1. Wipe the existing knowledge base
-        with httpx.Client(timeout=15.0, trust_env=False) as c:
-            c.delete(f"{_RAG_BASE}/api/v1/context")
+    result_holder: dict[str, Any] = {}
 
-        # 2. Ingest the new document
-        with open(filepath, "rb") as fh:
-            content = fh.read()
+    def _do_ingest() -> None:
+        try:
+            # 1. Wipe the existing knowledge base
+            with httpx.Client(timeout=15.0, trust_env=False) as c:
+                c.delete(f"{_RAG_BASE}/api/v1/context")
 
-        with httpx.Client(timeout=300.0, trust_env=False) as c:
-            resp = c.post(
-                f"{_RAG_BASE}/api/v1/context/file",
-                files={"file": (filename, content, "text/plain")},
+            # 2. Ingest the new document
+            with open(filepath, "rb") as fh:
+                content = fh.read()
+
+            with httpx.Client(timeout=600.0, trust_env=False) as c:
+                resp = c.post(
+                    f"{_RAG_BASE}/api/v1/context/file",
+                    files={"file": (filename, content, "text/plain")},
+                )
+
+            # Try to surface the server's error detail for non-2xx responses.
+            if resp.status_code >= 400:
+                try:
+                    detail = resp.json().get("detail", resp.text)
+                except Exception:
+                    detail = resp.text or f"HTTP {resp.status_code}"
+                result_holder["error"] = str(detail)
+                return
+
+            result_holder["data"] = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            result_holder["error"] = str(exc)
+
+    worker = threading.Thread(target=_do_ingest, daemon=True)
+    worker.start()
+
+    # Heartbeat: keep the SSE/WS connection alive while the worker runs so the
+    # browser never sees a connection-error toast for long ingests.
+    while worker.is_alive():
+        worker.join(timeout=2.0)
+        if worker.is_alive():
+            yield (
+                loading_html,
+                gr.update(value=None, interactive=False),
+                gr.update(value=None, interactive=False),
+                gr.update(interactive=False, value="Ingesting…"),
+                gr.update(interactive=False, value="Ingesting…"),
             )
-            resp.raise_for_status()
-            result = resp.json()
 
-        chunks = result.get("chunks_added", "?")
-        src    = result.get("source", filename)
-        yield (
-            f'<div class="ingest-status success">'
-            f'✅ Knowledge base updated &#8212; {chunks} chunks ingested from'
-            f' &#34;{_esc(src)}&#34;. The assistant is ready.'
-            f'</div>',
-            gr.update(interactive=True),
-            gr.update(interactive=True, value="Upload & Ingest"),
-        )
-
-    except Exception as exc:  # noqa: BLE001
+    if "error" in result_holder:
         yield (
             f'<div class="ingest-status error">'
-            f'⚠️ Ingestion failed: {_esc(str(exc))}. '
+            f'⚠️ Ingestion failed: {_esc(result_holder["error"])}. '
             f'The previous knowledge base remains active.'
             f'</div>',
-            gr.update(interactive=True),
-            gr.update(interactive=True, value="Upload & Ingest"),
+            gr.update(value=None, interactive=True),
+            gr.update(value=None, interactive=True),
+            gr.update(interactive=True, value=idle_upload_label),
+            gr.update(interactive=True, value=idle_sample_label),
         )
+        return
+
+    result = result_holder.get("data", {})
+    chunks = result.get("chunks_added", "?")
+    src    = result.get("source", filename)
+    yield (
+        f'<div class="ingest-status success">'
+        f'✅ Knowledge base updated &#8212; {chunks} chunks ingested from'
+        f' &#34;{_esc(src)}&#34;. The assistant is ready.'
+        f'</div>',
+        gr.update(value=None, interactive=True),
+        gr.update(value=None, interactive=True),
+        gr.update(interactive=True, value=idle_upload_label),
+        gr.update(interactive=True, value=idle_sample_label),
+    )
+
+
+def _ingest_doc(file) -> Generator:
+    yield from _ingest_doc_common(file)
+
+
+def _ingest_sample_doc(sample_name: str | None) -> Generator:
+    sample_path = _selected_sample_path(sample_name)
+    if sample_path is None:
+        yield from _ingest_doc_common(None)
+        return
+    yield from _ingest_doc_common(sample_path)
 
 def _render_chat(history: list[dict], partial_user: str = "", partial_asst: str = "") -> str:
     rows: list[str] = []
@@ -703,11 +822,10 @@ def _poll(sid: str) -> dict[str, Any]:
         r = c.get(f"{KIOSK_CORE_URL}/api/v1/sessions/{sid}")
     r.raise_for_status(); return r.json()
 
-def _latest_audio(session: dict, prev: int) -> tuple:
-    segs = session.get("tts_audio_segments") or []
-    if len(segs) > prev:
-        return gr.update(value=segs[-1]["audio_file"], autoplay=True), len(segs)
-    return gr.skip(), prev
+def _gradio_file_url(absolute_path: str) -> str:
+    """Build the URL the browser uses to fetch a Gradio-served file."""
+    encoded = _urlparse.quote(absolute_path, safe="/")
+    return f"/gradio_api/file={encoded}"
 
 # ── State ─────────────────────────────────────────────────────────────────────
 _INIT: dict = {"session_id": None, "buffer": [], "sample_rate": 16000, "history": []}
@@ -715,14 +833,14 @@ _INIT: dict = {"session_id": None, "buffer": [], "sample_rate": 16000, "history"
 # ── Handlers ──────────────────────────────────────────────────────────────────
 def on_start(state: dict):
     s = dict(state); s["session_id"] = None; s["buffer"] = []
-    return s, _render_chat(s["history"], partial_user="🎤  Listening…"), gr.skip(), "🎙  Listening — speak now"
+    return s, _render_chat(s["history"], partial_user="🎤  Listening…"), gr.update(value=None), gr.skip(), "🎙  Listening — speak now"
 
 def on_chunk(state: dict, chunk):
     if chunk is None:
-        return state, gr.skip(), gr.skip(), gr.skip()
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
     sr, data = chunk
     if data is None or len(data) == 0:
-        return state, gr.skip(), gr.skip(), gr.skip()
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
     if data.ndim > 1: data = data[:, 0]
     data = data.astype(np.int16)
 
@@ -733,7 +851,7 @@ def on_chunk(state: dict, chunk):
         try:
             s["session_id"] = _open_session(sr)["session_id"]
         except Exception as e:
-            return s, gr.skip(), gr.skip(), f"❌ {e}"
+            return s, gr.skip(), gr.skip(), gr.skip(), f"❌ {e}"
 
     total = sum(len(b) for b in s["buffer"])
     if total >= int(sr * _CHUNK_SECONDS):
@@ -748,15 +866,16 @@ def on_chunk(state: dict, chunk):
     except Exception: pass
 
     partial = transcript or "🎤  Listening…"
-    return s, _render_chat(s["history"], partial_user=partial), gr.skip(), "🎙  Listening — speak now"
+    return s, _render_chat(s["history"], partial_user=partial), gr.skip(), gr.skip(), "🎙  Listening — speak now"
 
 def on_stop(state: dict) -> Generator:
     s = dict(state)
     sid = s.get("session_id"); sr = s.get("sample_rate", 16000)
     history = list(s.get("history", []))
+    seen = 0
 
     if not sid:
-        yield s, _render_chat(history), gr.update(value=None), "No audio — try again"
+        yield s, _render_chat(history), gr.update(value=None), gr.skip(), "No audio — try again"
         return
 
     remaining = s.get("buffer", [])
@@ -766,34 +885,40 @@ def on_stop(state: dict) -> Generator:
 
     try: _eos(sid)
     except Exception as e:
-        yield s, _render_chat(history), gr.update(value=None), f"❌ {e}"; return
+        yield s, _render_chat(history), gr.update(value=None), gr.skip(), f"❌ {e}"; return
 
-    yield s, _render_chat(history, partial_user="⏳  Processing…"), gr.update(value=None), "⏳  Processing…"
+    reset_payload = _json.dumps({"reset": True, "ts": time.time()})
+    yield s, _render_chat(history, partial_user="⏳  Processing…"), gr.update(value=None), reset_payload, "⏳  Processing…"
 
-    prev_audio = 0
     while True:
         try: session = _poll(sid)
         except Exception as e:
-            yield s, _render_chat(history), gr.update(value=None), f"❌ {e}"; return
+            yield s, _render_chat(history), gr.update(value=None), gr.skip(), f"❌ {e}"; return
 
         transcript    = str(session.get("transcript","")).strip()
         response_text = str(session.get("response","")).strip()
-        audio_upd, prev_audio = _latest_audio(session, prev_audio)
+        segs = session.get("tts_audio_segments") or []
         running = session.get("status","") in {"running","stopping"}
 
-        n = len(session.get("tts_audio_segments") or [])
-        if n:             st = f"🔊  Speaking… ({n} clip{'s' if n>1 else ''})"
+        queue_upd: Any = gr.skip()
+        if len(segs) > seen:
+            new_urls = [_gradio_file_url(str(seg["audio_file"])) for seg in segs[seen:]]
+            queue_upd = _json.dumps({"urls": new_urls, "ts": time.time()})
+            seen = len(segs)
+
+        n = len(segs)
+        if n:               st = f"🔊  Speaking… ({seen}/{n})"
         elif response_text: st = "💬  Generating response…"
         elif transcript:    st = "📝  Querying knowledge base…"
         else:               st = "⏳  Processing speech…"
 
-        yield s, _render_chat(history, partial_user=transcript, partial_asst=response_text), audio_upd, st
+        yield s, _render_chat(history, partial_user=transcript, partial_asst=response_text), gr.skip(), queue_upd, st
 
         if not running:
             if transcript:    history.append({"role":"user",      "text": transcript})
             if response_text: history.append({"role":"assistant", "text": response_text})
             s["history"] = history; s["session_id"] = None; s["buffer"] = []
-            yield s, _render_chat(history), gr.skip(), "✓  Done — tap 🎤 for another question"
+            yield s, _render_chat(history), gr.skip(), gr.skip(), "✓  Done — tap 🎤 for another question"
             break
         time.sleep(POLL_INTERVAL_SECONDS)
 
@@ -927,8 +1052,13 @@ def create_app() -> gr.Blocks:
                         tts = gr.Audio(
                             label="�️ Assistant",
                             interactive=False,
-                            autoplay=True,
+                            autoplay=False,
                             elem_id="kiosk-tts",
+                        )
+                        tts_queue = gr.Textbox(
+                            value="",
+                            visible=False,
+                            elem_id="kiosk-tts-queue",
                         )
 
             # ── Right: collapsible panels ────────────────────────────────────
@@ -938,6 +1068,17 @@ def create_app() -> gr.Blocks:
 
                 with gr.Accordion(label="📚 Update Knowledge Base", open=False):
                     gr.HTML(value=_INGEST_NOTE_HTML)
+                    sample_choice = gr.Radio(
+                        choices=list(_SAMPLE_KB_OPTIONS.keys()),
+                        value=_DEFAULT_SAMPLE_KB,
+                        label="Use a built-in sample knowledge base",
+                    )
+                    sample_download = gr.File(
+                        value=_sample_download_value(_DEFAULT_SAMPLE_KB),
+                        label="Download selected sample",
+                        interactive=False,
+                    )
+                    sample_ingest_btn = gr.Button("Use Sample & Ingest", variant="secondary", size="sm")
                     doc_file = gr.File(
                         file_types=[".txt", ".md"],
                         label="Select document (.txt or .md)",
@@ -950,11 +1091,17 @@ def create_app() -> gr.Blocks:
                     kpi_panel = gr.HTML(value=_render_kpi_html({}, {}, {}))
                     refresh_btn = gr.Button("🔄 Refresh", size="sm", variant="secondary")
 
-        outs = [state, chat, tts, status]
+        outs = [state, chat, tts, tts_queue, status]
 
         mic.start_recording(fn=on_start, inputs=[state],         outputs=outs)
         mic.stream(         fn=on_chunk, inputs=[state, mic],    outputs=outs, stream_every=0.5)
         mic.stop_recording( fn=on_stop,  inputs=[state],         outputs=outs)
+
+        tts_queue.change(
+            fn=None,
+            inputs=[tts_queue],
+            js="(payload) => { if (window.kioskTTSEnqueue) window.kioskTTSEnqueue(payload); }",
+        )
 
         refresh_btn.click(
             fn=lambda: _render_kpi_html(*_fetch_kpis()),
@@ -963,7 +1110,17 @@ def create_app() -> gr.Blocks:
         ingest_btn.click(
             fn=_ingest_doc,
             inputs=[doc_file],
-            outputs=[ingest_status, mic, ingest_btn],
+            outputs=[ingest_status, mic, doc_file, ingest_btn, sample_ingest_btn],
+        )
+        sample_choice.change(
+            fn=_sample_download_value,
+            inputs=[sample_choice],
+            outputs=[sample_download],
+        )
+        sample_ingest_btn.click(
+            fn=_ingest_sample_doc,
+            inputs=[sample_choice],
+            outputs=[ingest_status, mic, doc_file, ingest_btn, sample_ingest_btn],
         )
         app.load(
             fn=lambda: _render_kpi_html(*_fetch_kpis()),
@@ -972,6 +1129,127 @@ def create_app() -> gr.Blocks:
         app.load(
             fn=None,
             js="""() => {
+                if (!window.kioskTTS) {
+                    window.kioskTTS = { queue: [], played: new Set(), playing: false, player: null, host: null, indicator: null };
+                }
+                const setTTSVisualState = (mode) => {
+                    const state = window.kioskTTS;
+                    const host = state.host || document.querySelector('#kiosk-tts');
+                    if (!host) return;
+                    state.host = host;
+                    host.classList.remove('kiosk-tts-idle', 'kiosk-tts-queued', 'kiosk-tts-playing');
+                    host.classList.add(mode || 'kiosk-tts-idle');
+                };
+                const ensureTTSPlayer = () => {
+                    const host = document.querySelector('#kiosk-tts');
+                    if (!host) return null;
+                    window.kioskTTS.host = host;
+                    let indicator = host.querySelector('.kiosk-tts-indicator');
+                    if (!indicator) {
+                        indicator = document.createElement('div');
+                        indicator.className = 'kiosk-tts-indicator';
+                        indicator.innerHTML = `
+                            <div class="kiosk-tts-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                                    <path d="M3 10v4c0 .55.45 1 1 1h3l5 4V5L7 9H4c-.55 0-1 .45-1 1zm12.5 2c0-1.77-1-3.29-2.5-4.03v8.05A4.47 4.47 0 0 0 15.5 12zm0-9.5v2.06c2.89.86 5 3.54 5 6.44s-2.11 5.58-5 6.44v2.06c4.01-.91 7-4.49 7-8.5s-2.99-7.59-7-8.5z"/>
+                                </svg>
+                            </div>
+                            <div class="kiosk-tts-title">Kiosk Assist</div>
+                            <div class="kiosk-tts-subtitle"></div>
+                            <div class="kiosk-tts-bars" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                        `;
+                        const target = host.querySelector('.block') || host;
+                        target.appendChild(indicator);
+                    }
+                    window.kioskTTS.indicator = indicator;
+                    let player = host.querySelector('audio');
+                    if (!player) {
+                        player = document.createElement('audio');
+                        player.controls = false;
+                        player.preload = 'auto';
+                        player.style.display = 'none';
+                        const target = host.querySelector('.block') || host;
+                        target.appendChild(player);
+                    }
+                    if (!player.dataset.kioskBound) {
+                        player.addEventListener('ended', () => {
+                            window.kioskTTS.playing = false;
+                            setTTSVisualState(window.kioskTTS.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle');
+                            window.kioskTTSPlayNext();
+                        });
+                        player.addEventListener('error', () => {
+                            window.kioskTTS.playing = false;
+                            setTTSVisualState(window.kioskTTS.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle');
+                            window.kioskTTSPlayNext();
+                        });
+                        player.dataset.kioskBound = '1';
+                    }
+                    window.kioskTTS.player = player;
+                    setTTSVisualState(window.kioskTTS.playing ? 'kiosk-tts-playing' : (window.kioskTTS.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle'));
+                    return player;
+                };
+                window.kioskTTSPlayNext = () => {
+                    const state = window.kioskTTS;
+                    const player = ensureTTSPlayer();
+                    if (!player) {
+                        state.playing = false;
+                        setTTSVisualState('kiosk-tts-idle');
+                        setTimeout(window.kioskTTSPlayNext, 150);
+                        return;
+                    }
+                    if (state.queue.length === 0) {
+                        state.playing = false;
+                        setTTSVisualState('kiosk-tts-idle');
+                        return;
+                    }
+                    state.playing = true;
+                    setTTSVisualState('kiosk-tts-playing');
+                    const nextUrl = state.queue.shift();
+                    player.src = nextUrl;
+                    player.load();
+                    const pending = player.play();
+                    if (pending && typeof pending.catch === 'function') {
+                        pending.catch(() => {
+                            state.playing = false;
+                            setTTSVisualState(state.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle');
+                            setTimeout(window.kioskTTSPlayNext, 150);
+                        });
+                    }
+                };
+                window.kioskTTSEnqueue = (payload) => {
+                    if (!payload) return;
+                    let data = null;
+                    try { data = JSON.parse(payload); } catch (e) { return; }
+                    if (!data) return;
+                    const state = window.kioskTTS;
+                    ensureTTSPlayer();
+                    if (data.reset) {
+                        state.queue = [];
+                        state.played.clear();
+                        state.playing = false;
+                        if (state.player) {
+                            state.player.pause();
+                            state.player.removeAttribute('src');
+                            state.player.load();
+                        }
+                        setTTSVisualState('kiosk-tts-idle');
+                        return;
+                    }
+                    const urls = Array.isArray(data.urls) ? data.urls : [];
+                    for (const url of urls) {
+                        if (!url || state.played.has(url)) continue;
+                        state.played.add(url);
+                        state.queue.push(url);
+                    }
+                    if (!state.playing && state.queue.length > 0) {
+                        setTTSVisualState('kiosk-tts-queued');
+                    }
+                    if (!state.playing && state.queue.length > 0) {
+                        window.kioskTTSPlayNext();
+                    }
+                };
+                ensureTTSPlayer();
+
                 // Rename "Record" button to "Speak"
                 const renameRecord = () => {
                     document.querySelectorAll('#kiosk-mic button').forEach(btn => {
@@ -1023,7 +1301,7 @@ def launch_app() -> Any:
     os.makedirs(_generated_audio, exist_ok=True)
     return create_app().launch(
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=7865,
         css=STYLE,
         allowed_paths=[_generated_audio],
     )
