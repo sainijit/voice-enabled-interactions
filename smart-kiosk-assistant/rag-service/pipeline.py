@@ -211,6 +211,21 @@ class RagPipeline:
         logger.info("[INGEST] Starting | source=%s | input_chars=%d", source, len(text))
         t0 = time.monotonic()
 
+        # Remove any existing docs for this source so re-ingestion replaces
+        # rather than accumulates (prevents stale duplicates across runs).
+        try:
+            collection = getattr(self.vectorstore, "_collection", None)
+            if collection is not None:
+                existing = collection.get(where={"source": source}, include=[])
+                if existing["ids"]:
+                    collection.delete(ids=existing["ids"])
+                    logger.info(
+                        "[INGEST] Removed %d stale docs for source=%s",
+                        len(existing["ids"]), source,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[INGEST] Could not purge old docs for source=%s: %s", source, exc)
+
         chunks = self.chunker.chunk_text(text)
         t_chunk = time.monotonic()
         logger.info(
