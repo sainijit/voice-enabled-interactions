@@ -26,8 +26,9 @@ POLL_INTERVAL_SECONDS   = float(os.getenv("KIOSK_CORE_UI_POLL_INTERVAL_SECONDS",
 _CHUNK_SECONDS          = kiosk_config.DEFAULT_CHUNK_SECONDS
 _SAMPLE_KB_DIR          = os.path.join(os.path.dirname(__file__), "knowledge-base-samples")
 _SAMPLE_KB_OPTIONS      = {
-    "QSR": os.path.join(_SAMPLE_KB_DIR, "qsr-12k.md"),
-    "Retail Store": os.path.join(_SAMPLE_KB_DIR, "retail-store-12k.md"),
+    "QuickBite (QSR)": os.path.join(_SAMPLE_KB_DIR, "QuickBite-M.md"),
+    "MegaRetail (Retail Store)": os.path.join(_SAMPLE_KB_DIR, "MegaRetail-M.md"),
+    "SkyJet (Airline)": os.path.join(_SAMPLE_KB_DIR, "SkyJet-S.md"),
 }
 _DEFAULT_SAMPLE_KB      = next(iter(_SAMPLE_KB_OPTIONS))
 
@@ -832,6 +833,13 @@ footer { display: none !important; }
 .ingest-status.success { background: #D4F5E5; color: #0A6640; border: 1px solid #A8E6C8; }
 .ingest-status.error   { background: #FDECEA; color: #B71C1C; border: 1px solid #F5C6CB; }
 .ingest-status.warn    { background: #FFF8E1; color: #795500; border: 1px solid #FFD966; }
+
+/* While ingest is loading, grey the mic out so the user can't fire a question. */
+.gradio-container:has(.ingest-status.loading) #kiosk-mic {
+    pointer-events: none;
+    opacity: 0.5;
+    filter: grayscale(0.6);
+}
 """
 
 # ── Chat HTML helpers ─────────────────────────────────────────────────────────
@@ -859,13 +867,18 @@ def _sample_download_value(sample_name: str | None) -> str | None:
     return sample_path if sample_path and os.path.exists(sample_path) else None
 
 
-def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sample_label: str = "Use Sample & Ingest") -> Generator:
-    """Clear the current knowledge base and ingest the selected document."""
+def _ingest_doc_common(file, idle_upload_label: str = "📄 Upload .txt / .md & Ingest", idle_sample_label: str = "Use Sample & Ingest") -> Generator:
+    """Clear the current knowledge base and ingest the selected document.
+
+    Outputs are `[ingest_status, ingest_btn, sample_ingest_btn]` — the streaming
+    `mic` is deliberately NOT an output of this handler. Pushing updates to a
+    `streaming=True` `gr.Audio` from a foreign event makes its postprocess
+    raise on the final render and the component shows a red ✕ error border
+    until reload.
+    """
     if file is None:
         yield (
             '<div class="ingest-status warn">⚠️ Please select a file first.</div>',
-            gr.update(value=None),
-            gr.update(),
             gr.update(),
             gr.update(),
         )
@@ -879,11 +892,15 @@ def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sa
         'Please do not refresh the page.</small>'
         '</div>'
     )
+    # Lock both ingest buttons while work is in progress. Clear the
+    # UploadButton's value (FileData) up-front: Gradio cleans up the uploaded
+    # temp file shortly after the upload handler starts, so any later yield
+    # that re-serialises the stored FileData raises in postprocess and the
+    # button is flagged with a red ✕ error border until the page is reloaded.
+    _INGEST_IN_PROGRESS.set()
     yield (
         loading_html,
         gr.update(value=None, interactive=False),
-        gr.update(value=None, interactive=False),
-        gr.update(interactive=False, value="Ingesting…"),
         gr.update(interactive=False, value="Ingesting…"),
     )
 
@@ -925,27 +942,25 @@ def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sa
     worker.start()
 
     # Heartbeat: keep the SSE/WS connection alive while the worker runs so the
-    # browser never sees a connection-error toast for long ingests.
+    # browser never sees a connection-error toast for long ingests. Use no-op
+    # updates so we don't keep resetting the UploadButton / sample button.
     while worker.is_alive():
         worker.join(timeout=2.0)
         if worker.is_alive():
             yield (
                 loading_html,
-                gr.update(value=None, interactive=False),
-                gr.update(value=None, interactive=False),
-                gr.update(interactive=False, value="Ingesting…"),
-                gr.update(interactive=False, value="Ingesting…"),
+                gr.update(),
+                gr.update(),
             )
 
     if "error" in result_holder:
+        _INGEST_IN_PROGRESS.clear()
         yield (
             f'<div class="ingest-status error">'
             f'⚠️ Ingestion failed: {_esc(result_holder["error"])}. '
             f'The previous knowledge base remains active.'
             f'</div>',
             gr.update(value=None, interactive=True),
-            gr.update(value=None, interactive=True),
-            gr.update(interactive=True, value=idle_upload_label),
             gr.update(interactive=True, value=idle_sample_label),
         )
         return
@@ -953,14 +968,13 @@ def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sa
     result = result_holder.get("data", {})
     chunks = result.get("chunks_added", "?")
     src    = result.get("source", filename)
+    _INGEST_IN_PROGRESS.clear()
     yield (
         f'<div class="ingest-status success">'
         f'✅ Knowledge base updated &#8212; {chunks} chunks ingested from'
         f' &#34;{_esc(src)}&#34;. The assistant is ready.'
         f'</div>',
         gr.update(value=None, interactive=True),
-        gr.update(value=None, interactive=True),
-        gr.update(interactive=True, value=idle_upload_label),
         gr.update(interactive=True, value=idle_sample_label),
     )
 
@@ -1035,12 +1049,21 @@ def _gradio_file_url(absolute_path: str) -> str:
 # ── State ─────────────────────────────────────────────────────────────────────
 _INIT: dict = {"session_id": None, "buffer": [], "sample_rate": 16000, "history": []}
 
+# Process-wide flag set while a knowledge-base ingest is running. The streaming
+# mic events check this and become no-ops so users can't fire a question while
+# the RAG service is rebuilding its index.
+_INGEST_IN_PROGRESS = threading.Event()
+
 # ── Handlers ──────────────────────────────────────────────────────────────────
 def on_start(state: dict):
+    if _INGEST_IN_PROGRESS.is_set():
+        return state, gr.skip(), gr.update(value=None), gr.skip(), "⏳ Ingestion in progress — please wait…"
     s = dict(state); s["session_id"] = None; s["buffer"] = []
     return s, _render_chat(s["history"], partial_user="🎤  Listening…"), gr.update(value=None), gr.skip(), "🎙  Listening — speak now"
 
 def on_chunk(state: dict, chunk):
+    if _INGEST_IN_PROGRESS.is_set():
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
     if chunk is None:
         return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
     sr, data = chunk
@@ -1284,17 +1307,26 @@ def create_app() -> gr.Blocks:
                         interactive=False,
                     )
                     sample_ingest_btn = gr.Button("Use Sample & Ingest", variant="secondary", size="sm")
-                    doc_file = gr.File(
+                    ingest_btn = gr.UploadButton(
+                        "📄 Upload .txt / .md & Ingest",
                         file_types=[".txt", ".md"],
-                        label="Select document (.txt or .md)",
                         file_count="single",
+                        variant="primary",
+                        size="sm",
                     )
-                    ingest_btn = gr.Button("Upload & Ingest", variant="primary", size="sm")
                     ingest_status = gr.HTML(value="")
 
                 with gr.Accordion(label="📊 Model KPIs", open=True):
                     kpi_panel = gr.HTML(value=_render_kpi_html({}, {}, {}))
                     refresh_btn = gr.Button("🔄 Refresh", size="sm", variant="secondary")
+                    # Hidden trigger clicked from JS after the final TTS wav
+                    # finishes playing, so KPIs auto-refresh once a full
+                    # user-question -> spoken-answer cycle completes.
+                    kpi_auto_refresh_btn = gr.Button(
+                        "auto-refresh",
+                        visible=False,
+                        elem_id="kpi-auto-refresh-trigger",
+                    )
 
         outs = [state, chat, tts, tts_queue, status]
 
@@ -1312,10 +1344,14 @@ def create_app() -> gr.Blocks:
             fn=lambda: _render_kpi_html(*_fetch_kpis()),
             outputs=[kpi_panel],
         )
-        ingest_btn.click(
+        kpi_auto_refresh_btn.click(
+            fn=lambda: _render_kpi_html(*_fetch_kpis()),
+            outputs=[kpi_panel],
+        )
+        ingest_btn.upload(
             fn=_ingest_doc,
-            inputs=[doc_file],
-            outputs=[ingest_status, mic, doc_file, ingest_btn, sample_ingest_btn],
+            inputs=[ingest_btn],
+            outputs=[ingest_status, ingest_btn, sample_ingest_btn],
         )
         sample_choice.change(
             fn=_sample_download_value,
@@ -1325,7 +1361,7 @@ def create_app() -> gr.Blocks:
         sample_ingest_btn.click(
             fn=_ingest_sample_doc,
             inputs=[sample_choice],
-            outputs=[ingest_status, mic, doc_file, ingest_btn, sample_ingest_btn],
+            outputs=[ingest_status, ingest_btn, sample_ingest_btn],
         )
         app.load(
             fn=lambda: _render_kpi_html(*_fetch_kpis()),
@@ -1380,6 +1416,9 @@ def create_app() -> gr.Blocks:
                         player.addEventListener('ended', () => {
                             window.kioskTTS.playing = false;
                             setTTSVisualState(window.kioskTTS.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle');
+                            if (window.kioskTTS.queue.length === 0) {
+                                window.kioskTriggerKpiRefresh && window.kioskTriggerKpiRefresh();
+                            }
                             window.kioskTTSPlayNext();
                         });
                         player.addEventListener('error', () => {
@@ -1454,6 +1493,20 @@ def create_app() -> gr.Blocks:
                     }
                 };
                 ensureTTSPlayer();
+
+                // Click the hidden Gradio button so the server re-fetches and
+                // re-renders the KPI panel. Debounced so a flurry of "ended"
+                // events (one per wav) only triggers a single refresh.
+                window.kioskTriggerKpiRefresh = () => {
+                    if (window.kioskTTS.kpiRefreshTimer) {
+                        clearTimeout(window.kioskTTS.kpiRefreshTimer);
+                    }
+                    window.kioskTTS.kpiRefreshTimer = setTimeout(() => {
+                        const host = document.getElementById('kpi-auto-refresh-trigger');
+                        const btn = host ? (host.querySelector('button') || (host.tagName === 'BUTTON' ? host : null)) : null;
+                        if (btn) btn.click();
+                    }, 250);
+                };
 
                 // Rename "Record" button to "Ask"
                 const renameRecord = () => {
