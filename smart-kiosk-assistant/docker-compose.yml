@@ -13,7 +13,11 @@ services:
     build:
       context: ../edge-ai-libraries/microservices/audio-analyzer
       dockerfile: Dockerfile
+      args:
+        APP_UID: ${LOCAL_UID:-1000}
+        APP_GID: ${LOCAL_GID:-1000}
     container_name: audio-analyzer
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
       - "8010:8010"
     devices:
@@ -21,22 +25,26 @@ services:
     group_add:
       - video
     environment:
-      AUDIO_ANALYZER_CONFIG_OVERRIDE_PATHS: /app/audio_analyzer/config.container.yaml
+      HF_HOME: /app/audio_analyzer/.cache/huggingface
     volumes:
-      # Kiosk-pinned config (see ./configs/README.md) — overrides the service's
-      # built-in config without modifying edge-ai-libraries.
-      - ./configs/audio-analyzer/config.container.yaml:/app/audio_analyzer/config.container.yaml:ro
+      # Kiosk-pinned config (see ./configs/README.md) — mounted as the
+      # service config without modifying edge-ai-libraries.
+      - ./configs/audio-analyzer/config.yaml:/app/audio_analyzer/config.yaml:ro
       - ../edge-ai-libraries/microservices/audio-analyzer/models:/app/audio_analyzer/models
       - ../edge-ai-libraries/microservices/audio-analyzer/chunks:/app/audio_analyzer/chunks
       - ../edge-ai-libraries/microservices/audio-analyzer/storage:/app/audio_analyzer/storage
-      - ../edge-ai-libraries/microservices/audio-analyzer/.cache/huggingface:/root/.cache/huggingface
+      - ../edge-ai-libraries/microservices/audio-analyzer/.cache/huggingface:/app/audio_analyzer/.cache/huggingface
     restart: unless-stopped
 
   text-to-speech:
     build:
       context: ../edge-ai-libraries/microservices/text-to-speech
       dockerfile: Dockerfile
+      args:
+        APP_UID: ${LOCAL_UID:-1000}
+        APP_GID: ${LOCAL_GID:-1000}
     container_name: text-to-speech
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
       - "8011:8011"
     devices:
@@ -44,14 +52,14 @@ services:
     group_add:
       - video
     environment:
-      TEXT_TO_SPEECH_CONFIG_OVERRIDE_PATHS: /app/text-to-speech/config.container.yaml
+      HF_HOME: /app/text-to-speech/.cache/huggingface
     volumes:
-      # Kiosk-pinned config (see ./configs/README.md) — overrides the service's
-      # built-in config without modifying edge-ai-libraries.
-      - ./configs/text-to-speech/config.container.yaml:/app/text-to-speech/config.container.yaml:ro
+      # Kiosk-pinned config (see ./configs/README.md) — mounted as the
+      # service config without modifying edge-ai-libraries.
+      - ./configs/text-to-speech/config.yaml:/app/text-to-speech/config.yaml:ro
       - ../edge-ai-libraries/microservices/text-to-speech/models:/app/text-to-speech/models
       - ../edge-ai-libraries/microservices/text-to-speech/storage:/app/text-to-speech/storage
-      - ../edge-ai-libraries/microservices/text-to-speech/.cache/huggingface:/root/.cache/huggingface
+      - ../edge-ai-libraries/microservices/text-to-speech/.cache/huggingface:/app/text-to-speech/.cache/huggingface
     restart: unless-stopped
 
   rag-service:
@@ -80,7 +88,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_UID: ${LOCAL_UID:-1000}
+        APP_GID: ${LOCAL_GID:-1000}
     container_name: kiosk-core
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
       - "8012:8012"
     environment:
@@ -109,7 +121,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_UID: ${LOCAL_UID:-1000}
+        APP_GID: ${LOCAL_GID:-1000}
     container_name: kiosk-ui
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
       - "7860:7860"
     environment:

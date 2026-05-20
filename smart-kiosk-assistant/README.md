@@ -27,11 +27,17 @@ cd voice-enabled-interactions/smart-kiosk-assistant
 Build and start the stack:
 
 ```bash
+export LOCAL_UID=$(id -u)
+export LOCAL_GID=$(id -g)
 docker compose build
 docker compose up -d
 ```
 
 Open the UI at [http://127.0.0.1:7860](http://127.0.0.1:7860).
+
+The stack runs containers as a non-root user. Exporting `LOCAL_UID` and
+`LOCAL_GID` keeps bind-mounted files writable from the host account you use
+to start the stack.
 
 For terminal-only mic mode, see [docs/run-standalone.md](docs/run-standalone.md). Full container instructions: [docs/run-container.md](docs/run-container.md).
 
@@ -50,4 +56,4 @@ For terminal-only mic mode, see [docs/run-standalone.md](docs/run-standalone.md)
 - kiosk-core / kiosk-ui env vars: [docs/configuration.md](docs/configuration.md)
 - kiosk-core REST API: [docs/api.md](docs/api.md)
 - RAG service config, ingest API, token cap: [rag-service/README.md](rag-service/README.md)
-- Pinned `config.container.yaml` for `audio-analyzer` and `text-to-speech` (override upstream without patching it): [configs/README.md](configs/README.md)
+- Pinned `config.yaml` for `audio-analyzer` and `text-to-speech` (replace upstream service config without patching it): [configs/README.md](configs/README.md)
