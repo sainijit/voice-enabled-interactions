@@ -104,5 +104,4 @@ See [configuration.md](configuration.md) for all variables.
 
 ## Notes
 
-- TTS audio files are written by kiosk-core into `generated_audio/` (volume-mounted into both containers) so the Gradio UI can serve them for playback.
 - For API use cases and endpoint details, see [api.md](api.md).

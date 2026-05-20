@@ -39,6 +39,7 @@ The stack runs containers as a non-root user. Exporting `LOCAL_UID` and
 `LOCAL_GID` keeps bind-mounted files writable from the host account you use
 to start the stack.
 
+
 For terminal-only mic mode, see [docs/run-standalone.md](docs/run-standalone.md). Full container instructions: [docs/run-container.md](docs/run-container.md).
 
 ## Services
