@@ -27,21 +27,34 @@ def _flatten_message_content(content) -> str:
     return str(content)
 
 
-def _extract_prompt(request: ChatCompletionRequest) -> tuple[str, str | None]:
+def _extract_prompt(request: ChatCompletionRequest) -> tuple[str, str | None, list[tuple[str, str]]]:
     user_messages = [message for message in request.messages if message.role == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="At least one user message is required")
 
-    last_user = _flatten_message_content(user_messages[-1].content).strip()
+    # Index of the final user message in the original sequence — everything
+    # before it (user/assistant turns only) becomes conversation history.
+    last_user_index = max(i for i, m in enumerate(request.messages) if m.role == "user")
+    last_user = _flatten_message_content(request.messages[last_user_index].content).strip()
+
     system_messages = [message for message in request.messages if message.role == "system"]
     system_prompt = _flatten_message_content(system_messages[-1].content).strip() if system_messages else None
-    return last_user, system_prompt or None
+
+    history: list[tuple[str, str]] = []
+    for message in request.messages[:last_user_index]:
+        if message.role not in ("user", "assistant"):
+            continue
+        text = _flatten_message_content(message.content).strip()
+        if text:
+            history.append((message.role, text))
+
+    return last_user, system_prompt or None, history
 
 
 @router.post("/v1/chat/completions")
 def create_chat_completion(request: ChatCompletionRequest):
     pipeline = get_shared_pipeline()
-    prompt, system_prompt = _extract_prompt(request)
+    prompt, system_prompt, history = _extract_prompt(request)
     model_name = config.api.openai_model_name
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
@@ -63,6 +76,7 @@ def create_chat_completion(request: ChatCompletionRequest):
                     temperature=request.temperature,
                     max_tokens=request.max_tokens,
                     system_prompt=system_prompt,
+                    history=history,
                 ):
                     event = {
                         "id": completion_id,
@@ -100,6 +114,7 @@ def create_chat_completion(request: ChatCompletionRequest):
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         system_prompt=system_prompt,
+        history=history,
     )
 
     payload = {
