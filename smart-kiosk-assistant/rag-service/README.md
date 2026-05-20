@@ -18,4 +18,4 @@ FastAPI retrieval-augmented Q&A service for the [Smart Kiosk Assistant](../READM
 - Configuration reference: [docs/configuration.md](docs/configuration.md)
 - API examples: [docs/api.md](docs/api.md)
 
-When started through the kiosk stack, this service's [`config.container.yaml`](config.container.yaml) is mounted in by the top-level compose file and layered over `config.yaml`. The same override pattern is used for the `audio-analyzer` and `text-to-speech` services — see [`../configs/`](../configs/README.md).
+When started through the kiosk stack, this service's [`config.container.yaml`](config.container.yaml) is mounted in by the top-level compose file and layered over `config.yaml`. The `audio-analyzer` and `text-to-speech` services now use pinned `config.yaml` files mounted directly as their primary config — see [`../configs/`](../configs/README.md).

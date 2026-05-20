@@ -33,6 +33,8 @@ git submodule update --init --recursive
 From the `smart-kiosk-assistant/` directory:
 
 ```bash
+export LOCAL_UID=$(id -u)
+export LOCAL_GID=$(id -g)
 docker compose build
 docker compose up -d
 ```
@@ -46,6 +48,10 @@ This starts five containers:
 | `rag-service` | `8020` | Knowledge-base retrieval |
 | `kiosk-core` | `8012` | FastAPI session API |
 | `kiosk-ui` | `7860` | Gradio voice UI |
+
+All containers run as non-root. Exporting `LOCAL_UID` and `LOCAL_GID`
+before `docker compose up` keeps bind-mounted files writable from the host
+account that launched the stack.
 
 ## Verify
 

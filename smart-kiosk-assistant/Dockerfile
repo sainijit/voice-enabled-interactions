@@ -10,6 +10,9 @@
 
 FROM python:3.11-slim
 
+ARG APP_UID=1000
+ARG APP_GID=1000
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -20,6 +23,8 @@ WORKDIR /app
 # when no mic device is used (Gradio file-upload mode).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libportaudio2 curl \
+    && groupadd --gid ${APP_GID} appuser \
+    && useradd --uid ${APP_UID} --gid ${APP_GID} --create-home --home-dir /app appuser \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./requirements.txt
@@ -28,6 +33,11 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY . .
+
+RUN mkdir -p /app/generated_audio \
+    && chown -R ${APP_UID}:${APP_GID} /app
+
+USER appuser
 
 EXPOSE 8012
 
