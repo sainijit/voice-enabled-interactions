@@ -122,6 +122,52 @@ footer { display: none !important; }
     min-height: 20px;
 }
 
+/* Status row — status line on the left, Kiosk Assist pill on the right */
+.status-row {
+    width: 100% !important;
+    align-items: center !important;
+    gap: 12px !important;
+    margin: 6px 0 !important;
+    flex-wrap: nowrap !important;
+}
+.status-row > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+.status-row .status-line { text-align: left !important; min-height: 0 !important; }
+.status-tts-col {
+    flex: 0 0 auto !important;
+    max-width: 200px !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+}
+/* When TTS lives in the status row, strip its block chrome and let the
+   indicator pill flow inline instead of being absolutely centered. */
+.status-tts-col #kiosk-tts,
+.status-tts-col #kiosk-tts > .block {
+    background: transparent !important;
+    border: none !important;
+    border-left: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+}
+.status-tts-col #kiosk-tts .kiosk-tts-indicator {
+    position: static !important;
+    transform: none !important;
+    margin: 0 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 0 14px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    font-size: 0.78rem !important;
+}
+.status-tts-col #kiosk-tts .kiosk-tts-icon,
+.status-tts-col #kiosk-tts .kiosk-tts-icon svg {
+    width: 18px !important;
+    height: 18px !important;
+}
+.status-tts-col #kiosk-tts .kiosk-tts-title { font-size: 0.78rem !important; }
+
 /* Headings */
 .gradio-container h1, .gradio-container h2, .gradio-container h3,
 .gradio-container .prose h1, .gradio-container .prose h2 {
@@ -134,19 +180,22 @@ footer { display: none !important; }
    Right half : speaker icon → waveform player when audio plays
    ═══════════════════════════════════════════════════════════ */
 
-/* The row itself becomes the single card */
+/* The row itself becomes the single card. Width is locked to 100% of the
+   left column so it lines up exactly with the chat-pane above. */
 .audio-pair {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 6px 0 !important;
     gap: 0 !important;
     align-items: stretch !important;
-    margin-top: 6px !important;
-    margin-bottom: 6px !important;
     flex-wrap: nowrap !important;
     background: linear-gradient(160deg, #EEF5FF 0%, #E6F0FA 100%) !important;
     border: 1.5px solid #C8D8EA !important;
     border-radius: 16px !important;
     box-shadow: 0 2px 8px rgba(0,104,181,0.07) !important;
     overflow: hidden !important;
-    min-height: 90px !important;
+    min-height: 120px !important;
 }
 .audio-pair > div {
     flex: 1 1 0 !important;
@@ -154,7 +203,7 @@ footer { display: none !important; }
     display: flex !important;
     flex-direction: column !important;
     align-self: stretch !important;
-    min-height: 90px !important;
+    min-height: 120px !important;
 }
 /* Inside each column, force the gr.Audio root and its block to fill the
    column's full height so vertical centering actually has room to work */
@@ -189,24 +238,130 @@ footer { display: none !important; }
 #kiosk-mic > .block {
     display: block !important;
     position: relative !important;
-    min-height: 90px !important;
+    min-height: 120px !important;
 }
-/* Absolutely center the Speak button (and any mic controls) inside the
-   mic half so it stays in the middle even when the TTS side stretches
-   the row taller */
+/* Center the Speak/Stop button vertically and span the full width of the
+   audio-pair card (no TTS half to share with anymore). */
 #kiosk-mic .controls,
 #kiosk-mic .recording-container,
 #kiosk-mic .minimal-audio-player {
     position: absolute !important;
     top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
+    left: 14px !important;
+    right: 14px !important;
+    transform: translateY(-50%) !important;
     margin: 0 !important;
     width: auto !important;
     height: auto !important;
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
+}
+
+/* ── Recorder teleport ──
+   When recording starts, Gradio swaps the Speak button for a recorder UI
+   (waveform canvas + Stop button). Svelte re-inserts nodes if we delete
+   them, and inline styles defeat plain CSS hiding. So we:
+     1) move the actual Stop button into our own .kiosk-stop-host wrapper
+     2) push the original recorder container off-screen (it keeps living
+        in the DOM so Svelte's bindings stay intact). */
+#kiosk-mic .kiosk-stop-host {
+    position: absolute !important;
+    top: 50% !important;
+    left: 14px !important;
+    right: 14px !important;
+    transform: translateY(-50%) !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    z-index: 5 !important;
+    pointer-events: auto !important;
+}
+#kiosk-mic .kiosk-stop-host:empty { display: none !important; }
+#kiosk-mic .kiosk-stop-host button {
+    background: #D32F2F !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 999px !important;
+    width: 80% !important;
+    max-width: 460px !important;
+    margin: 0 auto !important;
+    height: 44px !important;
+    min-width: 140px !important;
+    padding: 0 22px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    box-shadow: 0 3px 12px rgba(211,47,47,0.32) !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+}
+#kiosk-mic .kiosk-stop-host button:hover {
+    background: #B71C1C !important;
+    transform: scale(1.06) !important;
+    box-shadow: 0 5px 18px rgba(211,47,47,0.45) !important;
+}
+#kiosk-mic .kiosk-stop-host button svg {
+    stroke: #FFFFFF !important;
+    fill: #FFFFFF !important;
+    width: 18px !important;
+    height: 18px !important;
+}
+/* The original recorder container — physically teleported into
+   #kiosk-recorder-bin (attached to <body>). Keep it visible there so you
+   can confirm it actually moved; collapse it to a small footprint. */
+#kiosk-recorder-bin {
+    position: fixed !important;
+    right: 16px !important;
+    bottom: 16px !important;
+    z-index: 9999 !important;
+    width: 260px !important;
+    min-height: 110px !important;
+    max-width: 80vw !important;
+    background: #FFFFFF !important;
+    border: 1px solid #C8D8EA !important;
+    border-radius: 12px !important;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.12) !important;
+    padding: 12px 14px !important;
+    font-family: Inter, "Segoe UI", system-ui, sans-serif !important;
+    color: #1A1A1A !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+}
+#kiosk-recorder-bin > * {
+    align-self: stretch !important;
+    margin: auto 0 !important;
+}
+#kiosk-recorder-bin:empty { display: none !important; }
+#kiosk-recorder-bin::before {
+    content: "🎙 Live recording";
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #0068B5;
+    margin-bottom: 6px;
+}
+#kiosk-recorder-bin canvas,
+#kiosk-recorder-bin .canvases,
+#kiosk-recorder-bin .waveform-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 48px !important;
+    background: #F4F7FB !important;
+    border-radius: 6px !important;
+}
+/* Hide any non-stop controls that hitched a ride into the bin */
+#kiosk-recorder-bin .controls,
+#kiosk-recorder-bin button {
+    display: none !important;
 }
 /* Vertical divider between mic and TTS halves */
 #kiosk-tts > .block {
@@ -267,11 +422,12 @@ footer { display: none !important; }
     color: #FFFFFF !important;
     border: none !important;
     border-radius: 999px !important;
-    width: min(100%, 220px) !important;
+    width: 80% !important;
+    max-width: 460px !important;
     margin: 0 auto !important;
-    height: 40px !important;
-    min-width: 40px !important;
-    padding: 0 16px !important;
+    height: 44px !important;
+    min-width: 140px !important;
+    padding: 0 22px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -783,8 +939,7 @@ def _render_chat(history: list[dict], partial_user: str = "", partial_asst: str 
             f'{_esc(partial_asst)}<span class="cursor">▌</span></div></div>'
         )
     inner = "\n".join(rows) if rows else '<div class="chat-empty">Tap 🎤 and ask a question</div>'
-    scroll_js = "<script>setTimeout(()=>{var p=document.querySelector('.chat-pane');if(p)p.scrollTop=p.scrollHeight;},40);</script>"
-    return f'<div class="chat-pane">{inner}</div>{scroll_js}'
+    return f'<div class="chat-pane">{inner}<div class="chat-end-anchor" aria-hidden="true"></div></div>'
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 def _numpy_to_wav(audio: np.ndarray, sr: int) -> bytes:
@@ -1038,19 +1193,11 @@ def create_app() -> gr.Blocks:
             # ── Left: chat + mic ──────────────────────────────────────────────
             with gr.Column(elem_classes=["kiosk-left"]):
                 chat   = gr.HTML(value=_render_chat([]))
-                status = gr.HTML(value='<div class="status-line">Tap the mic and ask a question</div>')
-                with gr.Row(elem_classes=["audio-pair"]):
-                    with gr.Column(scale=1, min_width=160):
-                        mic = gr.Audio(
-                            sources=["microphone"],
-                            type="numpy",
-                            streaming=True,
-                            label="🎤 Your Voice",
-                            elem_id="kiosk-mic",
-                        )
-                    with gr.Column(scale=1, min_width=160):
+                with gr.Row(elem_classes=["status-row"]):
+                    status = gr.HTML(value='<div class="status-line">Tap the mic and ask a question</div>')
+                    with gr.Column(scale=0, min_width=180, elem_classes=["status-tts-col"]):
                         tts = gr.Audio(
-                            label="�️ Assistant",
+                            label="🗣️ Assistant",
                             interactive=False,
                             autoplay=False,
                             elem_id="kiosk-tts",
@@ -1060,6 +1207,14 @@ def create_app() -> gr.Blocks:
                             visible=False,
                             elem_id="kiosk-tts-queue",
                         )
+                with gr.Row(elem_classes=["audio-pair"]):
+                    mic = gr.Audio(
+                        sources=["microphone"],
+                        type="numpy",
+                        streaming=True,
+                        label="🎤 Your Voice",
+                        elem_id="kiosk-mic",
+                    )
 
             # ── Right: collapsible panels ────────────────────────────────────
             with gr.Column(elem_classes=["kiosk-right"]):
@@ -1250,21 +1405,107 @@ def create_app() -> gr.Blocks:
                 };
                 ensureTTSPlayer();
 
-                // Rename "Record" button to "Speak"
+                // Rename "Record" button to "Ask"
                 const renameRecord = () => {
                     document.querySelectorAll('#kiosk-mic button').forEach(btn => {
                         btn.childNodes.forEach(node => {
                             if (node.nodeType === Node.TEXT_NODE &&
                                     node.textContent.trim().toLowerCase() === 'record') {
-                                node.textContent = node.textContent.replace(/record/i, 'Speak');
+                                node.textContent = node.textContent.replace(/record/i, 'Ask');
                             }
                         });
                         const span = btn.querySelector('span');
                         if (span && span.textContent.trim().toLowerCase() === 'record') {
-                            span.textContent = 'Speak';
+                            span.textContent = 'Ask';
                         }
                     });
                 };
+
+                // Teleport the Stop button out of the recorder container so
+                // Svelte's internal re-renders never touch our layout. The
+                // recorder container itself is moved into #kiosk-recorder-bin
+                // attached to <body>, far away from the speak-button slot.
+                const ensureStopHost = () => {
+                    const block = document.querySelector('#kiosk-mic .block') || document.querySelector('#kiosk-mic');
+                    if (!block) return null;
+                    let host = block.querySelector(':scope > .kiosk-stop-host');
+                    if (!host) {
+                        host = document.createElement('div');
+                        host.className = 'kiosk-stop-host';
+                        block.appendChild(host);
+                    }
+                    return host;
+                };
+                const ensureRecorderBin = () => {
+                    let bin = document.getElementById('kiosk-recorder-bin');
+                    if (!bin) {
+                        bin = document.createElement('div');
+                        bin.id = 'kiosk-recorder-bin';
+                        document.body.appendChild(bin);
+                    }
+                    return bin;
+                };
+                const isStopButton = (btn) => {
+                    if (!btn) return false;
+                    const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    const title = (btn.getAttribute('title') || '').toLowerCase();
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    if (aria.includes('stop')) return true;
+                    if (title.includes('stop')) return true;
+                    if (text === 'stop') return true;
+                    return false;
+                };
+                // Walk up from `node` until we find a child of #kiosk-mic .block
+                // — that's the recorder root we want to move.
+                const findRecorderRoot = (node) => {
+                    const block = document.querySelector('#kiosk-mic .block');
+                    if (!block || !node) return null;
+                    let cur = node;
+                    while (cur && cur.parentElement && cur.parentElement !== block) {
+                        cur = cur.parentElement;
+                        if (!block.contains(cur)) return null;
+                    }
+                    return cur && cur.parentElement === block ? cur : null;
+                };
+                const teleportRecorder = () => {
+                    const mic = document.querySelector('#kiosk-mic');
+                    if (!mic) return;
+                    const host = ensureStopHost();
+                    if (!host) return;
+                    const bin = ensureRecorderBin();
+
+                    // First: hoist the Stop button into our host (if recorder
+                    // is still inside the mic block — happens for an instant
+                    // before we teleport it).
+                    mic.querySelectorAll('button').forEach((b) => {
+                        if (isStopButton(b) && b.parentElement !== host) {
+                            b.removeAttribute('style');
+                            host.appendChild(b);
+                        }
+                    });
+                    // Also catch any stop button that rode along into the bin
+                    bin.querySelectorAll('button').forEach((b) => {
+                        if (isStopButton(b) && b.parentElement !== host) {
+                            b.removeAttribute('style');
+                            host.appendChild(b);
+                        }
+                    });
+
+                    // Recording is "active" iff the mic has any <canvas>
+                    // (live waveform) inside it. If so, teleport its root.
+                    const canvas = mic.querySelector('canvas');
+                    if (canvas) {
+                        const root = findRecorderRoot(canvas);
+                        if (root && root.parentElement !== bin) {
+                            // Strip inline positioning Svelte applied
+                            root.removeAttribute('style');
+                            bin.appendChild(root);
+                        }
+                    } else if (bin.childElementCount === 0) {
+                        // No recording and bin empty — nothing to do.
+                    }
+                };
+
                 const moveSelect = () => {
                     const sel = document.querySelector('#kiosk-mic select');
                     const tgt = document.querySelector('#mic-device-panel');
@@ -1278,16 +1519,32 @@ def create_app() -> gr.Blocks:
                     }
                     return !!(sel && tgt);
                 };
+                const scrollChatToBottom = () => {
+                    const pane = document.querySelector('.chat-pane');
+                    if (!pane) return;
+                    const anchor = pane.querySelector('.chat-end-anchor');
+                    if (anchor) {
+                        anchor.scrollIntoView({ block: 'end', behavior: 'smooth' });
+                    }
+                    pane.scrollTop = pane.scrollHeight;
+                };
                 // Retry every 400 ms for up to 15 s (Svelte renders lazily).
                 let tries = 0;
                 const poll = setInterval(() => {
                     renameRecord();
+                    teleportRecorder();
+                    scrollChatToBottom();
                     if (moveSelect() || ++tries > 37) clearInterval(poll);
                 }, 400);
                 // Re-run whenever DOM changes (accordion open, Gradio re-render)
-                const obs = new MutationObserver(() => { moveSelect(); renameRecord(); });
+                const obs = new MutationObserver(() => {
+                    moveSelect();
+                    renameRecord();
+                    teleportRecorder();
+                    requestAnimationFrame(scrollChatToBottom);
+                });
                 obs.observe(document.body, { childList: true, subtree: true });
-                setTimeout(() => obs.disconnect(), 20000);
+                requestAnimationFrame(scrollChatToBottom);
             }""",
         )
 
