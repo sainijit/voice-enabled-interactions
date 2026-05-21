@@ -35,9 +35,16 @@ kiosk-core has no config file. All settings are controlled through environment v
 | `KIOSK_CORE_UI_TIMEOUT_SECONDS` | `120.0` | HTTP client timeout in the UI |
 | `KIOSK_CORE_UI_POLL_INTERVAL_SECONDS` | `0.35` | How often the UI polls for session state updates |
 
-## Container vs Standalone Defaults
+## Compose Defaults
 
-When running with Docker Compose, the `docker-compose.yml` sets `KIOSK_CORE_ANALYZER_URL`, `KIOSK_CORE_RAG_URL`, and `KIOSK_CORE_TTS_URL` to use `host.docker.internal` so the containers can reach host-side services. Override these values to point at different hosts or container names as needed.
+When running with the top-level [docker-compose.yml](../docker-compose.yml), the defaults are wired to the internal Compose network:
+
+- `KIOSK_CORE_ANALYZER_URL=http://audio-analyzer:8010/v1/audio/transcriptions`
+- `KIOSK_CORE_RAG_URL=http://rag-service:8020/api/v1/query`
+- `KIOSK_CORE_TTS_URL=http://text-to-speech:8011/v1/audio/speech`
+- `KIOSK_CORE_UI_BASE_URL=http://kiosk-core:8012`
+
+Most deployments should leave these values unchanged. Override them only when `kiosk-core` or `kiosk-ui` must call services outside the local Compose stack.
 
 ## Session Parameters
 
