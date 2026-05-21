@@ -22,7 +22,7 @@ GET /health
 GET /api/v1/devices
 ```
 
-Returns audio input devices available on the server host. Useful for selecting a device index for live microphone sessions.
+Returns audio input devices available on the server host. This is only relevant when calling the server-side microphone capture endpoint.
 
 **Response**
 
@@ -77,7 +77,7 @@ POST /api/v1/sessions/start
 Content-Type: application/json
 ```
 
-Begins live microphone capture on the server. Returns immediately; the session runs in the background.
+Begins microphone capture on the server. Returns immediately; the session runs in the background.
 
 **Request Body**
 
@@ -124,7 +124,7 @@ POST /api/v1/sessions/start-file
 Content-Type: multipart/form-data
 ```
 
-Feeds an uploaded audio file through the same chunking, ASR, RAG, and TTS pipeline as a live microphone session. Useful for testing without hardware.
+Feeds an uploaded audio file through the same chunking, ASR, RAG, and TTS pipeline as a session started through `/api/v1/sessions/start`. Useful for testing without capture hardware.
 
 **Form Fields**
 
