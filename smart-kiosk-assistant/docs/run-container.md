@@ -6,10 +6,17 @@ Mic audio is captured by the **browser** via the Web Audio API and uploaded to k
 
 If you want to run `kiosk-core` and the Gradio UI directly on the host while keeping the same browser experience, see [run-standalone.md](run-standalone.md).
 
-Clone the repo with its dependency submodule:
+Clone the repo and materialize only the two upstream microservices this stack needs:
 
 ```bash
+<<<<<<< HEAD
 git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
+=======
+git clone https://github.com/intel-retail/voice-enabled-interactions.git
+cd voice-enabled-interactions
+git submodule update --init --depth 1 edge-ai-libraries
+git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
+>>>>>>> 418580c (docs: shorten sparse checkout setup)
 ```
 
 Move into the kiosk directory:
@@ -18,14 +25,15 @@ Move into the kiosk directory:
 cd voice-enabled-interactions/smart-kiosk-assistant
 ```
 
-If the repo is already cloned, run `git submodule update --init --recursive` from the repo root.
+If the repo is already cloned, run the same `git submodule update` and `git sparse-checkout` commands from the repo root.
 
 ## Before You Start
 
-Initialize the submodule once so the edge service sources exist locally:
+Initialize the submodule once so the required edge service sources exist locally:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --depth 1 edge-ai-libraries
+git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
 ```
 
 ## Start
