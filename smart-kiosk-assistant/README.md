@@ -36,21 +36,6 @@ All five services are started by the top-level [docker-compose.yml](docker-compo
 
 ## Quick Start
 
-<<<<<<< HEAD
-Clone the repository with its upstream microservice submodule:
-
-```bash
-git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions/smart-kiosk-assistant
-```
-
-If the repository is already present, initialize the submodule once from the repo root:
-
-```bash
-git submodule update --init --recursive
-```
-
-=======
 Clone the repository and populate only the two upstream microservices this stack needs from the `edge-ai-libraries` submodule:
 
 ```bash
@@ -68,7 +53,6 @@ git submodule update --init --depth 1 edge-ai-libraries
 git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
 ```
 
->>>>>>> 418580c (docs: shorten sparse checkout setup)
 Build and start the full stack:
 
 ```bash
