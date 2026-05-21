@@ -6,20 +6,6 @@ The user experience stays browser-based: the microphone is still captured by the
 
 ## Clone And Prepare
 
-<<<<<<< HEAD
-Clone the repository with its dependency submodule:
-
-```bash
-git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions/smart-kiosk-assistant
-```
-
-If the repository is already present, initialize the submodule once from the repo root:
-
-```bash
-git submodule update --init --recursive
-```
-=======
 Clone the repository and populate only the two upstream microservices this setup uses:
 
 ```bash
@@ -31,7 +17,6 @@ cd smart-kiosk-assistant
 ```
 
 If the repository is already present, apply the same sparse-checkout commands from the repo root before starting.
->>>>>>> 418580c (docs: shorten sparse checkout setup)
 
 ## Start Downstream Services
 
