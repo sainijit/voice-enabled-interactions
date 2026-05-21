@@ -5,8 +5,7 @@
 #
 # Mic audio is NOT captured server-side in this image.
 # The Gradio UI captures audio in the browser (Web Audio API) and uploads it
-# as a file.  For host-side mic capture, run kiosk-core standalone instead —
-# see docs/run-standalone.md.
+# as a file.
 
 FROM python:3.11-slim
 

@@ -1,30 +1,55 @@
 # Smart Kiosk Assistant
 
-A voice-driven, retrieval-augmented kiosk assistant for retail, QSR, and similar customer-facing deployments. Speak a question in the browser; the assistant transcribes it, answers from a domain knowledge base, and speaks the reply back. Runs locally on Intel CPU/GPU via OpenVINO.
+Smart Kiosk Assistant is a voice-first retrieval-augmented kiosk stack for retail, QSR, and other customer-facing deployments. A browser session captures microphone audio, streams it through speech-to-text, retrieves grounded answers from a local knowledge base, and plays a generated spoken response back to the user. The full stack is designed to run locally on Intel CPU/GPU with OpenVINO-backed services.
 
-## What It Offers
+## What This Repository Contains
 
-- Browser mic capture and sequential TTS playback (no host mic passthrough needed).
-- Streaming retrieval-augmented answers, domain-aware (QSR / retail / generic).
-- Document ingestion from the UI (`.txt` / `.md` or raw text) with a configurable token cap.
-- Five services wired together by one `docker-compose.yml`; pinned configs for reproducible behaviour.
-- Sample knowledge bases in [knowledge-base-samples/](knowledge-base-samples/).
+- A browser-based Gradio kiosk UI with microphone capture and sequential audio playback.
+- A FastAPI kiosk orchestrator that coordinates speech-to-text, retrieval, and text-to-speech.
+- An internal RAG microservice with ingestion, vector storage, and streamed answers.
+- Pinned runtime configuration for upstream `audio-analyzer` and `text-to-speech` microservices.
+- Sample knowledge-base content in [knowledge-base-samples/](knowledge-base-samples/).
 
-## Run
+## Architecture
 
-Clone with the `edge-ai-libraries/` submodule:
+![Smart Kiosk Assistant architecture](docs/assets/architecture.png)
+
+### Request Flow
+
+1. The browser UI captures microphone audio and sends it to `kiosk-core`.
+2. `kiosk-core` forwards audio to `audio-analyzer` for transcription.
+3. `kiosk-core` sends the transcription, plus any runtime context, to `rag-service`.
+4. `rag-service` retrieves relevant chunks from Chroma, prompts the OpenVINO LLM, and streams the answer back.
+5. `kiosk-core` forwards the answer text to `text-to-speech`, stores the generated audio, and returns both text and audio metadata to the UI.
+
+## Service Topology
+
+All five services are started by the top-level [docker-compose.yml](docker-compose.yml).
+
+| Service | Port | Role | Source |
+|---|---|---|---|
+| `audio-analyzer` | `8010` | Speech-to-text | [../edge-ai-libraries/microservices/audio-analyzer](../edge-ai-libraries/microservices/audio-analyzer) |
+| `text-to-speech` | `8011` | Speech synthesis | [../edge-ai-libraries/microservices/text-to-speech](../edge-ai-libraries/microservices/text-to-speech) |
+| `rag-service` | `8020` | Retrieval, ingestion, answer generation | [rag-service/README.md](rag-service/README.md) |
+| `kiosk-core` | `8012` | Session API and service orchestration | [main.py](main.py) |
+| `kiosk-ui` | `7860` | Gradio browser interface | [gradio_app.py](gradio_app.py) |
+
+## Quick Start
+
+Clone the repository with its upstream microservice submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
-```
-
-Move into the kiosk directory:
-
-```bash
+git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
 cd voice-enabled-interactions/smart-kiosk-assistant
 ```
 
-Build and start the stack:
+If the repository is already present, initialize the submodule once from the repo root:
+
+```bash
+git submodule update --init --recursive
+```
+
+Build and start the full stack:
 
 ```bash
 export LOCAL_UID=$(id -u)
@@ -33,28 +58,22 @@ docker compose build
 docker compose up -d
 ```
 
-Open the UI at [http://127.0.0.1:7860](http://127.0.0.1:7860).
+Open [http://127.0.0.1:7860](http://127.0.0.1:7860) for the browser UI.
 
-The stack runs containers as a non-root user. Exporting `LOCAL_UID` and
-`LOCAL_GID` keeps bind-mounted files writable from the host account you use
-to start the stack.
+The compose stack runs most containers as your host user. Exporting `LOCAL_UID` and `LOCAL_GID` keeps bind-mounted files writable from the account that launched the stack.
 
+## Documentation Map
 
-For terminal-only mic mode, see [docs/run-standalone.md](docs/run-standalone.md). Full container instructions: [docs/run-container.md](docs/run-container.md).
+- Container startup and verification: [docs/run-container.md](docs/run-container.md)
+- Host-run kiosk-core and Gradio UI: [docs/run-standalone.md](docs/run-standalone.md)
+- `kiosk-core` API surface: [docs/api.md](docs/api.md)
+- `kiosk-core` and UI environment variables: [docs/configuration.md](docs/configuration.md)
+- Internal RAG service overview and APIs: [rag-service/README.md](rag-service/README.md)
+- Pinned configs for upstream services: [configs/README.md](configs/README.md)
 
-## Services
+## Operational Notes
 
-| Service | Port | Source |
-|---|---|---|
-| audio-analyzer | `8010` | [edge-ai-libraries/microservices/audio-analyzer](../edge-ai-libraries/microservices/audio-analyzer) (submodule, unmodified) |
-| text-to-speech | `8011` | [edge-ai-libraries/microservices/text-to-speech](../edge-ai-libraries/microservices/text-to-speech) (submodule, unmodified) |
-| rag-service | `8020` | [rag-service/](rag-service/README.md) |
-| kiosk-core | `8012` | [main.py](main.py) |
-| kiosk-ui | `7860` | [gradio_app.py](gradio_app.py) |
-
-## Configuration
-
-- kiosk-core / kiosk-ui env vars: [docs/configuration.md](docs/configuration.md)
-- kiosk-core REST API: [docs/api.md](docs/api.md)
-- RAG service config, ingest API, token cap: [rag-service/README.md](rag-service/README.md)
-- Pinned `config.yaml` for `audio-analyzer` and `text-to-speech` (replace upstream service config without patching it): [configs/README.md](configs/README.md)
+- Browser audio capture means no host microphone device needs to be passed into the containers.
+- The compose stack mounts pinned `config.yaml` files for `audio-analyzer` and `text-to-speech` without modifying their upstream sources.
+- `rag-service` persists model caches and vector storage in Docker volumes, so knowledge-base state survives container restarts.
+- The browser UI supports knowledge-base ingestion with raw text or `.txt` and `.md` uploads routed through the internal RAG service.

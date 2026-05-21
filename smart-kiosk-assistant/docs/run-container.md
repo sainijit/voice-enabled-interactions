@@ -4,12 +4,12 @@
 
 Mic audio is captured by the **browser** via the Web Audio API and uploaded to kiosk-core as a WAV file. No host mic hardware is passed into the containers.
 
-For the terminal-based key-press mic loop instead, see [run-standalone.md](run-standalone.md).
+If you want to run `kiosk-core` and the Gradio UI directly on the host while keeping the same browser experience, see [run-standalone.md](run-standalone.md).
 
 Clone the repo with its dependency submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/unarayan/voice-enabled-interactions.git
+git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
 ```
 
 Move into the kiosk directory:
@@ -89,18 +89,11 @@ docker compose up -d
 docker compose down
 ```
 
-## Override Downstream URLs
+## Troubleshooting
 
-By default the internal service URLs are already wired through the Compose network. Only override them if you want kiosk-core or kiosk-ui to talk to services outside this stack:
-
-```bash
-KIOSK_CORE_ANALYZER_URL=http://192.168.1.10:8010/v1/audio/transcriptions \
-KIOSK_CORE_TTS_URL=http://192.168.1.10:8011/v1/audio/speech \
-KIOSK_CORE_RAG_URL=http://192.168.1.10:8020/api/v1/query \
-docker compose build && docker compose up -d
-```
-
-See [configuration.md](configuration.md) for all variables.
+- The default Compose wiring already connects `kiosk-core` and `kiosk-ui` to the internal `audio-analyzer`, `rag-service`, and `text-to-speech` containers. Most deployments should not override these URLs.
+- Only change downstream service URLs when this stack must call services running outside the local Compose network, such as a remote host or a separately managed service tier.
+- See [configuration.md](configuration.md) for the advanced environment variables if you need that non-default routing.
 
 ## Notes
 
