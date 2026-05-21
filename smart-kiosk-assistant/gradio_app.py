@@ -26,8 +26,9 @@ POLL_INTERVAL_SECONDS   = float(os.getenv("KIOSK_CORE_UI_POLL_INTERVAL_SECONDS",
 _CHUNK_SECONDS          = kiosk_config.DEFAULT_CHUNK_SECONDS
 _SAMPLE_KB_DIR          = os.path.join(os.path.dirname(__file__), "knowledge-base-samples")
 _SAMPLE_KB_OPTIONS      = {
-    "QSR": os.path.join(_SAMPLE_KB_DIR, "qsr-12k.md"),
-    "Retail Store": os.path.join(_SAMPLE_KB_DIR, "retail-store-12k.md"),
+    "QuickBite (QSR)": os.path.join(_SAMPLE_KB_DIR, "QuickBite-M.md"),
+    "MegaRetail (Retail Store)": os.path.join(_SAMPLE_KB_DIR, "MegaRetail-M.md"),
+    "SkyJet (Airline)": os.path.join(_SAMPLE_KB_DIR, "SkyJet-S.md"),
 }
 _DEFAULT_SAMPLE_KB      = next(iter(_SAMPLE_KB_OPTIONS))
 
@@ -62,7 +63,57 @@ footer { display: none !important; }
 /* Layout */
 .kiosk-row   { width: 100% !important; align-items: flex-start !important; gap: 16px !important; }
 .kiosk-left  { min-width: 0 !important; }
-.kiosk-right { width: 320px !important; min-width: 260px !important; max-width: 340px !important; flex-shrink: 0 !important; }
+.kiosk-right { width: 340px !important; min-width: 280px !important; max-width: 360px !important; flex-shrink: 0 !important; }
+
+/* ── Compact file upload widgets inside the right-panel accordions ── */
+.kiosk-right .file-preview,
+.kiosk-right [data-testid="file"],
+.kiosk-right .upload-container {
+    min-height: 0 !important;
+}
+.kiosk-right .file-preview,
+.kiosk-right [data-testid="file"] {
+    padding: 6px 8px !important;
+    font-size: 0.74rem !important;
+}
+.kiosk-right .upload-container,
+.kiosk-right .file-preview .download {
+    padding: 4px 6px !important;
+}
+/* The big drag-and-drop drop zone — compress its vertical footprint */
+.kiosk-right .wrap.svelte-1ipelgc,
+.kiosk-right .wrap[class*="svelte"]:has(input[type="file"]),
+.kiosk-right [data-testid="file"] .wrap,
+.kiosk-right .upload-container .wrap,
+.kiosk-right .file-preview,
+.kiosk-right .file-preview .wrap {
+    min-height: 32px !important;
+    height: 32px !important;
+    padding: 4px 8px !important;
+    font-size: 0.72rem !important;
+    line-height: 1.1 !important;
+}
+/* Hide the big "Drop File Here / or Click to Upload" hint block so the
+   zone collapses to just the icon + filename row */
+.kiosk-right .file-preview .or,
+.kiosk-right [data-testid="file"] .or,
+.kiosk-right .upload-container .or {
+    display: none !important;
+}
+.kiosk-right .file-preview .wrap > *,
+.kiosk-right [data-testid="file"] .wrap > * {
+    margin: 0 !important;
+}
+.kiosk-right input[type="file"] + * .icon,
+.kiosk-right .upload-container svg {
+    width: 18px !important;
+    height: 18px !important;
+}
+/* Tighten the label rows above the file widgets */
+.kiosk-right .label-wrap span,
+.kiosk-right label > span {
+    font-size: 0.74rem !important;
+}
 
 /* Chat pane */
 .chat-pane {
@@ -122,6 +173,52 @@ footer { display: none !important; }
     min-height: 20px;
 }
 
+/* Status row — status line on the left, Kiosk Assist pill on the right */
+.status-row {
+    width: 100% !important;
+    align-items: center !important;
+    gap: 12px !important;
+    margin: 6px 0 !important;
+    flex-wrap: nowrap !important;
+}
+.status-row > div:first-child { flex: 1 1 auto !important; min-width: 0 !important; }
+.status-row .status-line { text-align: left !important; min-height: 0 !important; }
+.status-tts-col {
+    flex: 0 0 auto !important;
+    max-width: 200px !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+}
+/* When TTS lives in the status row, strip its block chrome and let the
+   indicator pill flow inline instead of being absolutely centered. */
+.status-tts-col #kiosk-tts,
+.status-tts-col #kiosk-tts > .block {
+    background: transparent !important;
+    border: none !important;
+    border-left: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+}
+.status-tts-col #kiosk-tts .kiosk-tts-indicator {
+    position: static !important;
+    transform: none !important;
+    margin: 0 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 0 14px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    font-size: 0.78rem !important;
+}
+.status-tts-col #kiosk-tts .kiosk-tts-icon,
+.status-tts-col #kiosk-tts .kiosk-tts-icon svg {
+    width: 18px !important;
+    height: 18px !important;
+}
+.status-tts-col #kiosk-tts .kiosk-tts-title { font-size: 0.78rem !important; }
+
 /* Headings */
 .gradio-container h1, .gradio-container h2, .gradio-container h3,
 .gradio-container .prose h1, .gradio-container .prose h2 {
@@ -134,19 +231,22 @@ footer { display: none !important; }
    Right half : speaker icon → waveform player when audio plays
    ═══════════════════════════════════════════════════════════ */
 
-/* The row itself becomes the single card */
+/* The row itself becomes the single card. Width is locked to 100% of the
+   left column so it lines up exactly with the chat-pane above. */
 .audio-pair {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 6px 0 !important;
     gap: 0 !important;
     align-items: stretch !important;
-    margin-top: 6px !important;
-    margin-bottom: 6px !important;
     flex-wrap: nowrap !important;
     background: linear-gradient(160deg, #EEF5FF 0%, #E6F0FA 100%) !important;
     border: 1.5px solid #C8D8EA !important;
     border-radius: 16px !important;
     box-shadow: 0 2px 8px rgba(0,104,181,0.07) !important;
     overflow: hidden !important;
-    min-height: 90px !important;
+    min-height: 120px !important;
 }
 .audio-pair > div {
     flex: 1 1 0 !important;
@@ -154,7 +254,7 @@ footer { display: none !important; }
     display: flex !important;
     flex-direction: column !important;
     align-self: stretch !important;
-    min-height: 90px !important;
+    min-height: 120px !important;
 }
 /* Inside each column, force the gr.Audio root and its block to fill the
    column's full height so vertical centering actually has room to work */
@@ -189,24 +289,130 @@ footer { display: none !important; }
 #kiosk-mic > .block {
     display: block !important;
     position: relative !important;
-    min-height: 90px !important;
+    min-height: 120px !important;
 }
-/* Absolutely center the Speak button (and any mic controls) inside the
-   mic half so it stays in the middle even when the TTS side stretches
-   the row taller */
+/* Center the Speak/Stop button vertically and span the full width of the
+   audio-pair card (no TTS half to share with anymore). */
 #kiosk-mic .controls,
 #kiosk-mic .recording-container,
 #kiosk-mic .minimal-audio-player {
     position: absolute !important;
     top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
+    left: 14px !important;
+    right: 14px !important;
+    transform: translateY(-50%) !important;
     margin: 0 !important;
     width: auto !important;
     height: auto !important;
     background: transparent !important;
     border: none !important;
     box-shadow: none !important;
+}
+
+/* ── Recorder teleport ──
+   When recording starts, Gradio swaps the Speak button for a recorder UI
+   (waveform canvas + Stop button). Svelte re-inserts nodes if we delete
+   them, and inline styles defeat plain CSS hiding. So we:
+     1) move the actual Stop button into our own .kiosk-stop-host wrapper
+     2) push the original recorder container off-screen (it keeps living
+        in the DOM so Svelte's bindings stay intact). */
+#kiosk-mic .kiosk-stop-host {
+    position: absolute !important;
+    top: 50% !important;
+    left: 14px !important;
+    right: 14px !important;
+    transform: translateY(-50%) !important;
+    margin: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
+    z-index: 5 !important;
+    pointer-events: auto !important;
+}
+#kiosk-mic .kiosk-stop-host:empty { display: none !important; }
+#kiosk-mic .kiosk-stop-host button {
+    background: #D32F2F !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 999px !important;
+    width: 80% !important;
+    max-width: 460px !important;
+    margin: 0 auto !important;
+    height: 44px !important;
+    min-width: 140px !important;
+    padding: 0 22px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    box-shadow: 0 3px 12px rgba(211,47,47,0.32) !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+}
+#kiosk-mic .kiosk-stop-host button:hover {
+    background: #B71C1C !important;
+    transform: scale(1.06) !important;
+    box-shadow: 0 5px 18px rgba(211,47,47,0.45) !important;
+}
+#kiosk-mic .kiosk-stop-host button svg {
+    stroke: #FFFFFF !important;
+    fill: #FFFFFF !important;
+    width: 18px !important;
+    height: 18px !important;
+}
+/* The original recorder container — physically teleported into
+   #kiosk-recorder-bin (attached to <body>). Keep it visible there so you
+   can confirm it actually moved; collapse it to a small footprint. */
+#kiosk-recorder-bin {
+    position: fixed !important;
+    right: 16px !important;
+    bottom: 16px !important;
+    z-index: 9999 !important;
+    width: 260px !important;
+    min-height: 110px !important;
+    max-width: 80vw !important;
+    background: #FFFFFF !important;
+    border: 1px solid #C8D8EA !important;
+    border-radius: 12px !important;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.12) !important;
+    padding: 12px 14px !important;
+    font-family: Inter, "Segoe UI", system-ui, sans-serif !important;
+    color: #1A1A1A !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+}
+#kiosk-recorder-bin > * {
+    align-self: stretch !important;
+    margin: auto 0 !important;
+}
+#kiosk-recorder-bin:empty { display: none !important; }
+#kiosk-recorder-bin::before {
+    content: "🎙 Live recording";
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #0068B5;
+    margin-bottom: 6px;
+}
+#kiosk-recorder-bin canvas,
+#kiosk-recorder-bin .canvases,
+#kiosk-recorder-bin .waveform-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 48px !important;
+    background: #F4F7FB !important;
+    border-radius: 6px !important;
+}
+/* Hide any non-stop controls that hitched a ride into the bin */
+#kiosk-recorder-bin .controls,
+#kiosk-recorder-bin button {
+    display: none !important;
 }
 /* Vertical divider between mic and TTS halves */
 #kiosk-tts > .block {
@@ -267,11 +473,12 @@ footer { display: none !important; }
     color: #FFFFFF !important;
     border: none !important;
     border-radius: 999px !important;
-    width: min(100%, 220px) !important;
+    width: 80% !important;
+    max-width: 460px !important;
     margin: 0 auto !important;
-    height: 40px !important;
-    min-width: 40px !important;
-    padding: 0 16px !important;
+    height: 44px !important;
+    min-width: 140px !important;
+    padding: 0 22px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -626,6 +833,13 @@ footer { display: none !important; }
 .ingest-status.success { background: #D4F5E5; color: #0A6640; border: 1px solid #A8E6C8; }
 .ingest-status.error   { background: #FDECEA; color: #B71C1C; border: 1px solid #F5C6CB; }
 .ingest-status.warn    { background: #FFF8E1; color: #795500; border: 1px solid #FFD966; }
+
+/* While ingest is loading, grey the mic out so the user can't fire a question. */
+.gradio-container:has(.ingest-status.loading) #kiosk-mic {
+    pointer-events: none;
+    opacity: 0.5;
+    filter: grayscale(0.6);
+}
 """
 
 # ── Chat HTML helpers ─────────────────────────────────────────────────────────
@@ -653,13 +867,18 @@ def _sample_download_value(sample_name: str | None) -> str | None:
     return sample_path if sample_path and os.path.exists(sample_path) else None
 
 
-def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sample_label: str = "Use Sample & Ingest") -> Generator:
-    """Clear the current knowledge base and ingest the selected document."""
+def _ingest_doc_common(file, idle_upload_label: str = "📄 Upload .txt / .md & Ingest", idle_sample_label: str = "Use Sample & Ingest") -> Generator:
+    """Clear the current knowledge base and ingest the selected document.
+
+    Outputs are `[ingest_status, ingest_btn, sample_ingest_btn]` — the streaming
+    `mic` is deliberately NOT an output of this handler. Pushing updates to a
+    `streaming=True` `gr.Audio` from a foreign event makes its postprocess
+    raise on the final render and the component shows a red ✕ error border
+    until reload.
+    """
     if file is None:
         yield (
             '<div class="ingest-status warn">⚠️ Please select a file first.</div>',
-            gr.update(value=None),
-            gr.update(),
             gr.update(),
             gr.update(),
         )
@@ -668,16 +887,20 @@ def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sa
     # Immediately lock the mic and both ingest buttons while work is in progress
     loading_html = (
         '<div class="ingest-status loading">'
-        '⏳ Refreshing knowledge base &#8212; the assistant will be back shortly&#8230;'
+        '⏳ Ingesting knowledge base &#8212; the assistant will be back shortly&#8230;'
         '<br><small>This may take a few minutes depending on content size. '
         'Please do not refresh the page.</small>'
         '</div>'
     )
+    # Lock both ingest buttons while work is in progress. Clear the
+    # UploadButton's value (FileData) up-front: Gradio cleans up the uploaded
+    # temp file shortly after the upload handler starts, so any later yield
+    # that re-serialises the stored FileData raises in postprocess and the
+    # button is flagged with a red ✕ error border until the page is reloaded.
+    _INGEST_IN_PROGRESS.set()
     yield (
         loading_html,
         gr.update(value=None, interactive=False),
-        gr.update(value=None, interactive=False),
-        gr.update(interactive=False, value="Ingesting…"),
         gr.update(interactive=False, value="Ingesting…"),
     )
 
@@ -719,27 +942,25 @@ def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sa
     worker.start()
 
     # Heartbeat: keep the SSE/WS connection alive while the worker runs so the
-    # browser never sees a connection-error toast for long ingests.
+    # browser never sees a connection-error toast for long ingests. Use no-op
+    # updates so we don't keep resetting the UploadButton / sample button.
     while worker.is_alive():
         worker.join(timeout=2.0)
         if worker.is_alive():
             yield (
                 loading_html,
-                gr.update(value=None, interactive=False),
-                gr.update(value=None, interactive=False),
-                gr.update(interactive=False, value="Ingesting…"),
-                gr.update(interactive=False, value="Ingesting…"),
+                gr.update(),
+                gr.update(),
             )
 
     if "error" in result_holder:
+        _INGEST_IN_PROGRESS.clear()
         yield (
             f'<div class="ingest-status error">'
             f'⚠️ Ingestion failed: {_esc(result_holder["error"])}. '
             f'The previous knowledge base remains active.'
             f'</div>',
             gr.update(value=None, interactive=True),
-            gr.update(value=None, interactive=True),
-            gr.update(interactive=True, value=idle_upload_label),
             gr.update(interactive=True, value=idle_sample_label),
         )
         return
@@ -747,14 +968,13 @@ def _ingest_doc_common(file, idle_upload_label: str = "Upload & Ingest", idle_sa
     result = result_holder.get("data", {})
     chunks = result.get("chunks_added", "?")
     src    = result.get("source", filename)
+    _INGEST_IN_PROGRESS.clear()
     yield (
         f'<div class="ingest-status success">'
         f'✅ Knowledge base updated &#8212; {chunks} chunks ingested from'
         f' &#34;{_esc(src)}&#34;. The assistant is ready.'
         f'</div>',
         gr.update(value=None, interactive=True),
-        gr.update(value=None, interactive=True),
-        gr.update(interactive=True, value=idle_upload_label),
         gr.update(interactive=True, value=idle_sample_label),
     )
 
@@ -783,8 +1003,7 @@ def _render_chat(history: list[dict], partial_user: str = "", partial_asst: str 
             f'{_esc(partial_asst)}<span class="cursor">▌</span></div></div>'
         )
     inner = "\n".join(rows) if rows else '<div class="chat-empty">Tap 🎤 and ask a question</div>'
-    scroll_js = "<script>setTimeout(()=>{var p=document.querySelector('.chat-pane');if(p)p.scrollTop=p.scrollHeight;},40);</script>"
-    return f'<div class="chat-pane">{inner}</div>{scroll_js}'
+    return f'<div class="chat-pane">{inner}<div class="chat-end-anchor" aria-hidden="true"></div></div>'
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 def _numpy_to_wav(audio: np.ndarray, sr: int) -> bytes:
@@ -794,7 +1013,23 @@ def _numpy_to_wav(audio: np.ndarray, sr: int) -> bytes:
         wf.writeframes(audio.astype(np.int16).tobytes())
     return buf.getvalue()
 
-def _open_session(sr: int) -> dict[str, Any]:
+def _recent_history_payload(history: list[dict] | None, max_turns: int = 4) -> list[dict[str, str]]:
+    """Return the last `max_turns` chat turns in {role, content} form for the
+    RAG service. `state["history"]` stores entries as {"role", "text"}; we
+    rename `text` -> `content` and drop empties.
+    """
+    if not history:
+        return []
+    cleaned: list[dict[str, str]] = []
+    for entry in history[-max_turns:]:
+        role = str(entry.get("role", ""))
+        content = str(entry.get("text", "")).strip()
+        if role in {"user", "assistant"} and content:
+            cleaned.append({"role": role, "content": content})
+    return cleaned
+
+
+def _open_session(sr: int, history: list[dict] | None = None) -> dict[str, Any]:
     with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS, trust_env=False) as c:
         r = c.post(f"{KIOSK_CORE_URL}/api/v1/sessions/start-stream", json={
             "sample_rate": sr,
@@ -805,6 +1040,7 @@ def _open_session(sr: int) -> dict[str, Any]:
             "language": "en", "temperature": 0.0,
             "analyzer_url": ANALYZER_URL, "rag_url": RAG_URL, "tts_url": TTS_URL,
             "tts_model": "speecht5", "tts_language": "English",
+            "history": _recent_history_payload(history),
         })
     r.raise_for_status(); return r.json()
 
@@ -830,12 +1066,21 @@ def _gradio_file_url(absolute_path: str) -> str:
 # ── State ─────────────────────────────────────────────────────────────────────
 _INIT: dict = {"session_id": None, "buffer": [], "sample_rate": 16000, "history": []}
 
+# Process-wide flag set while a knowledge-base ingest is running. The streaming
+# mic events check this and become no-ops so users can't fire a question while
+# the RAG service is rebuilding its index.
+_INGEST_IN_PROGRESS = threading.Event()
+
 # ── Handlers ──────────────────────────────────────────────────────────────────
 def on_start(state: dict):
+    if _INGEST_IN_PROGRESS.is_set():
+        return state, gr.skip(), gr.update(value=None), gr.skip(), "⏳ Ingestion in progress — please wait…"
     s = dict(state); s["session_id"] = None; s["buffer"] = []
     return s, _render_chat(s["history"], partial_user="🎤  Listening…"), gr.update(value=None), gr.skip(), "🎙  Listening — speak now"
 
 def on_chunk(state: dict, chunk):
+    if _INGEST_IN_PROGRESS.is_set():
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
     if chunk is None:
         return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
     sr, data = chunk
@@ -849,7 +1094,7 @@ def on_chunk(state: dict, chunk):
 
     if s["session_id"] is None:
         try:
-            s["session_id"] = _open_session(sr)["session_id"]
+            s["session_id"] = _open_session(sr, history=s.get("history"))["session_id"]
         except Exception as e:
             return s, gr.skip(), gr.skip(), gr.skip(), f"❌ {e}"
 
@@ -1038,19 +1283,11 @@ def create_app() -> gr.Blocks:
             # ── Left: chat + mic ──────────────────────────────────────────────
             with gr.Column(elem_classes=["kiosk-left"]):
                 chat   = gr.HTML(value=_render_chat([]))
-                status = gr.HTML(value='<div class="status-line">Tap the mic and ask a question</div>')
-                with gr.Row(elem_classes=["audio-pair"]):
-                    with gr.Column(scale=1, min_width=160):
-                        mic = gr.Audio(
-                            sources=["microphone"],
-                            type="numpy",
-                            streaming=True,
-                            label="🎤 Your Voice",
-                            elem_id="kiosk-mic",
-                        )
-                    with gr.Column(scale=1, min_width=160):
+                with gr.Row(elem_classes=["status-row"]):
+                    status = gr.HTML(value='<div class="status-line">Tap the mic and ask a question</div>')
+                    with gr.Column(scale=0, min_width=180, elem_classes=["status-tts-col"]):
                         tts = gr.Audio(
-                            label="�️ Assistant",
+                            label="🗣️ Assistant",
                             interactive=False,
                             autoplay=False,
                             elem_id="kiosk-tts",
@@ -1060,6 +1297,14 @@ def create_app() -> gr.Blocks:
                             visible=False,
                             elem_id="kiosk-tts-queue",
                         )
+                with gr.Row(elem_classes=["audio-pair"]):
+                    mic = gr.Audio(
+                        sources=["microphone"],
+                        type="numpy",
+                        streaming=True,
+                        label="🎤 Your Voice",
+                        elem_id="kiosk-mic",
+                    )
 
             # ── Right: collapsible panels ────────────────────────────────────
             with gr.Column(elem_classes=["kiosk-right"]):
@@ -1079,17 +1324,26 @@ def create_app() -> gr.Blocks:
                         interactive=False,
                     )
                     sample_ingest_btn = gr.Button("Use Sample & Ingest", variant="secondary", size="sm")
-                    doc_file = gr.File(
+                    ingest_btn = gr.UploadButton(
+                        "📄 Upload .txt / .md & Ingest",
                         file_types=[".txt", ".md"],
-                        label="Select document (.txt or .md)",
                         file_count="single",
+                        variant="primary",
+                        size="sm",
                     )
-                    ingest_btn = gr.Button("Upload & Ingest", variant="primary", size="sm")
                     ingest_status = gr.HTML(value="")
 
                 with gr.Accordion(label="📊 Model KPIs", open=True):
                     kpi_panel = gr.HTML(value=_render_kpi_html({}, {}, {}))
                     refresh_btn = gr.Button("🔄 Refresh", size="sm", variant="secondary")
+                    # Hidden trigger clicked from JS after the final TTS wav
+                    # finishes playing, so KPIs auto-refresh once a full
+                    # user-question -> spoken-answer cycle completes.
+                    kpi_auto_refresh_btn = gr.Button(
+                        "auto-refresh",
+                        visible=False,
+                        elem_id="kpi-auto-refresh-trigger",
+                    )
 
         outs = [state, chat, tts, tts_queue, status]
 
@@ -1107,10 +1361,14 @@ def create_app() -> gr.Blocks:
             fn=lambda: _render_kpi_html(*_fetch_kpis()),
             outputs=[kpi_panel],
         )
-        ingest_btn.click(
+        kpi_auto_refresh_btn.click(
+            fn=lambda: _render_kpi_html(*_fetch_kpis()),
+            outputs=[kpi_panel],
+        )
+        ingest_btn.upload(
             fn=_ingest_doc,
-            inputs=[doc_file],
-            outputs=[ingest_status, mic, doc_file, ingest_btn, sample_ingest_btn],
+            inputs=[ingest_btn],
+            outputs=[ingest_status, ingest_btn, sample_ingest_btn],
         )
         sample_choice.change(
             fn=_sample_download_value,
@@ -1120,7 +1378,7 @@ def create_app() -> gr.Blocks:
         sample_ingest_btn.click(
             fn=_ingest_sample_doc,
             inputs=[sample_choice],
-            outputs=[ingest_status, mic, doc_file, ingest_btn, sample_ingest_btn],
+            outputs=[ingest_status, ingest_btn, sample_ingest_btn],
         )
         app.load(
             fn=lambda: _render_kpi_html(*_fetch_kpis()),
@@ -1175,6 +1433,9 @@ def create_app() -> gr.Blocks:
                         player.addEventListener('ended', () => {
                             window.kioskTTS.playing = false;
                             setTTSVisualState(window.kioskTTS.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle');
+                            if (window.kioskTTS.queue.length === 0) {
+                                window.kioskTriggerKpiRefresh && window.kioskTriggerKpiRefresh();
+                            }
                             window.kioskTTSPlayNext();
                         });
                         player.addEventListener('error', () => {
@@ -1250,21 +1511,121 @@ def create_app() -> gr.Blocks:
                 };
                 ensureTTSPlayer();
 
-                // Rename "Record" button to "Speak"
+                // Click the hidden Gradio button so the server re-fetches and
+                // re-renders the KPI panel. Debounced so a flurry of "ended"
+                // events (one per wav) only triggers a single refresh.
+                window.kioskTriggerKpiRefresh = () => {
+                    if (window.kioskTTS.kpiRefreshTimer) {
+                        clearTimeout(window.kioskTTS.kpiRefreshTimer);
+                    }
+                    window.kioskTTS.kpiRefreshTimer = setTimeout(() => {
+                        const host = document.getElementById('kpi-auto-refresh-trigger');
+                        const btn = host ? (host.querySelector('button') || (host.tagName === 'BUTTON' ? host : null)) : null;
+                        if (btn) btn.click();
+                    }, 250);
+                };
+
+                // Rename "Record" button to "Ask"
                 const renameRecord = () => {
                     document.querySelectorAll('#kiosk-mic button').forEach(btn => {
                         btn.childNodes.forEach(node => {
                             if (node.nodeType === Node.TEXT_NODE &&
                                     node.textContent.trim().toLowerCase() === 'record') {
-                                node.textContent = node.textContent.replace(/record/i, 'Speak');
+                                node.textContent = node.textContent.replace(/record/i, 'Ask');
                             }
                         });
                         const span = btn.querySelector('span');
                         if (span && span.textContent.trim().toLowerCase() === 'record') {
-                            span.textContent = 'Speak';
+                            span.textContent = 'Ask';
                         }
                     });
                 };
+
+                // Teleport the Stop button out of the recorder container so
+                // Svelte's internal re-renders never touch our layout. The
+                // recorder container itself is moved into #kiosk-recorder-bin
+                // attached to <body>, far away from the speak-button slot.
+                const ensureStopHost = () => {
+                    const block = document.querySelector('#kiosk-mic .block') || document.querySelector('#kiosk-mic');
+                    if (!block) return null;
+                    let host = block.querySelector(':scope > .kiosk-stop-host');
+                    if (!host) {
+                        host = document.createElement('div');
+                        host.className = 'kiosk-stop-host';
+                        block.appendChild(host);
+                    }
+                    return host;
+                };
+                const ensureRecorderBin = () => {
+                    let bin = document.getElementById('kiosk-recorder-bin');
+                    if (!bin) {
+                        bin = document.createElement('div');
+                        bin.id = 'kiosk-recorder-bin';
+                        document.body.appendChild(bin);
+                    }
+                    return bin;
+                };
+                const isStopButton = (btn) => {
+                    if (!btn) return false;
+                    const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    const title = (btn.getAttribute('title') || '').toLowerCase();
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    if (aria.includes('stop')) return true;
+                    if (title.includes('stop')) return true;
+                    if (text === 'stop') return true;
+                    return false;
+                };
+                // Walk up from `node` until we find a child of #kiosk-mic .block
+                // — that's the recorder root we want to move.
+                const findRecorderRoot = (node) => {
+                    const block = document.querySelector('#kiosk-mic .block');
+                    if (!block || !node) return null;
+                    let cur = node;
+                    while (cur && cur.parentElement && cur.parentElement !== block) {
+                        cur = cur.parentElement;
+                        if (!block.contains(cur)) return null;
+                    }
+                    return cur && cur.parentElement === block ? cur : null;
+                };
+                const teleportRecorder = () => {
+                    const mic = document.querySelector('#kiosk-mic');
+                    if (!mic) return;
+                    const host = ensureStopHost();
+                    if (!host) return;
+                    const bin = ensureRecorderBin();
+
+                    // First: hoist the Stop button into our host (if recorder
+                    // is still inside the mic block — happens for an instant
+                    // before we teleport it).
+                    mic.querySelectorAll('button').forEach((b) => {
+                        if (isStopButton(b) && b.parentElement !== host) {
+                            b.removeAttribute('style');
+                            host.appendChild(b);
+                        }
+                    });
+                    // Also catch any stop button that rode along into the bin
+                    bin.querySelectorAll('button').forEach((b) => {
+                        if (isStopButton(b) && b.parentElement !== host) {
+                            b.removeAttribute('style');
+                            host.appendChild(b);
+                        }
+                    });
+
+                    // Recording is "active" iff the mic has any <canvas>
+                    // (live waveform) inside it. If so, teleport its root.
+                    const canvas = mic.querySelector('canvas');
+                    if (canvas) {
+                        const root = findRecorderRoot(canvas);
+                        if (root && root.parentElement !== bin) {
+                            // Strip inline positioning Svelte applied
+                            root.removeAttribute('style');
+                            bin.appendChild(root);
+                        }
+                    } else if (bin.childElementCount === 0) {
+                        // No recording and bin empty — nothing to do.
+                    }
+                };
+
                 const moveSelect = () => {
                     const sel = document.querySelector('#kiosk-mic select');
                     const tgt = document.querySelector('#mic-device-panel');
@@ -1278,16 +1639,32 @@ def create_app() -> gr.Blocks:
                     }
                     return !!(sel && tgt);
                 };
+                const scrollChatToBottom = () => {
+                    const pane = document.querySelector('.chat-pane');
+                    if (!pane) return;
+                    const anchor = pane.querySelector('.chat-end-anchor');
+                    if (anchor) {
+                        anchor.scrollIntoView({ block: 'end', behavior: 'smooth' });
+                    }
+                    pane.scrollTop = pane.scrollHeight;
+                };
                 // Retry every 400 ms for up to 15 s (Svelte renders lazily).
                 let tries = 0;
                 const poll = setInterval(() => {
                     renameRecord();
+                    teleportRecorder();
+                    scrollChatToBottom();
                     if (moveSelect() || ++tries > 37) clearInterval(poll);
                 }, 400);
                 // Re-run whenever DOM changes (accordion open, Gradio re-render)
-                const obs = new MutationObserver(() => { moveSelect(); renameRecord(); });
+                const obs = new MutationObserver(() => {
+                    moveSelect();
+                    renameRecord();
+                    teleportRecorder();
+                    requestAnimationFrame(scrollChatToBottom);
+                });
                 obs.observe(document.body, { childList: true, subtree: true });
-                setTimeout(() => obs.disconnect(), 20000);
+                requestAnimationFrame(scrollChatToBottom);
             }""",
         )
 

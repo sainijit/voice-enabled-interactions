@@ -29,6 +29,8 @@ storage:
 retrieval:
   top_k: 3
   fetch_k: 6
+  # Hard cap on chars for (retrieved context + runtime context + recent
+  # conversation history) combined. Question is never truncated.
   max_context_chars: 8000
   score_threshold: null
 
@@ -59,6 +61,9 @@ answering:
     If the answer is not available in the context, say so plainly instead of guessing.
   fallback_to_general_knowledge: true
   include_source_markers: false
+  # Number of prior user+assistant exchanges to carry as conversational
+  # history (so the model can resolve follow-ups like "are you sure?").
+  history_turns: 2
   max_tokens: 192
   # If a single model.generate() call does not complete within this many seconds
   # (e.g. GPU deadlock / OOM hang), it is cancelled, the pipeline is reloaded,

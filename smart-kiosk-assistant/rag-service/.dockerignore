@@ -6,6 +6,8 @@ __pycache__/
 # Virtual environments
 .venv/
 .venv-*/
+.vscode/
+.idea/
 
 # Large model & vectorstore artifacts (mounted as volumes at runtime)
 models/
@@ -19,9 +21,11 @@ chunks/
 # Dev / eval scripts — not needed in the production image
 scripts/
 tests/
+docs/
+API_TEST_RESULTS.md
+README.md
+docker-compose.yml
 
 # IDE / OS
-.vscode/
-.idea/
 .DS_Store
 *.swp

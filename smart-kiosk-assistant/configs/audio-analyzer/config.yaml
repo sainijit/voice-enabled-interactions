@@ -2,8 +2,8 @@
 #
 # This file is mounted into the audio-analyzer container by
 # voice-enabled-interactions/smart-kiosk-assistant/docker-compose.yml,
-# overriding the service's built-in config so the kiosk always boots a
-# known-good version regardless of changes in edge-ai-libraries.
+# replacing the service config so the kiosk always boots a known-good
+# version regardless of changes in edge-ai-libraries.
 app:
   name: Audio Analyzer
   cleanup_on_exit: true
