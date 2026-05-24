@@ -53,6 +53,10 @@ NO_PROXY = {"http": "", "https": ""}
 CHROMA_PATH = BASE_DIR / "storage" / "vector_db"
 CHROMA_COLLECTION = "smart-kiosk-assistant-bge-large"
 EMBED_MODEL_NAME = "BAAI/bge-large-en-v1.5"
+RERANKER_MODEL_NAME = "BAAI/bge-reranker-base"
+# Pull this many ANN candidates before reranking. Mirrors retrieval.fetch_k
+# in config.yaml so the eval matches what the service does at runtime.
+LOCAL_RETRIEVER_ANN_K = 5
 
 SERVICE_START_CMD = (
     "source /home/intel/udit-ws/kiosk/new_audio_analyzer/.venv-1/bin/activate && "
@@ -95,7 +99,8 @@ def restart_service() -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _init_local_retriever() -> bool:
-    """Load embedding model + chromadb collection once. Returns True on success."""
+    """Load embedding model + chromadb collection (and optional reranker) once.
+    Returns True on success."""
     global _local_retriever
     if _local_retriever is not None:
         return True
@@ -106,8 +111,16 @@ def _init_local_retriever() -> bool:
         embed_model = SentenceTransformer(EMBED_MODEL_NAME)
         client = chromadb.PersistentClient(path=str(CHROMA_PATH))
         coll = client.get_collection(CHROMA_COLLECTION)
-        _local_retriever = {"embed": embed_model, "coll": coll}
-        print(f"[LocalRetriever] Ready. Collection has {coll.count()} docs.")
+        reranker = None
+        try:
+            from sentence_transformers import CrossEncoder
+            print(f"[LocalRetriever] Loading reranker {RERANKER_MODEL_NAME}…")
+            reranker = CrossEncoder(RERANKER_MODEL_NAME, device="cpu", max_length=512)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[LocalRetriever] Reranker unavailable ({exc}); falling back to ANN-only ranking.")
+        _local_retriever = {"embed": embed_model, "coll": coll, "reranker": reranker}
+        suffix = " + reranker" if reranker is not None else ""
+        print(f"[LocalRetriever] Ready. Collection has {coll.count()} docs.{suffix}")
         return True
     except Exception as exc:
         print(f"[LocalRetriever] Init failed: {exc}")
@@ -115,15 +128,29 @@ def _init_local_retriever() -> bool:
 
 
 def get_rr_local(question: str, reference: str, top_k: int = 6) -> float:
-    """Reciprocal rank via direct chromadb query — no LLM needed."""
+    """Reciprocal rank via direct chromadb query + optional cross-encoder
+    rerank — no service LLM needed. Mirrors the rag-service retrieval flow:
+    ANN over-fetch (LOCAL_RETRIEVER_ANN_K) → rerank → keep top_k."""
     if not _local_retriever:
         return 0.0
     try:
         embed_model = _local_retriever["embed"]
         coll = _local_retriever["coll"]
+        reranker = _local_retriever.get("reranker")
         qemb = embed_model.encode(question, normalize_embeddings=True)
-        res = coll.query(query_embeddings=[qemb.tolist()], n_results=top_k, include=["documents"])
-        sources = [{"content": doc} for doc in res["documents"][0]]
+        ann_k = max(top_k, LOCAL_RETRIEVER_ANN_K)
+        res = coll.query(query_embeddings=[qemb.tolist()], n_results=ann_k, include=["documents"])
+        docs = res["documents"][0]
+        if reranker is not None and len(docs) > 1:
+            scores = reranker.predict(
+                [(question, d) for d in docs],
+                batch_size=16, show_progress_bar=False, convert_to_numpy=True,
+            )
+            order = sorted(range(len(docs)), key=lambda i: float(scores[i]), reverse=True)
+            docs = [docs[i] for i in order[:top_k]]
+        else:
+            docs = docs[:top_k]
+        sources = [{"content": d} for d in docs]
         return reciprocal_rank(sources, reference)
     except Exception as exc:
         print(f"    [local_rr] WARN: {exc}")

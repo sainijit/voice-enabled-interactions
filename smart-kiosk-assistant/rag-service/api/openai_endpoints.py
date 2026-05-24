@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 
@@ -13,6 +14,7 @@ from utils.config_loader import config
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _flatten_message_content(content) -> str:
@@ -115,6 +117,12 @@ def create_chat_completion(request: ChatCompletionRequest):
         max_tokens=request.max_tokens,
         system_prompt=system_prompt,
         history=history,
+    )
+
+    total_ms = (time.time() - created) * 1000
+    logger.info(
+        "[CHAT] q=%r prompt_chars=%d ans_chars=%d total=%.0fms",
+        prompt[:80], len(prompt), len(result.get("answer", "")), total_ms,
     )
 
     payload = {

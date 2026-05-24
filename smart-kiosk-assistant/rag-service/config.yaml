@@ -19,6 +19,10 @@ models:
   embedding:
     hf_id: "BAAI/bge-large-en-v1.5"
     device: "CPU"
+    backend: "openvino"
+    weight_format: "int8"
+    max_seq_length: 512
+    batch_size: 16
     models_base_path: "./models/embeddings"
     normalize_embeddings: true
 
@@ -28,20 +32,35 @@ storage:
 
 retrieval:
   top_k: 3
-  fetch_k: 6
+  fetch_k: 5
   # Hard cap on chars for (retrieved context + runtime context + recent
   # conversation history) combined. Question is never truncated.
   max_context_chars: 8000
   score_threshold: null
+  # Cross-encoder reranker. When enabled, fetch_k docs are pulled by ANN,
+  # rescored jointly with the query, and the top_k by rerank score are kept.
+  reranker:
+    enabled: true
+    hf_id: "BAAI/bge-reranker-base"
+    device: "CPU"
+    backend: "openvino"
+    weight_format: "int8"
+    models_base_path: "./models/rerankers"
+    max_length: 384
+    batch_size: 8
 
 chunking:
   max_chunk_chars: 1500
-  min_chunk_chars: 200
+  min_chunk_chars: 300
   overlap_chars: 200
   semantic_similarity_threshold: 0.72
   llm_passage_chars: 12000
   llm_passage_tokens: 4000      # wide enough to keep a full semantic intact before LLM splits it
   llm_passage_overlap_tokens: 300
+  # Skip the LLM marker call entirely when a coarse passage is already <= this
+  # size (it would just fit in one chunk). Prevents orphan-heading splits and
+  # cuts ingest time by avoiding per-subsection LLM calls.
+  llm_min_passage_chars: 1500
   save_chunks_debug: "./storage/chunks_debug"  # set to null to disable
 
 answering:
