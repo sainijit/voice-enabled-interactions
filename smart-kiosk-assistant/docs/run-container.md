@@ -6,27 +6,19 @@ Mic audio is captured by the **browser** via the Web Audio API and uploaded to k
 
 If you want to run `kiosk-core` and the Gradio UI directly on the host while keeping the same browser experience, see [run-standalone.md](run-standalone.md).
 
-Clone the repo with its dependency submodule:
+## Clone And Prepare
+
+Clone the repo and materialize only the two upstream microservices this stack needs:
 
 ```bash
-git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
+git clone https://github.com/intel-retail/voice-enabled-interactions.git
+cd voice-enabled-interactions
+git submodule update --init --depth 1 edge-ai-libraries
+git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
+cd smart-kiosk-assistant
 ```
 
-Move into the kiosk directory:
-
-```bash
-cd voice-enabled-interactions/smart-kiosk-assistant
-```
-
-If the repo is already cloned, run `git submodule update --init --recursive` from the repo root.
-
-## Before You Start
-
-Initialize the submodule once so the edge service sources exist locally:
-
-```bash
-git submodule update --init --recursive
-```
+If the repo is already cloned, run the two `git` commands above from the repo root.
 
 ## Start
 
@@ -94,7 +86,4 @@ docker compose down
 - The default Compose wiring already connects `kiosk-core` and `kiosk-ui` to the internal `audio-analyzer`, `rag-service`, and `text-to-speech` containers. Most deployments should not override these URLs.
 - Only change downstream service URLs when this stack must call services running outside the local Compose network, such as a remote host or a separately managed service tier.
 - See [configuration.md](configuration.md) for the advanced environment variables if you need that non-default routing.
-
-## Notes
-
-- For API use cases and endpoint details, see [api.md](api.md).
+- For endpoint details, see [api.md](api.md).

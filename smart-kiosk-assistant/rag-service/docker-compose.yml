@@ -13,9 +13,7 @@ services:
       - "992"
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
-      SMART_KIOSK_RAG_CONFIG_OVERRIDE_PATHS: /app/rag-service/config.container.yaml
     volumes:
-      - ./config.container.yaml:/app/rag-service/config.container.yaml:ro
       - rag_service_models:/app/rag-service/models
       - rag_service_storage:/app/rag-service/storage
       - rag_service_hf_cache:/app/rag-service/.cache/huggingface

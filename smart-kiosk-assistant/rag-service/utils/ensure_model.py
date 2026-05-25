@@ -149,6 +149,53 @@ def get_embedding_model_path() -> str:
     )
 
 
+def get_embedding_openvino_path() -> str:
+    emb_cfg = config.models.embedding
+    weight_format = getattr(emb_cfg, "weight_format", "fp32") or "fp32"
+    return os.path.join(
+        _resolve_service_path(emb_cfg.models_base_path),
+        "openvino",
+        _slugify(emb_cfg.hf_id, weight_format),
+    )
+
+
+def _ov_export_ready(output_dir: str) -> bool:
+    xml = os.path.join(output_dir, "openvino_model.xml")
+    binp = os.path.join(output_dir, "openvino_model.bin")
+    return (
+        os.path.isfile(xml)
+        and os.path.getsize(xml) > 0
+        and os.path.isfile(binp)
+        and os.path.getsize(binp) > 0
+    )
+
+
+def ensure_embedding_openvino(force: bool = False) -> str:
+    emb_cfg = config.models.embedding
+    weight_format = getattr(emb_cfg, "weight_format", "fp32") or "fp32"
+    output_dir = get_embedding_openvino_path()
+    if not force and _ov_export_ready(output_dir):
+        logger.info("Using cached OpenVINO embedding export at %s", output_dir)
+        return output_dir
+    logger.info(
+        "Exporting %s → OpenVINO IR at %s (task=feature-extraction, weight_format=%s)",
+        emb_cfg.hf_id, output_dir, weight_format,
+    )
+    _reset_output_dir(output_dir)
+    main_export(
+        model_name_or_path=emb_cfg.hf_id,
+        output=output_dir,
+        task="feature-extraction",
+        trust_remote_code=True,
+        weight_format=weight_format,
+    )
+    if not _ov_export_ready(output_dir):
+        raise RuntimeError(
+            f"OpenVINO export failed for {emb_cfg.hf_id}: no valid IR in {output_dir}"
+        )
+    return output_dir
+
+
 def ensure_llm_model(force: bool = False) -> str:
     llm_cfg = config.models.llm
     output_dir = get_llm_model_path()
@@ -194,7 +241,18 @@ def ensure_embedding_model(force: bool = False) -> str:
 
 def ensure_model(force: bool = False) -> None:
     ensure_llm_model(force=force)
-    ensure_embedding_model(force=force)
+    emb_backend = (getattr(config.models.embedding, "backend", "") or "").lower()
+    if emb_backend == "openvino":
+        ensure_embedding_openvino(force=force)
+    else:
+        ensure_embedding_model(force=force)
+    reranker_cfg = getattr(config.retrieval, "reranker", None)
+    if reranker_cfg is not None and bool(getattr(reranker_cfg, "enabled", False)):
+        rr_backend = (getattr(reranker_cfg, "backend", "") or "").lower()
+        if rr_backend == "openvino":
+            ensure_reranker_openvino(force=force)
+        else:
+            ensure_reranker_model(force=force)
 
 
 def resolve_embedding_model_source() -> str:
@@ -203,3 +261,70 @@ def resolve_embedding_model_source() -> str:
     if os.path.isdir(output_dir) and any(os.scandir(output_dir)):
         return output_dir
     return emb_cfg.hf_id
+
+
+def get_reranker_model_path() -> str:
+    reranker_cfg = config.retrieval.reranker
+    base_path = getattr(reranker_cfg, "models_base_path", "./models/rerankers")
+    return os.path.join(
+        _resolve_service_path(base_path),
+        "sentence_transformers",
+        _slugify(reranker_cfg.hf_id),
+    )
+
+
+def get_reranker_openvino_path() -> str:
+    reranker_cfg = config.retrieval.reranker
+    base_path = getattr(reranker_cfg, "models_base_path", "./models/rerankers")
+    weight_format = getattr(reranker_cfg, "weight_format", "fp32") or "fp32"
+    return os.path.join(
+        _resolve_service_path(base_path),
+        "openvino",
+        _slugify(reranker_cfg.hf_id, weight_format),
+    )
+
+
+def ensure_reranker_openvino(force: bool = False) -> str:
+    reranker_cfg = config.retrieval.reranker
+    weight_format = getattr(reranker_cfg, "weight_format", "fp32") or "fp32"
+    output_dir = get_reranker_openvino_path()
+    if not force and _ov_export_ready(output_dir):
+        logger.info("Using cached OpenVINO reranker export at %s", output_dir)
+        return output_dir
+    logger.info(
+        "Exporting %s → OpenVINO IR at %s (task=text-classification, weight_format=%s)",
+        reranker_cfg.hf_id, output_dir, weight_format,
+    )
+    _reset_output_dir(output_dir)
+    main_export(
+        model_name_or_path=reranker_cfg.hf_id,
+        output=output_dir,
+        task="text-classification",
+        trust_remote_code=True,
+        weight_format=weight_format,
+    )
+    if not _ov_export_ready(output_dir):
+        raise RuntimeError(
+            f"OpenVINO export failed for {reranker_cfg.hf_id}: no valid IR in {output_dir}"
+        )
+    return output_dir
+
+
+def ensure_reranker_model(force: bool = False) -> str:
+    reranker_cfg = config.retrieval.reranker
+    output_dir = get_reranker_model_path()
+    if not force and os.path.isdir(output_dir) and any(os.scandir(output_dir)):
+        logger.info("Using cached reranker model at %s", output_dir)
+        return output_dir
+
+    logger.info("Downloading cross-encoder reranker model %s to %s", reranker_cfg.hf_id, output_dir)
+    _download_repo(reranker_cfg.hf_id, output_dir)
+    return output_dir
+
+
+def resolve_reranker_model_source() -> str:
+    reranker_cfg = config.retrieval.reranker
+    output_dir = get_reranker_model_path()
+    if os.path.isdir(output_dir) and any(os.scandir(output_dir)):
+        return output_dir
+    return reranker_cfg.hf_id

@@ -6,18 +6,17 @@ The user experience stays browser-based: the microphone is still captured by the
 
 ## Clone And Prepare
 
-Clone the repository with its dependency submodule:
+Clone the repository and populate only the two upstream microservices this setup uses:
 
 ```bash
-git clone --recurse-submodules https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions/smart-kiosk-assistant
+git clone https://github.com/intel-retail/voice-enabled-interactions.git
+cd voice-enabled-interactions
+git submodule update --init --depth 1 edge-ai-libraries
+git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
+cd smart-kiosk-assistant
 ```
 
-If the repository is already present, initialize the submodule once from the repo root:
-
-```bash
-git submodule update --init --recursive
-```
+If the repository is already present, apply the same sparse-checkout commands from the repo root before starting.
 
 ## Start Downstream Services
 

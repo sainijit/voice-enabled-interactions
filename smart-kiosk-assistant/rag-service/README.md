@@ -42,14 +42,22 @@ Within the top-level compose deployment, `kiosk-core` treats `rag-service` as it
 - A final optional `sources` event can be emitted when `include_sources=true`.
 - The stream terminates with `data: [DONE]`.
 
+## Pipeline At A Glance
+
+**Ingestion.** Uploaded text is split into semantically coherent chunks. Markdown files are first segmented along their heading and section structure; the resulting passages then go through an LLM-driven semantic splitter that places boundaries on topic shifts, with a recursive character splitter as a deterministic fallback when the LLM stage is skipped or fails. Each chunk is embedded with an OpenVINO-accelerated bi-encoder and persisted to Chroma along with source metadata.
+
+**Retrieval.** For each query the embedder produces a query vector, Chroma returns `fetch_k` candidates by ANN cosine similarity, and an OpenVINO cross-encoder **reranker** re-scores `(query, chunk)` jointly. The top `top_k` reranked chunks are kept and fed to the LLM. Reranking materially improves Hit@1 over pure ANN because the cross-encoder reads the chunk content rather than relying on the embedding alone.
+
+**Answering.** The retained chunks plus any runtime context and short conversation history are assembled into a prompt under `max_context_chars`, then the LLM generates a grounded answer that is streamed back token by token.
+
 ## Current Default Runtime
 
 The checked-in [config.yaml](config.yaml) currently defaults to:
 
-- LLM: `Qwen/Qwen3-4B-Instruct-2507`
-- LLM device: `GPU`
-- Embeddings: `BAAI/bge-large-en-v1.5`
-- Retrieval: `top_k=3`, `fetch_k=6`
+- LLM: `Qwen/Qwen3-4B-Instruct-2507` (OpenVINO INT8, GPU)
+- Embeddings: `BAAI/bge-large-en-v1.5` (OpenVINO INT8, CPU)
+- Reranker: `BAAI/bge-reranker-base` (OpenVINO INT8, CPU)
+- Retrieval: `top_k=3`, `fetch_k=5`
 - Context budget: `max_context_chars=8000`
 - Storage collection: `smart-kiosk-assistant-bge-large`
 
@@ -70,4 +78,4 @@ These defaults are intentionally conservative for a kiosk flow: short retrieved 
 - Full configuration reference: [docs/configuration.md](docs/configuration.md)
 - API request examples: [docs/api.md](docs/api.md)
 
-When started through the top-level kiosk stack, [config.container.yaml](config.container.yaml) is mounted read-only and layered over [config.yaml](config.yaml) through `SMART_KIOSK_RAG_CONFIG_OVERRIDE_PATHS`. The upstream `audio-analyzer` and `text-to-speech` services are configured separately by the top-level stack through pinned config mounts described in [../configs/README.md](../configs/README.md).
+When started through the top-level kiosk stack, [config.yaml](config.yaml) is used as-is — the same file drives both standalone and containerised runs. The upstream `audio-analyzer` and `text-to-speech` services are configured separately by the top-level stack through pinned config mounts described in [../configs/README.md](../configs/README.md).

@@ -810,6 +810,10 @@ footer { display: none !important; }
 .badge-blue   { background: #D0E8F8; color: #004E8C; }
 .badge-purple { background: #E8D8F8; color: #5E2D9E; }
 
+/* Hidden Gradio component that stays in the DOM (so JS .click() reaches
+   Gradio's event handler) but is invisible to users. */
+.kiosk-hidden { display: none !important; }
+
 /* ── Knowledge-base ingest panel ── */
 .ingest-note {
     font-size: 0.74rem;
@@ -1245,15 +1249,22 @@ def _render_kpi_html(asr: dict, rag: dict, tts: dict) -> str:
 
     llm_id  = str(rag.get("llm_model") or "—")
     emb_id  = str(rag.get("embedding_model") or "—")
+    rerank_id = rag.get("reranker_model") or (rag.get("reranker") or {}).get("hf_id")
+    rerank_label = str(rerank_id).split("/")[-1] if rerank_id else "—"
+    rp_latency = rp if isinstance(rp, dict) else {}
+    rp_retrieval = rp_latency.get("retrieval") or {}
+    rp_llm = rp_latency.get("llm") or {}
     rag_card = _kpi_card("🔍 RAG — Retrieval + Generation", [
-        ("LLM",           _esc(llm_id.split("/")[-1])),
-        ("LLM Device",    _esc(str(rag.get("llm_device") or "—"))),
-        ("Precision",     _badge(str(rag.get("llm_weight_format") or "") or None)),
-        ("Embeddings",    _esc(emb_id.split("/")[-1])),
-        ("Emb Device",    _esc(str(rag.get("embedding_device") or "—"))),
-        ("Docs indexed",  _esc(str(rag.get("document_count") if rag.get("document_count") is not None else "—"))),
-        ("Top-K",         _esc(str(rag.get("top_k") or "—"))),
-        ("Last latency",  _fmt_ms(rp.get("last_ms"))),
+        ("LLM",            _esc(llm_id.split("/")[-1])),
+        ("LLM Device",     _esc(str(rag.get("llm_device") or "—"))),
+        ("Precision",      _badge(str(rag.get("llm_weight_format") or "") or None)),
+        ("Embeddings",     _esc(emb_id.split("/")[-1])),
+        ("Emb Device",     _esc(str(rag.get("embedding_device") or "—"))),
+        ("Reranker",       _esc(rerank_label)),
+        ("Docs indexed",   _esc(str(rag.get("document_count") if rag.get("document_count") is not None else "—"))),
+        ("Top-K",          _esc(str(rag.get("top_k") or "—"))),
+        ("Retrieval lat.", _fmt_ms(rp_retrieval.get("last_ms"))),
+        ("LLM lat.",       _fmt_ms(rp_llm.get("last_ms"))),
     ])
 
     tts_runtime = _PROVIDER_LABELS.get(str(tts.get("runtime", "")).lower(),
@@ -1336,13 +1347,15 @@ def create_app() -> gr.Blocks:
                 with gr.Accordion(label="📊 Model KPIs", open=True):
                     kpi_panel = gr.HTML(value=_render_kpi_html({}, {}, {}))
                     refresh_btn = gr.Button("🔄 Refresh", size="sm", variant="secondary")
-                    # Hidden trigger clicked from JS after the final TTS wav
-                    # finishes playing, so KPIs auto-refresh once a full
-                    # user-question -> spoken-answer cycle completes.
+                    # Hidden trigger clicked from JS after the first TTS wav
+                    # starts playing (and again after the last one ends), so
+                    # KPIs auto-refresh once a full user-question -> spoken-answer
+                    # cycle completes. Kept in the DOM via CSS class so the JS
+                    # .click() reliably reaches Gradio's event handler.
                     kpi_auto_refresh_btn = gr.Button(
                         "auto-refresh",
-                        visible=False,
                         elem_id="kpi-auto-refresh-trigger",
+                        elem_classes=["kiosk-hidden"],
                     )
 
         outs = [state, chat, tts, tts_queue, status]
@@ -1430,6 +1443,17 @@ def create_app() -> gr.Blocks:
                         target.appendChild(player);
                     }
                     if (!player.dataset.kioskBound) {
+                        player.addEventListener('play', () => {
+                            // Fire as soon as the first wav of this answer cycle
+                            // starts playing. ASR/RAG metrics are already final
+                            // by this point; TTS last_ms will reflect at least the
+                            // first chunk. The 'ended' handler below will refresh
+                            // again once the queue fully drains.
+                            if (!window.kioskTTS.refreshedOnPlay) {
+                                window.kioskTTS.refreshedOnPlay = true;
+                                window.kioskTriggerKpiRefresh && window.kioskTriggerKpiRefresh();
+                            }
+                        });
                         player.addEventListener('ended', () => {
                             window.kioskTTS.playing = false;
                             setTTSVisualState(window.kioskTTS.queue.length > 0 ? 'kiosk-tts-queued' : 'kiosk-tts-idle');
@@ -1488,6 +1512,7 @@ def create_app() -> gr.Blocks:
                         state.queue = [];
                         state.played.clear();
                         state.playing = false;
+                        state.refreshedOnPlay = false;
                         if (state.player) {
                             state.player.pause();
                             state.player.removeAttribute('src');
@@ -1497,10 +1522,17 @@ def create_app() -> gr.Blocks:
                         return;
                     }
                     const urls = Array.isArray(data.urls) ? data.urls : [];
+                    let appended = 0;
                     for (const url of urls) {
                         if (!url || state.played.has(url)) continue;
                         state.played.add(url);
                         state.queue.push(url);
+                        appended += 1;
+                    }
+                    // New wavs arriving after a previous cycle finished should
+                    // count as a fresh answer cycle for the first-wav refresh.
+                    if (appended > 0 && !state.playing && state.queue.length === appended) {
+                        state.refreshedOnPlay = false;
                     }
                     if (!state.playing && state.queue.length > 0) {
                         setTTSVisualState('kiosk-tts-queued');
@@ -1512,8 +1544,8 @@ def create_app() -> gr.Blocks:
                 ensureTTSPlayer();
 
                 // Click the hidden Gradio button so the server re-fetches and
-                // re-renders the KPI panel. Debounced so a flurry of "ended"
-                // events (one per wav) only triggers a single refresh.
+                // re-renders the KPI panel. Debounced so a flurry of "ended" /
+                // "play" events (one per wav) only triggers a single refresh.
                 window.kioskTriggerKpiRefresh = () => {
                     if (window.kioskTTS.kpiRefreshTimer) {
                         clearTimeout(window.kioskTTS.kpiRefreshTimer);
@@ -1521,7 +1553,12 @@ def create_app() -> gr.Blocks:
                     window.kioskTTS.kpiRefreshTimer = setTimeout(() => {
                         const host = document.getElementById('kpi-auto-refresh-trigger');
                         const btn = host ? (host.querySelector('button') || (host.tagName === 'BUTTON' ? host : null)) : null;
-                        if (btn) btn.click();
+                        if (btn) {
+                            btn.click();
+                            console.debug('[kiosk] KPI auto-refresh fired');
+                        } else {
+                            console.warn('[kiosk] KPI auto-refresh trigger button not found in DOM');
+                        }
                     }, 250);
                 };
 

@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from dto.query_dto import ContextRequest, IngestResponse, QueryRequest
 from pipeline import get_shared_pipeline
 from utils.config_loader import config
-from utils.latency_store import llm_latency
+from utils.latency_store import llm_latency, retrieval_latency
 
 router = APIRouter()
 
@@ -40,18 +40,37 @@ def health() -> dict[str, str]:
 @router.get("/api/v1/model-info")
 def model_info():
     stats = get_shared_pipeline().get_stats()
+    embedding_cfg = config.models.embedding
+    reranker_cfg = getattr(config.retrieval, "reranker", None)
+    reranker_info: dict | None = None
+    if reranker_cfg is not None and getattr(reranker_cfg, "enabled", True):
+        reranker_info = {
+            "hf_id": getattr(reranker_cfg, "hf_id", None),
+            "device": str(getattr(reranker_cfg, "device", "CPU")).upper(),
+            "backend": getattr(reranker_cfg, "backend", None),
+            "weight_format": getattr(reranker_cfg, "weight_format", None),
+        }
     return JSONResponse(content={
         **stats,
         "llm_device": str(getattr(config.models.llm, "device", "CPU")).upper(),
         "llm_weight_format": getattr(config.models.llm, "weight_format", None),
-        "embedding_device": str(getattr(config.models.embedding, "device", "CPU")).upper(),
+        "embedding_device": str(getattr(embedding_cfg, "device", "CPU")).upper(),
+        "embedding_backend": getattr(embedding_cfg, "backend", None),
+        "embedding_weight_format": getattr(embedding_cfg, "weight_format", None),
+        "reranker": reranker_info,
         "top_k": int(getattr(config.retrieval, "top_k", 3)),
+        "fetch_k": int(getattr(config.retrieval, "fetch_k", 5)),
     })
 
 
 @router.get("/api/v1/performance")
 def rag_performance():
-    return JSONResponse(content={"latency": llm_latency.stats()})
+    return JSONResponse(content={
+        "latency": {
+            "retrieval": retrieval_latency.stats(),
+            "llm": llm_latency.stats(),
+        }
+    })
 
 
 @router.post("/api/v1/context", response_model=IngestResponse)
