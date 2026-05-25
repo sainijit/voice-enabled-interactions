@@ -35,14 +35,14 @@ retrieval:
   fetch_k: 5
   # Hard cap on chars for (retrieved context + runtime context + recent
   # conversation history) combined. Question is never truncated.
-  max_context_chars: 8000
+  max_context_chars: 7000
   score_threshold: null
   # Cross-encoder reranker. When enabled, fetch_k docs are pulled by ANN,
   # rescored jointly with the query, and the top_k by rerank score are kept.
   reranker:
     enabled: true
     hf_id: "BAAI/bge-reranker-base"
-    device: "CPU"
+    device: "GPU"
     backend: "openvino"
     weight_format: "int8"
     models_base_path: "./models/rerankers"
