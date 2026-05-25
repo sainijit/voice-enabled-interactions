@@ -145,6 +145,10 @@ class RagPipeline:
     def get_stats(self) -> dict:
         collection = getattr(self.vectorstore, "_collection", None)
         count = collection.count() if collection is not None else None
+        reranker_cfg = getattr(config.retrieval, "reranker", None)
+        reranker_id = None
+        if reranker_cfg is not None and getattr(reranker_cfg, "enabled", True):
+            reranker_id = getattr(reranker_cfg, "hf_id", None)
         return {
             "collection_name": self.collection_name,
             "persist_directory": self.persist_directory,
@@ -152,6 +156,7 @@ class RagPipeline:
             "chunking_strategy": "semantic_llm+markdown_aware",
             "llm_model": config.models.llm.hf_id,
             "embedding_model": config.models.embedding.hf_id,
+            "reranker_model": reranker_id,
         }
 
     # ── retrieval ────────────────────────────────────────────────────

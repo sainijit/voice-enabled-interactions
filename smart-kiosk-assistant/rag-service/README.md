@@ -78,4 +78,4 @@ These defaults are intentionally conservative for a kiosk flow: short retrieved 
 - Full configuration reference: [docs/configuration.md](docs/configuration.md)
 - API request examples: [docs/api.md](docs/api.md)
 
-When started through the top-level kiosk stack, [config.container.yaml](config.container.yaml) is mounted read-only and layered over [config.yaml](config.yaml) through `SMART_KIOSK_RAG_CONFIG_OVERRIDE_PATHS`. The upstream `audio-analyzer` and `text-to-speech` services are configured separately by the top-level stack through pinned config mounts described in [../configs/README.md](../configs/README.md).
+When started through the top-level kiosk stack, [config.yaml](config.yaml) is used as-is — the same file drives both standalone and containerised runs. The upstream `audio-analyzer` and `text-to-speech` services are configured separately by the top-level stack through pinned config mounts described in [../configs/README.md](../configs/README.md).

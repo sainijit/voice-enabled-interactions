@@ -2,12 +2,12 @@
 
 ## Config Files And Override Order
 
-Primary settings live in [../config.yaml](../config.yaml).
+All settings live in [../config.yaml](../config.yaml). The same file is used in both standalone and container runs.
 
-When the service runs inside the top-level kiosk compose stack, [../config.container.yaml](../config.container.yaml) is mounted and applied through `SMART_KIOSK_RAG_CONFIG_OVERRIDE_PATHS`. That gives this effective precedence order:
+Effective precedence order:
 
 1. `config.yaml`
-2. YAML files listed in `SMART_KIOSK_RAG_CONFIG_OVERRIDE_PATHS`
+2. YAML files listed in `SMART_KIOSK_RAG_CONFIG_OVERRIDE_PATHS` (optional, comma-separated; intended for one-off local overrides and tests)
 3. `SMART_KIOSK_RAG__...` environment variable overrides
 
 ## `server`

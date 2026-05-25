@@ -1245,15 +1245,22 @@ def _render_kpi_html(asr: dict, rag: dict, tts: dict) -> str:
 
     llm_id  = str(rag.get("llm_model") or "—")
     emb_id  = str(rag.get("embedding_model") or "—")
+    rerank_id = rag.get("reranker_model") or (rag.get("reranker") or {}).get("hf_id")
+    rerank_label = str(rerank_id).split("/")[-1] if rerank_id else "—"
+    rp_latency = rp if isinstance(rp, dict) else {}
+    rp_retrieval = rp_latency.get("retrieval") or {}
+    rp_llm = rp_latency.get("llm") or {}
     rag_card = _kpi_card("🔍 RAG — Retrieval + Generation", [
-        ("LLM",           _esc(llm_id.split("/")[-1])),
-        ("LLM Device",    _esc(str(rag.get("llm_device") or "—"))),
-        ("Precision",     _badge(str(rag.get("llm_weight_format") or "") or None)),
-        ("Embeddings",    _esc(emb_id.split("/")[-1])),
-        ("Emb Device",    _esc(str(rag.get("embedding_device") or "—"))),
-        ("Docs indexed",  _esc(str(rag.get("document_count") if rag.get("document_count") is not None else "—"))),
-        ("Top-K",         _esc(str(rag.get("top_k") or "—"))),
-        ("Last latency",  _fmt_ms(rp.get("last_ms"))),
+        ("LLM",            _esc(llm_id.split("/")[-1])),
+        ("LLM Device",     _esc(str(rag.get("llm_device") or "—"))),
+        ("Precision",      _badge(str(rag.get("llm_weight_format") or "") or None)),
+        ("Embeddings",     _esc(emb_id.split("/")[-1])),
+        ("Emb Device",     _esc(str(rag.get("embedding_device") or "—"))),
+        ("Reranker",       _esc(rerank_label)),
+        ("Docs indexed",   _esc(str(rag.get("document_count") if rag.get("document_count") is not None else "—"))),
+        ("Top-K",          _esc(str(rag.get("top_k") or "—"))),
+        ("Retrieval lat.", _fmt_ms(rp_retrieval.get("last_ms"))),
+        ("LLM lat.",       _fmt_ms(rp_llm.get("last_ms"))),
     ])
 
     tts_runtime = _PROVIDER_LABELS.get(str(tts.get("runtime", "")).lower(),

@@ -17,3 +17,4 @@ class LatencyStore:
 
 
 llm_latency = LatencyStore()
+retrieval_latency = LatencyStore()

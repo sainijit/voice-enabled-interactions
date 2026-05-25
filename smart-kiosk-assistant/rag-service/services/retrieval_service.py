@@ -10,6 +10,8 @@ import logging
 import time
 from typing import Callable
 
+from utils.latency_store import retrieval_latency
+
 from .types import RetrievalRecord
 
 
@@ -87,5 +89,6 @@ class RetrievalService:
                     metadata=document.metadata,
                 )
             )
+        retrieval_latency.record(t_ann_ms + t_rr_ms)
         return records
 

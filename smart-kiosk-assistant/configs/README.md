@@ -11,10 +11,10 @@ spin up from `docker-compose.yml`:
   container at `/app/text-to-speech/config.yaml`. Pins the TTS model,
   voice, language, device, dtype, and output format.
 
-> Note: The `rag-service` uses the same override mechanism on its own
-> `config.container.yaml` (mounted directly from `rag-service/`). Only the
-> two services that come from `edge-ai-libraries/` need the `configs/`
-> indirection.
+> Note: The `rag-service` reads its settings directly from its own
+> `rag-service/config.yaml` (no override layer), so it does not need the
+> `configs/` indirection — only the two services that come from
+> `edge-ai-libraries/` do.
 
 ## Why this exists
 
