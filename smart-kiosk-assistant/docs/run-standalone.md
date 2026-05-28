@@ -103,4 +103,4 @@ See [configuration.md](configuration.md) for the environment variables.
 
 - TTS audio clips are written under `generated_audio/` in the project directory.
 - Browser capture means no host microphone device needs to be managed by Python directly.
-- For endpoint details, see [api.md](api.md).
+- For endpoint details, see [api-reference.md](api-reference.md).

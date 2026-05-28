@@ -1,5 +1,82 @@
 # Configuration
 
+This page covers two configuration surfaces:
+
+1. `kiosk-core` and `kiosk-ui` are configured purely through **environment
+   variables** (see [Environment Variables](#environment-variables)).
+2. The three model-hosting services (`audio-analyzer`, `text-to-speech`,
+   `rag-service`) are configured through **YAML files** that the kiosk
+   pins and mounts into the containers. The most common change here is
+   the **inference device** — see
+   [Choosing the Inference Device (CPU / GPU / NPU)](#choosing-the-inference-device-cpu--gpu--npu).
+
+## Choosing the Inference Device (CPU / GPU / NPU)
+
+Smart Kiosk Assistant hosts models in three of its five services. Each can
+be pinned to a specific Intel inference device at deployment time.
+
+### Where the Device Is Configured
+
+| Service | File | Field(s) |
+|---|---|---|
+| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](../configs/audio-analyzer/config.yaml) | `models.asr.device`, `sentiment.device` |
+| `text-to-speech` | [`configs/text-to-speech/config.yaml`](../configs/text-to-speech/config.yaml) | `models.tts.device` |
+| `rag-service` | [`rag-service/config.yaml`](../rag-service/config.yaml) | `models.llm.device`, `models.embedding.device`, `retrieval.reranker.device` |
+
+The pinned YAML for `audio-analyzer` and `text-to-speech` lives under
+`configs/` and is mounted into the upstream container without forking the
+service — see [configs/README.md](../configs/README.md). `rag-service`
+reads its own `config.yaml` directly.
+
+### Supported Devices per Service
+
+| Service | Model | Supported devices | Notes |
+|---|---|---|---|
+| `audio-analyzer` | Whisper ASR | `CPU`, `GPU` | `GPU` requires `provider: openvino` in the same block. |
+| `audio-analyzer` | Voice sentiment (optional) | `CPU`, `GPU` | `GPU` requires `provider: openvino`. Disabled by default. |
+| `text-to-speech` | SpeechT5 (default) | `CPU`, `GPU` | `int4` on iGPU produces noise; prefer `fp16` or `int8` on GPU. |
+| `text-to-speech` | Qwen-TTS variant | `CPU`, `GPU`, `NPU` | `NPU` only supported by this variant. |
+| `rag-service` | LLM (`models.llm.device`) | `CPU`, `GPU` | `GPU` strongly recommended for acceptable latency. |
+| `rag-service` | Embedding (`models.embedding.device`) | `CPU`, `GPU` | `CPU` is usually fast enough. |
+| `rag-service` | Reranker (`retrieval.reranker.device`) | `CPU`, `GPU` | Optional; disable in config to skip. |
+
+### Recommended Combinations
+
+| Goal | audio-analyzer | text-to-speech | rag-service (LLM / embed / rerank) |
+|---|---|---|---|
+| Safe default, mixed Intel hardware | `CPU` | `CPU` | `GPU` / `CPU` / `GPU` |
+| Maximum throughput on Core Ultra + iGPU | `GPU` | `GPU` | `GPU` / `CPU` / `GPU` |
+| Free the GPU for the LLM | `CPU` | `CPU` | `GPU` / `CPU` / `CPU` |
+
+### Steps to Change a Device
+
+1. Edit the relevant field(s) in the table above. Use uppercase device
+   names (`CPU`, `GPU`, `NPU`) without quotes for `audio-analyzer` and
+   `text-to-speech`, and quoted strings (`"CPU"`, `"GPU"`) for
+   `rag-service` to stay consistent with the rest of that file.
+2. Restart only the affected service so it picks up the new device:
+
+   ```bash
+   docker compose up -d --build --force-recreate audio-analyzer
+   docker compose up -d --build --force-recreate text-to-speech
+   docker compose up -d --build --force-recreate rag-service
+   ```
+
+3. Confirm the device was actually used by tailing the logs:
+
+   ```bash
+   docker compose logs <service-name> | grep -i -E "device|compiling|GPU|NPU|CPU"
+   ```
+
+   OpenVINO prints a line such as `Compiling model on GPU` (or `NPU` /
+   `CPU`) when the model is first loaded.
+
+> **Note on NPU/GPU support.** NPU/GPU execution in this stack is delegated
+> entirely to the OpenVINO backend used by each model-hosting service.
+> Smart Kiosk Assistant exposes `NPU`/`GPU` as a valid device choice wherever
+> the service config accepts it, but whether a specific model actually
+> runs on the NPU/GPU — and how it performs — depends on the OpenVINO
+
 ## Environment Variables
 
 kiosk-core has no config file. All settings are controlled through environment variables.
