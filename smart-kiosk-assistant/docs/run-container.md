@@ -82,5 +82,6 @@ docker compose down               # teardown
   internal `audio-analyzer`, `rag-service`, and `text-to-speech`
   containers. Override these URLs only when this stack must call
   services outside the local Compose network.
-- See [configuration.md](configuration.md) for environment variables and
+- See [configuration.md](configuration.md) for environment variables,
+  model selection, and inference device, and
   [api-reference.md](api-reference.md) for endpoint details.

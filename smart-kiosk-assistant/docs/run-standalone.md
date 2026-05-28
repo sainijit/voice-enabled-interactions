@@ -81,26 +81,11 @@ Open that address in a browser, allow microphone access, and use the same browse
 
 ## Verify
 
-Check the API and UI separately:
-
 ```bash
-curl --noproxy '*' http://127.0.0.1:8012/health
+curl --noproxy '*' http://127.0.0.1:8012/health   # {"status":"ok"}
 ```
-
-Then open:
-
-```text
-http://127.0.0.1:7860
-```
-
-## Advanced Routing
-
-Most host-run setups should keep the default localhost URLs. Override them only if `kiosk-core` or the Gradio UI needs to call services on another host or in another deployment.
-
-See [configuration.md](configuration.md) for the environment variables.
 
 ## Notes
 
 - TTS audio clips are written under `generated_audio/` in the project directory.
-- Browser capture means no host microphone device needs to be managed by Python directly.
 - For endpoint details, see [api-reference.md](api-reference.md).

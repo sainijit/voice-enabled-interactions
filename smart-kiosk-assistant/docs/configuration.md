@@ -5,8 +5,23 @@
 
 The three model-hosting services (`audio-analyzer`, `text-to-speech`,
 `rag-service`) are configured through YAML files that the kiosk pins
-and mounts into the containers. The field changed most often is the
-inference device — see [Inference Device](#inference-device).
+and mounts into the containers. The most common changes are the
+[model](#model-selection) and the [inference device](#inference-device).
+
+## Model Selection
+
+Each model-hosting service reads the model identifier from the same
+pinned config file used for device selection:
+
+| Service | File | Model fields |
+|---|---|---|
+| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](../configs/audio-analyzer/config.yaml) | `models.asr.name` (e.g. `whisper-tiny`, `whisper-base`); `sentiment.model` (optional) |
+| `text-to-speech` | [`configs/text-to-speech/config.yaml`](../configs/text-to-speech/config.yaml) | `models.tts.name` (e.g. `microsoft/speecht5_tts`, Qwen-TTS variant); `model_variant` |
+| `rag-service` | [`rag-service/config.yaml`](../rag-service/config.yaml) | `models.llm.hf_id`, `models.embedding.hf_id`, `retrieval.reranker.hf_id`; per-model `weight_format` (`int4`, `int8`, `fp16`) |
+
+Use Hugging Face IDs where the field name is `hf_id`. Models are
+downloaded and exported on first start into the per-service `models/`
+directory; subsequent starts reuse the cache.
 
 ## Inference Device
 

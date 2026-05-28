@@ -75,7 +75,7 @@ The compose stack runs most containers as your host user. Exporting `LOCAL_UID` 
 - Container startup and verification: [docs/run-container.md](docs/run-container.md)
 - Host-run kiosk-core and Gradio UI: [docs/run-standalone.md](docs/run-standalone.md)
 - `kiosk-core` API: [docs/api-reference.md](docs/api-reference.md)
-- Environment variables and inference device: [docs/configuration.md](docs/configuration.md)
+- Environment variables, model selection, and inference device: [docs/configuration.md](docs/configuration.md)
 - Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
 - Release notes: [docs/release-notes.md](docs/release-notes.md)
 - RAG service: [rag-service/README.md](rag-service/README.md)

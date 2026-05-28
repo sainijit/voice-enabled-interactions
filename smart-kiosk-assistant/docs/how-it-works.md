@@ -61,5 +61,5 @@ inside the three model-hosting services.
    session snapshot, downloads them from `kiosk-core`, and plays them
    sequentially.
 
-See [configuration.md](configuration.md) for environment variables and
-per-service device fields.
+See [configuration.md](configuration.md) for environment variables,
+model selection, and per-service device fields.
