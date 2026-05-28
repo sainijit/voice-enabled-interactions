@@ -1,0 +1,991 @@
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       300.42 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s  150.21 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402089 be/4 999         0.00 B/s    0.00 B/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+Total DISK READ:         9.87 M/s | Total DISK WRITE:       298.08 K/s
+Current DISK READ:       9.87 M/s | Current DISK WRITE:    1372.74 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+1221873 be/3 root        0.00 B/s  141.20 K/s ?unavailable?  systemd-journald
+2073133 be/4 ubuntu      0.00 B/s   62.75 K/s ?unavailable?  rygel
+    364 be/3 root        0.00 B/s   58.83 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402441 be/4 root        0.00 B/s   11.77 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    7.84 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+   1091 be/4 102         0.00 B/s    3.92 K/s ?unavailable?  rsyslogd -n -iNONE
+ 402043 be/4 ubuntu     23.53 K/s    3.92 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8010
+ 402100 be/4 ubuntu      9.84 M/s    3.92 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8011
+ 402385 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:        86.08 K/s | Total DISK WRITE:        19.56 K/s
+Current DISK READ:      86.08 K/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   15.65 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402089 be/4 999        86.08 K/s    3.91 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+Total DISK READ:        11.74 K/s | Total DISK WRITE:         7.82 K/s
+Current DISK READ:      35.21 K/s | Current DISK WRITE:       7.82 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402089 be/4 999        11.74 K/s    7.82 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+Total DISK READ:       247.01 K/s | Total DISK WRITE:        47.05 K/s
+Current DISK READ:     223.48 K/s | Current DISK WRITE:     870.40 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   19.60 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    7.84 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 374573 ?dif ubuntu      0.00 B/s    3.92 K/s ?unavailable?  firefox
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+ 402056 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id e093978b8f1fe2b273eb441cf54ea3392de4ba022de2fa4a7ba411598f196b4d -address /run/containerd/containerd.sock
+ 402089 be/4 999       164.67 K/s    0.00 B/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+ 402100 be/4 ubuntu     82.34 K/s    0.00 B/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8011
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        42.97 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      70.31 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   27.34 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        62.63 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     168.31 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   58.71 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        31.33 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   31.33 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        39.19 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      90.13 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   31.35 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s    7.84 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         3.91 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       3.91 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       662.06 K/s
+Current DISK READ:       2.24 M/s | Current DISK WRITE:     716.90 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+1221873 be/3 root        0.00 B/s  332.99 K/s ?unavailable?  systemd-journald
+   2351 be/4 root        0.00 B/s  152.78 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+   1256 be/4 root        0.00 B/s   82.27 K/s ?unavailable?  containerd
+    364 be/3 root        0.00 B/s   39.17 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402441 be/4 root        0.00 B/s   39.17 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   1091 be/4 102         0.00 B/s    7.83 K/s ?unavailable?  rsyslogd -n -iNONE
+Total DISK READ:       324.69 K/s | Total DISK WRITE:        66.50 K/s
+Current DISK READ:     109.53 K/s | Current DISK WRITE:      97.80 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   46.94 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 402751 be/4 ubuntu    324.69 K/s    0.00 B/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8012
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       101.67 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     258.08 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+1221873 be/3 root        0.00 B/s   74.30 K/s ?unavailable?  systemd-journald
+2073133 be/4 ubuntu      0.00 B/s   15.64 K/s ?unavailable?  rygel
+    364 be/3 root        0.00 B/s    7.82 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        46.96 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   46.96 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        58.74 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   54.82 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:       152.70 K/s | Total DISK WRITE:       634.29 K/s
+Current DISK READ:     152.70 K/s | Current DISK WRITE:    1017.99 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+1221873 be/3 root        0.00 B/s  328.89 K/s ?unavailable?  systemd-journald
+   2351 be/4 root        0.00 B/s  160.53 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+   1256 be/4 root        0.00 B/s   82.22 K/s ?unavailable?  containerd
+    364 be/3 root        0.00 B/s   31.32 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   1091 be/4 102         0.00 B/s   15.66 K/s ?unavailable?  rsyslogd -n -iNONE
+ 374573 ?dif ubuntu      0.00 B/s    3.92 K/s ?unavailable?  firefox
+ 402728 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 286c810c5c7b1c87112c0ac60a13ddc361dcfbd7b8bdf0a58785cf5a9f20fa9e -address /run/containerd/containerd.sock
+ 402751 be/4 ubuntu    152.70 K/s    0.00 B/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8012
+Total DISK READ:        10.39 M/s | Total DISK WRITE:        74.19 K/s
+Current DISK READ:      10.39 M/s | Current DISK WRITE:     304.55 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   54.66 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s    3.90 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402364 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  free -s 1
+ 402925 be/4 ubuntu     10.39 M/s    0.00 B/s ?unavailable?  python3 gradio_app.py
+Total DISK READ:      1258.22 K/s | Total DISK WRITE:       203.19 K/s
+Current DISK READ:    1262.13 K/s | Current DISK WRITE:     355.58 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+1221873 be/3 root        0.00 B/s   78.15 K/s ?unavailable?  systemd-journald
+ 402441 be/4 root        0.00 B/s   66.43 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402925 be/4 ubuntu   1258.22 K/s   31.26 K/s ?unavailable?  python3 gradio_app.py
+2073133 be/4 ubuntu      0.00 B/s   15.63 K/s ?unavailable?  rygel
+    364 be/3 root        0.00 B/s    3.91 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         3.91 K/s | Total DISK WRITE:         3.91 K/s
+Current DISK READ:       3.91 K/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+2073516 be/4 ubuntu      3.91 K/s    0.00 B/s ?unavailable?  glib-pacrunner
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        70.41 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     664.97 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   62.59 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        74.33 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     422.51 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   70.42 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    0.00 B/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     253.21 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       285.86 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     199.71 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s  191.88 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402441 be/4 root        0.00 B/s   78.32 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.76 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     109.53 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      0.00 B/s  109.53 K/s ?unavailable?  firefox
+ 402441 be/4 root        0.00 B/s   78.23 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        11.74 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        89.99 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       3.91 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   86.08 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        86.02 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   86.02 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        43.10 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     662.19 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   31.35 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402364 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       101.79 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   97.88 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        93.99 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   93.99 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         3.92 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    3.92 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       101.70 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  101.70 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         7.83 K/s | Total DISK WRITE:         3.48 M/s
+Current DISK READ:       2.90 M/s | Current DISK WRITE:    1773.54 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      3.92 K/s    2.69 M/s ?unavailable?  firefox
+ 402089 be/4 999         0.00 B/s  415.00 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+    364 be/3 root        0.00 B/s  270.14 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402441 be/4 root        0.00 B/s  109.62 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s   11.75 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402925 be/4 ubuntu      3.92 K/s    0.00 B/s ?unavailable?  python3 gradio_app.py
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        15.63 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       426.35 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     406.79 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      0.00 B/s  258.16 K/s ?unavailable?  firefox
+ 402441 be/4 root        0.00 B/s  113.43 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   39.11 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402056 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id e093978b8f1fe2b273eb441cf54ea3392de4ba022de2fa4a7ba411598f196b4d -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       112.99 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     241.57 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  112.99 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        11.74 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402392 be/4 root        0.00 B/s   11.74 K/s ?unavailable?  pcm 1 -silent -r -nc -nsys -csv=/tmp/results/pcm.csv
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       132.99 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       2.38 M/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  121.26 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s   11.73 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       140.89 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  125.23 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       160.46 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     172.20 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s  148.72 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       132.80 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  128.90 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       183.90 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      50.87 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  133.03 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s   50.87 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       152.58 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     410.80 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  140.85 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       121.34 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     199.62 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   97.85 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s   11.74 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 402728 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 286c810c5c7b1c87112c0ac60a13ddc361dcfbd7b8bdf0a58785cf5a9f20fa9e -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       598.43 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     594.52 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402089 be/4 999         0.00 B/s  395.04 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+ 402441 be/4 root        0.00 B/s  144.72 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   43.02 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 374573 ?dif ubuntu      0.00 B/s   11.73 K/s ?unavailable?  firefox
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       144.39 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  144.39 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:      1348.11 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:    1344.21 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s 1344.21 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       171.72 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     601.02 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  152.21 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.81 K/s ?unavailable?  firefox
+ 402364 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       171.64 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  156.04 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402375 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  sar 1
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        42.96 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     136.69 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   42.96 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       160.13 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  160.13 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       168.06 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  164.15 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    3.91 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        19.55 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     500.37 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402022 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       179.91 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     118.67 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  172.26 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    7.66 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       163.90 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     109.26 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s  101.46 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402441 be/4 root        0.00 B/s   62.44 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       109.38 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  109.38 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       179.62 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       3.90 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  179.62 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        15.56 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     544.43 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402381 be/4 root        0.00 B/s    7.78 K/s ?unavailable?  free -s 1
+ 402364 be/4 root        0.00 B/s    3.89 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.89 K/s ?unavailable?  sar 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       195.11 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.30 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       191.41 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     152.35 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.50 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s    3.91 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         7.82 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      0.00 B/s    7.82 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       294.81 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     112.49 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  186.19 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s  108.61 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       226.54 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     585.87 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.38 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    7.81 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402056 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id e093978b8f1fe2b273eb441cf54ea3392de4ba022de2fa4a7ba411598f196b4d -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        66.23 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402089 be/4 999         0.00 B/s   35.06 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+   2351 be/4 root        0.00 B/s   27.27 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       315.66 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     142.43 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.78 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s  130.89 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       100.48 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      11.59 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   92.75 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.73 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        92.24 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   92.24 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       185.16 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     891.06 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.16 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        15.47 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      34.81 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402364 be/4 root        0.00 B/s    3.87 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.87 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.87 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.87 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       280.94 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      96.21 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  192.42 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   84.67 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       192.01 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.33 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.68 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       192.68 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.97 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       199.18 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     586.05 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  180.03 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    7.66 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402392 be/4 root        0.00 B/s    7.66 K/s ?unavailable?  pcm 1 -silent -r -nc -nsys -csv=/tmp/results/pcm.csv
+ 402728 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 286c810c5c7b1c87112c0ac60a13ddc361dcfbd7b8bdf0a58785cf5a9f20fa9e -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        84.64 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     246.23 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   57.71 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402441 be/4 root        0.00 B/s   11.54 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       192.67 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       3.85 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.96 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402381 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       192.30 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.61 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       184.30 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.30 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        84.93 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     857.00 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   73.35 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402364 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  free -s 1
+Total DISK READ:       475.30 K/s | Total DISK WRITE:       204.80 K/s
+Current DISK READ:     475.30 K/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  193.21 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.73 K/s ?unavailable?  firefox
+ 402385 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 402028 be/4 root      475.30 K/s    0.00 B/s ?unavailable?  python3 /app/app.py
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       184.96 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.96 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       169.35 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      53.88 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+1221873 be/3 root        0.00 B/s  161.65 K/s ?unavailable?  systemd-journald
+   1091 be/4 102         0.00 B/s    3.85 K/s ?unavailable?  rsyslogd -n -iNONE
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       188.59 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.74 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        73.27 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     667.14 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   65.56 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 374573 ?dif ubuntu      0.00 B/s    7.71 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       208.09 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  192.68 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       184.62 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  184.62 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:        15.46 K/s | Total DISK WRITE:      1514.99 K/s
+Current DISK READ:      15.46 K/s | Current DISK WRITE:    1696.64 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402089 be/4 999        15.46 K/s 1213.54 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+ 374573 ?dif ubuntu      0.00 B/s  166.19 K/s ?unavailable?  firefox
+    364 be/3 root        0.00 B/s  123.67 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s    7.73 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402364 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /scripts/collect_npu.py
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       312.76 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     109.47 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.57 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s  109.47 K/s ?unavailable?  firefox
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:       633.48 K/s | Total DISK WRITE:       242.44 K/s
+Current DISK READ:     633.48 K/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.61 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      3.91 K/s   50.83 K/s ?unavailable?  firefox
+ 402028 be/4 root      477.07 K/s    0.00 B/s ?unavailable?  python3 /app/app.py
+ 402925 be/4 ubuntu    152.50 K/s    0.00 B/s ?unavailable?  python3 gradio_app.py
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         3.88 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402385 be/4 root        0.00 B/s    3.88 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       207.42 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.85 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    7.83 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+ 402056 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id e093978b8f1fe2b273eb441cf54ea3392de4ba022de2fa4a7ba411598f196b4d -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       355.50 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:    1058.69 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  195.33 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s  156.26 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       125.24 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     109.59 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      0.00 B/s  109.59 K/s ?unavailable?  firefox
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.79 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.79 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         3.91 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.93 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.93 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       191.97 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     983.35 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.97 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        23.47 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402375 be/4 root        0.00 B/s    7.82 K/s ?unavailable?  sar 1
+ 402385 be/4 root        0.00 B/s    7.82 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       246.27 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.54 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s   54.73 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.71 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.71 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         3.91 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       324.54 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     723.37 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.60 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s  117.30 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s   11.73 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402728 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 286c810c5c7b1c87112c0ac60a13ddc361dcfbd7b8bdf0a58785cf5a9f20fa9e -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       207.28 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      46.93 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.64 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       195.36 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.54 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.81 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        19.56 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    7.82 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       661.40 K/s
+Current DISK READ:      27.40 K/s | Current DISK WRITE:    1377.60 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402089 be/4 999         0.00 B/s  387.45 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+ 402441 be/4 root        0.00 B/s  191.77 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   66.53 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 374573 ?dif ubuntu      0.00 B/s   11.74 K/s ?unavailable?  firefox
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       206.96 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.34 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         3.89 K/s | Total DISK WRITE:         7.78 K/s
+Current DISK READ:       3.89 K/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      3.89 K/s    7.78 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.54 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      19.54 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.54 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       203.52 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.78 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402392 be/4 root        0.00 B/s    7.83 K/s ?unavailable?  pcm 1 -silent -r -nc -nsys -csv=/tmp/results/pcm.csv
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       125.14 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     735.19 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s  125.14 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       211.25 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.69 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    7.82 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       191.37 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.47 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       195.13 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.23 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         7.80 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:    1170.72 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s    7.80 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       207.04 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.42 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:      1509.30 K/s | Total DISK WRITE:       190.61 K/s
+Current DISK READ:    1509.30 K/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  186.72 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    3.89 K/s ?unavailable?  firefox
+ 402028 be/4 root     1509.30 K/s    0.00 B/s ?unavailable?  python3 /app/app.py
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       109.29 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     109.29 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      0.00 B/s  109.29 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       214.66 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.24 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    7.81 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+ 402056 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id e093978b8f1fe2b273eb441cf54ea3392de4ba022de2fa4a7ba411598f196b4d -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       303.72 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     891.70 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  186.91 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s  112.92 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402385 be/4 root        0.00 B/s    3.89 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        15.59 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402364 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       195.01 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       3.90 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.11 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /scripts/collect_npu.py
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.40 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       7.81 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.40 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         7.82 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 374573 ?dif ubuntu      0.00 B/s    7.82 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       253.88 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     738.21 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.39 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   62.49 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        15.63 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       265.56 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.36 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402089 be/4 999         0.00 B/s   35.15 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+   2351 be/4 root        0.00 B/s   27.34 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 374573 ?dif ubuntu      0.00 B/s    7.81 K/s ?unavailable?  firefox
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       185.08 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.08 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        11.60 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      15.47 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    3.87 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 402728 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 286c810c5c7b1c87112c0ac60a13ddc361dcfbd7b8bdf0a58785cf5a9f20fa9e -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       272.26 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     843.61 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.90 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   80.53 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s    3.83 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       208.42 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  189.13 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402381 be/4 root        0.00 B/s    7.72 K/s ?unavailable?  free -s 1
+ 402364 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  sar 1
+ 402385 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      69.47 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       189.17 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  189.17 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       107.57 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   96.05 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s    3.84 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.84 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       153.70 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     660.93 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   88.38 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   65.32 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       211.99 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  188.87 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.71 K/s ?unavailable?  firefox
+ 402364 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         0.00 B/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       200.73 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  189.15 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.72 K/s ?unavailable?  firefox
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       189.13 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       3.86 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.27 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        54.07 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     224.01 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s   54.07 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       204.59 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     594.46 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  189.15 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       192.68 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  188.82 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         3.85 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    3.85 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       220.09 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      46.33 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.34 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   34.75 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        15.43 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402392 be/4 root        0.00 B/s   11.58 K/s ?unavailable?  pcm 1 -silent -r -nc -nsys -csv=/tmp/results/pcm.csv
+ 402375 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  sar 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       270.38 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     780.25 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.41 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s   73.39 K/s ?unavailable?  firefox
+ 402364 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       195.25 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.42 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    3.83 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        19.23 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    7.69 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+ 402056 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id e093978b8f1fe2b273eb441cf54ea3392de4ba022de2fa4a7ba411598f196b4d -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       254.88 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     200.81 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.37 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   65.65 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 402385 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       189.28 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  185.41 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402381 be/4 root        0.00 B/s    3.86 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:      1500.39 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:    1674.40 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402089 be/4 999         0.00 B/s 1171.70 K/s ?unavailable?  python3 -m uvicorn main:app --host 0.0.0.0 --port 8020
+ 374573 ?dif ubuntu      0.00 B/s  235.89 K/s ?unavailable?  firefox
+    364 be/3 root        0.00 B/s   85.07 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+   2351 be/4 root        0.00 B/s    7.73 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       211.29 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  195.64 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        62.61 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   54.79 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 374573 ?dif ubuntu      0.00 B/s    7.83 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       133.09 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  133.09 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.73 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.73 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       175.99 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     172.08 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+    364 be/3 root        0.00 B/s  113.41 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 374573 ?dif ubuntu      0.00 B/s   58.66 K/s ?unavailable?  firefox
+ 402385 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       207.35 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:    1028.92 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  195.61 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       210.73 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.31 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+   2351 be/4 root        0.00 B/s   11.71 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402385 be/4 root        0.00 B/s    3.90 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+ 401961 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id d02e8e57d31e4d976ad6d2e3a24888b85dd6906cc418c6101ca0b5ed44ef07da -address /run/containerd/containerd.sock
+ 402022 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 08c96f315e383e9da1c8f4c3aa479dbaeeb051cc044afd63ca51217385dcce63 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:         7.82 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 402728 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 286c810c5c7b1c87112c0ac60a13ddc361dcfbd7b8bdf0a58785cf5a9f20fa9e -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       187.50 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  187.50 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       277.89 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     598.83 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.78 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   82.19 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
+ 374573 ?dif ubuntu      0.00 B/s    3.91 K/s ?unavailable?  firefox
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        11.73 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     641.48 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402364 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  python3 /scripts/collect_npu.py
+ 402375 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  sar 1
+ 402381 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  free -s 1
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       207.31 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:      19.56 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.66 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+ 402385 be/4 root        0.00 B/s    7.82 K/s ?unavailable?  python3 /usr/sbin/iotop -o -P -b
+   2351 be/4 root        0.00 B/s    3.91 K/s ?unavailable?  dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ 401992 be/4 root        0.00 B/s    0.00 B/s ?unavailable?  containerd-shim-runc-v2 -namespace moby -id 835db627f8d42df6cc08781f3a2412a2f4e3c9604160b512da115baae7bef586 -address /run/containerd/containerd.sock
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       125.28 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  125.28 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:        62.26 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:       0.00 B/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s   62.26 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+Total DISK READ:         0.00 B/s | Total DISK WRITE:       234.79 K/s
+Current DISK READ:       0.00 B/s | Current DISK WRITE:     211.31 K/s
+    PID  PRIO  USER     DISK READ  DISK WRITE  SWAPIN      IO    COMMAND
+ 402441 be/4 root        0.00 B/s  191.75 K/s ?unavailable?  qmassa -d 0000:00:02.0,vendor=8086,device=7d55,card=1,driver=i915 -g -x -t /tmp/results/qmassa1-7d55-i915-tool-generated.json
+    364 be/3 root        0.00 B/s   43.05 K/s ?unavailable?  [jbd2/nvme0n1p2-8]
