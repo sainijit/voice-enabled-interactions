@@ -10,12 +10,21 @@ as a WAV file. No host audio device is passed into the containers.
 To run `kiosk-core` and the UI directly on the host, see
 [run-standalone.md](run-standalone.md).
 
-## Prerequisites
+## Clone and Prepare
 
-Clone the repository and initialize the submodule as described in
-[get-started.md](get-started.md#step-1-clone-and-prepare-sources).
+```bash
+git clone https://github.com/intel-retail/voice-enabled-interactions.git
+cd voice-enabled-interactions
+git submodule update --init --depth 1 edge-ai-libraries
+git -C edge-ai-libraries sparse-checkout set --cone \
+  microservices/audio-analyzer microservices/text-to-speech
+cd smart-kiosk-assistant
+```
 
-## Start
+If the repository is already cloned, run the two `git` commands above
+from the repository root.
+
+## Build and Start
 
 From `smart-kiosk-assistant/`:
 

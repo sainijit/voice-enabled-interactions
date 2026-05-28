@@ -5,9 +5,18 @@ execution.
 
 ## Prerequisites
 
-- Verify the [system requirements](system-requirements.md).
-- Clone the repository and initialize the submodule as described in
-  [get-started.md](get-started.md#step-1-clone-and-prepare-sources).
+Verify the [system requirements](system-requirements.md).
+
+## Clone and Prepare
+
+```bash
+git clone https://github.com/intel-retail/voice-enabled-interactions.git
+cd voice-enabled-interactions
+git submodule update --init --depth 1 edge-ai-libraries
+git -C edge-ai-libraries sparse-checkout set --cone \
+  microservices/audio-analyzer microservices/text-to-speech
+cd smart-kiosk-assistant
+```
 
 ## Build All Images With Compose
 
