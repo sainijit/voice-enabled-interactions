@@ -49,9 +49,10 @@ docker compose build
 docker compose up -d
 ```
 
-Exporting `LOCAL_UID` and `LOCAL_GID` keeps bind-mounted files writable
-from the host user that launched the stack. These vars are only
-consumed during `build`; the pull flow uses the image defaults.
+`LOCAL_UID` and `LOCAL_GID` are only consumed during `docker compose
+build`; they bake the container's runtime UID/GID into the rebuilt
+image. Runtime data lives in named Docker volumes, so the pull flow
+does not need them and uses the image defaults (`1000:1000`).
 
 ## Rebuild A Single Service
 
