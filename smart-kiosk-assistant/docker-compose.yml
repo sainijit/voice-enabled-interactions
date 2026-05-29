@@ -16,7 +16,7 @@ services:
       args:
         APP_UID: ${LOCAL_UID:-1000}
         APP_GID: ${LOCAL_GID:-1000}
-    image: audio-analyzer:${RELEASE_TAG:-latest}
+    image: ${REGISTRY:-intel}/audio-analyzer:${RELEASE_TAG:-latest}
     container_name: audio-analyzer
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
@@ -29,7 +29,7 @@ services:
       # Point HF cache under the same parent as ~/.cache/whisper so a single
       # ./.cache mount persists every model cache the service uses
       # (huggingface, openai-whisper, torch hub, etc.).
-      HF_HOME: /home/openvino/.cache/huggingface
+      HF_HOME: /app/audio_analyzer/.cache/huggingface
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
       # service config without modifying edge-ai-libraries.
@@ -39,7 +39,7 @@ services:
       - ../edge-ai-libraries/microservices/audio-analyzer/storage:/app/audio_analyzer/storage
       # Single cache mount — covers HF (HF_HOME above) AND openai-whisper's
       # ~/.cache/whisper, so no model is re-downloaded across restarts.
-      - ../edge-ai-libraries/microservices/audio-analyzer/.cache:/home/openvino/.cache
+      - ../edge-ai-libraries/microservices/audio-analyzer/.cache:/app/audio_analyzer/.cache
     # Whisper warmup on GPU can take ~120s; override the image healthcheck
     # so connection-refused during boot doesn't trip `unhealthy` and abort
     # dependent services (kiosk-core / kiosk-ui).
@@ -59,7 +59,7 @@ services:
       args:
         APP_UID: ${LOCAL_UID:-1000}
         APP_GID: ${LOCAL_GID:-1000}
-    image: text-to-speech:${RELEASE_TAG:-latest}
+    image: ${REGISTRY:-intel}/text-to-speech:${RELEASE_TAG:-latest}
     container_name: text-to-speech
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
@@ -68,10 +68,11 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       - video
+      - "${RENDER_GID:-992}"
     environment:
       # Point HF cache under ~/.cache so a single ./.cache mount persists
       # every model cache the service uses (HF, torch hub, etc.).
-      HF_HOME: /home/openvino/.cache/huggingface
+      HF_HOME: /app/text-to-speech/.cache/huggingface
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
       # service config without modifying edge-ai-libraries.
@@ -79,14 +80,14 @@ services:
       - ../edge-ai-libraries/microservices/text-to-speech/models:/app/text-to-speech/models
       - ../edge-ai-libraries/microservices/text-to-speech/storage:/app/text-to-speech/storage
       # Single cache mount — see audio-analyzer block for rationale.
-      - ../edge-ai-libraries/microservices/text-to-speech/.cache:/home/openvino/.cache
+      - ../edge-ai-libraries/microservices/text-to-speech/.cache:/app/text-to-speech/.cache
     restart: unless-stopped
 
   rag-service:
     build:
       context: ./rag-service
       dockerfile: Dockerfile
-    image: rag-service:${RELEASE_TAG:-latest}
+    image: ${REGISTRY:-intel}/rag-service:${RELEASE_TAG:-latest}
     container_name: rag-service
     ports:
       - "8020:8020"
@@ -94,7 +95,7 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       - video
-      - "992"
+      - "${RENDER_GID:-992}"
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
     volumes:
@@ -110,7 +111,7 @@ services:
       args:
         APP_UID: ${LOCAL_UID:-1000}
         APP_GID: ${LOCAL_GID:-1000}
-    image: kiosk-core:${RELEASE_TAG:-latest}
+    image: ${REGISTRY:-intel}/kiosk-core:${RELEASE_TAG:-latest}
     container_name: kiosk-core
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:
@@ -144,7 +145,7 @@ services:
       args:
         APP_UID: ${LOCAL_UID:-1000}
         APP_GID: ${LOCAL_GID:-1000}
-    image: kiosk-ui:${RELEASE_TAG:-latest}
+    image: ${REGISTRY:-intel}/kiosk-ui:${RELEASE_TAG:-latest}
     container_name: kiosk-ui
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     ports:

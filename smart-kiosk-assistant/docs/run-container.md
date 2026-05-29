@@ -2,13 +2,14 @@
 
 `docker compose up` starts `audio-analyzer`, `text-to-speech`,
 `rag-service`, `kiosk-core` (REST API), and `kiosk-ui` (Gradio interface)
-as containers.
+as containers, using the prebuilt images published on Docker Hub.
 
 Microphone audio is captured by the browser and uploaded to `kiosk-core`
 as a WAV file. No host audio device is passed into the containers.
 
-To run `kiosk-core` and the UI directly on the host, see
-[run-standalone.md](run-standalone.md).
+To rebuild the images from source instead of pulling, see
+[build-from-source.md](build-from-source.md). To run `kiosk-core` and
+the UI directly on the host, see [run-standalone.md](run-standalone.md).
 
 ## Clone and Prepare
 
@@ -24,19 +25,25 @@ cd smart-kiosk-assistant
 If the repository is already cloned, run the two `git` commands above
 from the repository root.
 
-## Build and Start
+## Pull And Start
 
 From `smart-kiosk-assistant/`:
 
 ```bash
-export LOCAL_UID=$(id -u)
-export LOCAL_GID=$(id -g)
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
-Images are tagged with `RELEASE_TAG` from `.env` (defaults to `latest`).
-Override by exporting `RELEASE_TAG` or editing `.env`.
+`docker compose pull` fetches all five images from Docker Hub:
+
+- `intel/audio-analyzer:${RELEASE_TAG}`
+- `intel/text-to-speech:${RELEASE_TAG}`
+- `intel/rag-service:${RELEASE_TAG}`
+- `intel/kiosk-core:${RELEASE_TAG}`
+- `intel/kiosk-ui:${RELEASE_TAG}`
+
+`REGISTRY` and `RELEASE_TAG` are read from [.env](../.env) (defaults
+`REGISTRY=intel`, committed `RELEASE_TAG` pins the current release).
 
 This starts five containers:
 
@@ -48,8 +55,10 @@ This starts five containers:
 | `kiosk-core` | 8012 | FastAPI session API |
 | `kiosk-ui` | 7860 | Gradio voice UI |
 
-Containers run as non-root; `LOCAL_UID` / `LOCAL_GID` keep bind-mounted
-files writable from the host account.
+Containers run as non-root; the published images default to UID/GID
+`1000:1000`. To match a different host user, export `LOCAL_UID` /
+`LOCAL_GID` (those vars are only consumed during a local build, so the
+pull flow uses the image defaults).
 
 ## Verify
 
@@ -72,7 +81,7 @@ docker compose logs -f kiosk-ui
 
 ```bash
 docker compose restart            # after env var change
-docker compose build && docker compose up -d   # after code change
+docker compose pull && docker compose up -d   # after a new release tag
 docker compose down               # teardown
 ```
 

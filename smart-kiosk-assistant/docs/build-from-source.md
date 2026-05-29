@@ -1,7 +1,9 @@
 # Build From Source
 
-Build Smart Kiosk Assistant from source for either Docker or host
-execution.
+Build Smart Kiosk Assistant from source. Use this path when you need a
+code change in any of the kiosk services. To run the prebuilt images
+from Docker Hub without rebuilding, see
+[run-container.md](run-container.md).
 
 ## Prerequisites
 
@@ -20,10 +22,16 @@ cd smart-kiosk-assistant
 
 ## Build All Images With Compose
 
-The top-level [docker-compose.yml](../docker-compose.yml) builds five
-images: `audio-analyzer`, `text-to-speech`, `rag-service`, `kiosk-core`,
-and `kiosk-ui`. The image tag is read from the `RELEASE_TAG` variable in
-[.env](../.env) and defaults to `latest` if unset.
+The top-level [docker-compose.yml](../docker-compose.yml) declares both
+`image:` and `build:` for each of the five services: `audio-analyzer`,
+`text-to-speech`, `rag-service`, `kiosk-core`, and `kiosk-ui`. Both
+`REGISTRY` and `RELEASE_TAG` are read from [.env](../.env) (defaults
+`REGISTRY=intel`, committed `RELEASE_TAG` pins the current release).
+
+`docker compose build` rebuilds each service from source and tags the
+result as the same `${REGISTRY}/<svc>:${RELEASE_TAG}` reference used by
+the pull flow, so subsequent `docker compose up` calls reuse the local
+build until you `docker compose pull` again.
 
 ```bash
 export LOCAL_UID=$(id -u)
@@ -33,28 +41,38 @@ docker compose up -d
 ```
 
 Exporting `LOCAL_UID` and `LOCAL_GID` keeps bind-mounted files writable
-from the host user that launched the stack.
+from the host user that launched the stack. These vars are only
+consumed during `build`; the pull flow uses the image defaults.
 
-## Build a Single Service Image
+## Rebuild A Single Service
+
+Rebuild only the service whose source you changed:
+
+```bash
+docker compose build audio-analyzer
+docker compose up -d audio-analyzer
+```
+
+## Build A Single Service Image Directly
 
 Each service can be built directly with `docker build`. From the
 repository root:
 
 ```bash
 # audio-analyzer
-docker build -t audio-analyzer:local \
+docker build -t intel/audio-analyzer:local \
   ../edge-ai-libraries/microservices/audio-analyzer
 
 # text-to-speech
-docker build -t text-to-speech:local \
+docker build -t intel/text-to-speech:local \
   ../edge-ai-libraries/microservices/text-to-speech
 
 # rag-service
-docker build -t rag-service:local ./rag-service
+docker build -t intel/rag-service:local ./rag-service
 
 # kiosk-core / kiosk-ui (same Dockerfile, different entrypoints)
-docker build -t kiosk-core:local .
-docker build -t kiosk-ui:local   .
+docker build -t intel/kiosk-core:local .
+docker build -t intel/kiosk-ui:local   .
 ```
 
 The `kiosk-ui` container reuses the `kiosk-core` image and runs

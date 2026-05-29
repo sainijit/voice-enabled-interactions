@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: rag-service:${RELEASE_TAG:-latest}
+    image: ${REGISTRY:-intel}/rag-service:${RELEASE_TAG:-latest}
     container_name: rag-service
     ports:
       - "8020:8020"
@@ -11,7 +11,7 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       - video
-      - "992"
+      - "${RENDER_GID:-992}"
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
     volumes:
