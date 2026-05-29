@@ -13,21 +13,37 @@ Verify the [system requirements](system-requirements.md).
 
 The kiosk compose builds `audio-analyzer` and `text-to-speech` from the
 upstream [edge-ai-libraries](https://github.com/open-edge-platform/edge-ai-libraries)
-repository. Clone both repositories as siblings so the kiosk compose
-can reach the upstream sources at `../edge-ai-libraries/microservices/`:
+monorepo. The compose file references those sources at
+`../edge-ai-libraries/microservices/{audio-analyzer,text-to-speech}`,
+so the two repositories must sit side by side:
+
+```text
+<parent>/
+├── voice-enabled-interactions/
+│   └── smart-kiosk-assistant/   # run docker compose from here
+└── edge-ai-libraries/
+    └── microservices/
+        ├── audio-analyzer/
+        └── text-to-speech/
+```
+
+From whatever parent directory you keep source in:
 
 ```bash
-# pick a parent directory
-mkdir -p ~/src && cd ~/src
-
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-git clone --depth 1 https://github.com/open-edge-platform/edge-ai-libraries.git
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/open-edge-platform/edge-ai-libraries.git
+git -C edge-ai-libraries sparse-checkout set \
+  microservices/audio-analyzer microservices/text-to-speech
 
 cd voice-enabled-interactions/smart-kiosk-assistant
 ```
 
-Only the build flow needs `edge-ai-libraries` on disk. The pull flow
-(see [run-container.md](run-container.md)) does not require it.
+The sparse checkout pulls only the two microservices the kiosk build
+needs; everything else in `edge-ai-libraries` stays unchecked out. A
+plain `git clone` of `edge-ai-libraries` also works if you do not mind
+the extra files. Only the build flow needs `edge-ai-libraries` on disk
+— the pull flow (see [run-container.md](run-container.md)) does not.
 
 ## Build All Images With Compose
 
