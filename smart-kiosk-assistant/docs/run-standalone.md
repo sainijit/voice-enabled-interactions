@@ -1,22 +1,15 @@
-# Run On The Host (Gradio UI Mode)
+# Run On The Host
 
-Use this path when you want to run `kiosk-core` and the Gradio UI directly on the host instead of inside the top-level Compose stack.
+Use this path to run `kiosk-core` and the Gradio UI directly on the host
+instead of inside the top-level Compose stack. The microphone is still
+captured by the browser and uploaded to `kiosk-core`.
 
-The user experience stays browser-based: the microphone is still captured by the browser and uploaded to `kiosk-core` as audio. This guide covers the host-run Gradio flow only.
-
-## Clone And Prepare
-
-Clone the repository and populate only the two upstream microservices this setup uses:
+## Clone
 
 ```bash
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
-cd smart-kiosk-assistant
+cd voice-enabled-interactions/smart-kiosk-assistant
 ```
-
-If the repository is already present, apply the same sparse-checkout commands from the repo root before starting.
 
 ## Start Downstream Services
 
@@ -26,15 +19,20 @@ Before starting `kiosk-core` and the UI on the host, make sure these downstream 
 - `text-to-speech` at `http://127.0.0.1:8011/v1/audio/speech`
 - `rag-service` at `http://127.0.0.1:8020/api/v1/query`
 
-One practical setup is to run the two upstream microservices in their own Compose projects and run `rag-service` on the host:
+The simplest way is to pull the prebuilt images for `audio-analyzer`
+and `text-to-speech` from Docker Hub, build `rag-service` locally, and
+run `kiosk-core` plus the UI on the host. The kiosk compose file in
+`smart-kiosk-assistant/` already wires these three services together;
+start only those three:
 
 ```bash
-cd ../edge-ai-libraries/microservices/audio-analyzer && docker compose up -d && cd -
-cd ../edge-ai-libraries/microservices/text-to-speech && docker compose up -d && cd -
-cd rag-service && python main.py && cd -
+docker compose pull audio-analyzer text-to-speech
+docker compose up -d audio-analyzer text-to-speech rag-service
 ```
 
-If you prefer the full all-in-one container deployment, use [run-container.md](run-container.md) instead.
+`rag-service` builds locally because it ships in this repository under
+[../rag-service/](../rag-service). The other two are pulled from
+`intel/audio-analyzer` and `intel/text-to-speech` on Docker Hub.
 
 ## Python Setup
 
@@ -81,26 +79,11 @@ Open that address in a browser, allow microphone access, and use the same browse
 
 ## Verify
 
-Check the API and UI separately:
-
 ```bash
-curl --noproxy '*' http://127.0.0.1:8012/health
+curl --noproxy '*' http://127.0.0.1:8012/health   # {"status":"ok"}
 ```
-
-Then open:
-
-```text
-http://127.0.0.1:7860
-```
-
-## Advanced Routing
-
-Most host-run setups should keep the default localhost URLs. Override them only if `kiosk-core` or the Gradio UI needs to call services on another host or in another deployment.
-
-See [configuration.md](configuration.md) for the environment variables.
 
 ## Notes
 
 - TTS audio clips are written under `generated_audio/` in the project directory.
-- Browser capture means no host microphone device needs to be managed by Python directly.
-- For endpoint details, see [api.md](api.md).
+- For endpoint details, see [api-reference.md](api-reference.md).

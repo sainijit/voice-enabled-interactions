@@ -1,5 +1,68 @@
 # Configuration
 
+`kiosk-core` and `kiosk-ui` are configured through environment variables
+(see [Environment Variables](#environment-variables)).
+
+The three model-hosting services (`audio-analyzer`, `text-to-speech`,
+`rag-service`) are configured through YAML files that the kiosk pins
+and mounts into the containers. The most common changes are the
+[model](#model-selection) and the [inference device](#inference-device).
+
+## Model Selection
+
+Each model-hosting service reads the model identifier from the same
+pinned config file used for device selection:
+
+| Service | File | Model fields |
+|---|---|---|
+| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](../configs/audio-analyzer/config.yaml) | `models.asr.name` (e.g. `whisper-tiny`, `whisper-base`); `sentiment.model` (optional) |
+| `text-to-speech` | [`configs/text-to-speech/config.yaml`](../configs/text-to-speech/config.yaml) | `models.tts.name` (e.g. `microsoft/speecht5_tts`, Qwen-TTS variant); `model_variant` |
+| `rag-service` | [`rag-service/config.yaml`](../rag-service/config.yaml) | `models.llm.hf_id`, `models.embedding.hf_id`, `retrieval.reranker.hf_id`; per-model `weight_format` (`int4`, `int8`, `fp16`) |
+
+Use Hugging Face IDs where the field name is `hf_id`. Models are
+downloaded and exported on first start into the per-service `models/`
+directory; subsequent starts reuse the cache.
+
+## Inference Device
+
+Each model-hosting service reads its device from a pinned config file:
+
+| Service | File | Fields |
+|---|---|---|
+| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](../configs/audio-analyzer/config.yaml) | `models.asr.device`, `sentiment.device` |
+| `text-to-speech` | [`configs/text-to-speech/config.yaml`](../configs/text-to-speech/config.yaml) | `models.tts.device` |
+| `rag-service` | [`rag-service/config.yaml`](../rag-service/config.yaml) | `models.llm.device`, `models.embedding.device`, `retrieval.reranker.device` |
+
+Supported devices:
+
+| Model | Devices | Notes |
+|---|---|---|
+| `audio-analyzer` ASR (Whisper) | `CPU`, `GPU` | `GPU` requires `provider: openvino`. |
+| `audio-analyzer` sentiment (optional) | `CPU`, `GPU` | Disabled by default. |
+| `text-to-speech` SpeechT5 (default) | `CPU`, `GPU` | `int4` on iGPU produces noise; use `fp16` or `int8` on GPU. |
+| `text-to-speech` Qwen-TTS variant | `CPU`, `GPU`, `NPU` | Only this variant supports `NPU`. |
+| `rag-service` LLM | `CPU`, `GPU` | `GPU` recommended for acceptable latency. |
+| `rag-service` embedding | `CPU`, `GPU` | `CPU` is usually fast enough. |
+| `rag-service` reranker | `CPU`, `GPU` | Optional. |
+
+Use uppercase device names (`CPU`, `GPU`, `NPU`). `rag-service` expects
+them as quoted strings; `audio-analyzer` and `text-to-speech` unquoted.
+
+After editing, restart the affected service and confirm OpenVINO picked
+the device:
+
+```bash
+docker compose up -d --build --force-recreate <service-name>
+docker compose logs <service-name> | grep -i -E "device|compiling|GPU|NPU|CPU"
+```
+
+OpenVINO prints a `Compiling model on <DEVICE>` line on first load.
+
+> NPU/GPU execution is delegated to the OpenVINO backend used by each
+> service. Whether a given model actually runs on NPU/GPU and how it
+> performs depends on the OpenVINO version and operator coverage for
+> that model.
+
 ## Environment Variables
 
 kiosk-core has no config file. All settings are controlled through environment variables.
