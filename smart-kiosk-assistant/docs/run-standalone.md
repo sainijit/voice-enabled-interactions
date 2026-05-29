@@ -4,19 +4,12 @@ Use this path to run `kiosk-core` and the Gradio UI directly on the host
 instead of inside the top-level Compose stack. The microphone is still
 captured by the browser and uploaded to `kiosk-core`.
 
-## Clone and Prepare
+## Clone
 
 ```bash
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone \
-  microservices/audio-analyzer microservices/text-to-speech
-cd smart-kiosk-assistant
+cd voice-enabled-interactions/smart-kiosk-assistant
 ```
-
-If the repository is already cloned, run the two `git` commands above
-from the repository root.
 
 ## Start Downstream Services
 
@@ -26,15 +19,20 @@ Before starting `kiosk-core` and the UI on the host, make sure these downstream 
 - `text-to-speech` at `http://127.0.0.1:8011/v1/audio/speech`
 - `rag-service` at `http://127.0.0.1:8020/api/v1/query`
 
-One practical setup is to run the two upstream microservices in their own Compose projects and run `rag-service` on the host:
+The simplest way is to pull the prebuilt images for `audio-analyzer`
+and `text-to-speech` from Docker Hub, build `rag-service` locally, and
+run `kiosk-core` plus the UI on the host. The kiosk compose file in
+`smart-kiosk-assistant/` already wires these three services together;
+start only those three:
 
 ```bash
-cd ../edge-ai-libraries/microservices/audio-analyzer && docker compose up -d && cd -
-cd ../edge-ai-libraries/microservices/text-to-speech && docker compose up -d && cd -
-cd rag-service && python main.py && cd -
+docker compose pull audio-analyzer text-to-speech
+docker compose up -d audio-analyzer text-to-speech rag-service
 ```
 
-If you prefer the full all-in-one container deployment, use [run-container.md](run-container.md) instead.
+`rag-service` builds locally because it ships in this repository under
+[../rag-service/](../rag-service). The other two are pulled from
+`intel/audio-analyzer` and `intel/text-to-speech` on Docker Hub.
 
 ## Python Setup
 

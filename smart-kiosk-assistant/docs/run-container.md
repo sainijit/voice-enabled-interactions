@@ -11,19 +11,12 @@ To rebuild the images from source instead of pulling, see
 [build-from-source.md](build-from-source.md). To run `kiosk-core` and
 the UI directly on the host, see [run-standalone.md](run-standalone.md).
 
-## Clone and Prepare
+## Clone
 
 ```bash
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone \
-  microservices/audio-analyzer microservices/text-to-speech
-cd smart-kiosk-assistant
+cd voice-enabled-interactions/smart-kiosk-assistant
 ```
-
-If the repository is already cloned, run the two `git` commands above
-from the repository root.
 
 ## Pull And Start
 

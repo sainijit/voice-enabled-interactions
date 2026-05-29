@@ -73,29 +73,39 @@ does not appear in the logs:
 ## Permission Errors on Mounted Folders
 
 The compose file runs most containers as
-`user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"`. If your host user has a
-different UID/GID, bind-mounted folders such as
-`../edge-ai-libraries/microservices/audio-analyzer/models/`,
-`../edge-ai-libraries/microservices/text-to-speech/models/`, or the
-service `.cache/` directories may show errors like:
+`user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"`. Model files and caches
+for `audio-analyzer` and `text-to-speech` live in Docker named volumes
+(`audio_analyzer_models`, `audio_analyzer_cache`, `text_to_speech_models`,
+etc.), so the usual host-side ownership errors do not apply. If you
+still see:
 
 ```
 PermissionError: [Errno 13] Permission denied: '...'
 ```
 
-Start the stack with your host user's IDs:
+on a path inside the container, start the stack with your host user's
+IDs so any build-time files match:
 
 ```bash
-LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose up -d --build
+LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose up -d
 ```
 
-If the directories already exist as `root`, repair them once:
+If a named volume was created earlier with the wrong ownership (for
+example by an older root-only run), reset it:
 
 ```bash
-sudo chown -R "$(id -u):$(id -g)" \
-  ../edge-ai-libraries/microservices/audio-analyzer/{models,chunks,storage,.cache} \
-  ../edge-ai-libraries/microservices/text-to-speech/{models,storage,.cache}
+docker compose down
+docker volume rm \
+  smart-kiosk-assistant_audio_analyzer_models \
+  smart-kiosk-assistant_audio_analyzer_cache \
+  smart-kiosk-assistant_text_to_speech_models \
+  smart-kiosk-assistant_text_to_speech_cache
+docker compose up -d
 ```
+
+Replace `smart-kiosk-assistant_` with whatever Compose project prefix
+`docker volume ls` shows on your host. Resetting a volume forces the
+services to re-download model assets on next startup.
 
 ## Browser UI Does Not Capture Audio
 

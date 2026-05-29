@@ -6,32 +6,28 @@ request end to end.
 Confirm your machine meets the
 [system requirements](system-requirements.md) before starting.
 
-## Step 1: Clone and Prepare Sources
+## Step 1: Clone The Repository
 
 ```bash
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone \
-  microservices/audio-analyzer microservices/text-to-speech
-cd smart-kiosk-assistant
+cd voice-enabled-interactions/smart-kiosk-assistant
 ```
 
-If already cloned, run the two `git` commands above from the repository
-root.
-
-## Step 2: Start the Stack
+## Step 2: Pull Images And Start The Stack
 
 ```bash
-export LOCAL_UID=$(id -u)
-export LOCAL_GID=$(id -g)
-docker compose build
+docker compose pull
 docker compose up -d
 ```
 
-`LOCAL_UID` / `LOCAL_GID` keep bind-mounted files writable from the host
-user. First startup downloads and exports model assets and can take a
+All five images are pulled from Docker Hub under the `intel/` namespace
+at the tag pinned in [.env](../.env). Model files and caches live in
+Docker named volumes, so no extra host directories need to be created.
+First startup downloads model assets into those volumes and can take a
 few minutes.
+
+To rebuild from source instead of pulling, see
+[build-from-source.md](build-from-source.md).
 
 ## Step 3: Verify the Stack Is Healthy
 

@@ -11,14 +11,23 @@ Verify the [system requirements](system-requirements.md).
 
 ## Clone and Prepare
 
+The kiosk compose builds `audio-analyzer` and `text-to-speech` from the
+upstream [edge-ai-libraries](https://github.com/open-edge-platform/edge-ai-libraries)
+repository. Clone both repositories as siblings so the kiosk compose
+can reach the upstream sources at `../edge-ai-libraries/microservices/`:
+
 ```bash
+# pick a parent directory
+mkdir -p ~/src && cd ~/src
+
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone \
-  microservices/audio-analyzer microservices/text-to-speech
-cd smart-kiosk-assistant
+git clone --depth 1 https://github.com/open-edge-platform/edge-ai-libraries.git
+
+cd voice-enabled-interactions/smart-kiosk-assistant
 ```
+
+Only the build flow needs `edge-ai-libraries` on disk. The pull flow
+(see [run-container.md](run-container.md)) does not require it.
 
 ## Build All Images With Compose
 

@@ -28,43 +28,33 @@ All five services are started by the top-level [docker-compose.yml](docker-compo
 
 | Service | Port | Role | Source |
 |---|---|---|---|
-| `audio-analyzer` | `8010` | Speech-to-text | [../edge-ai-libraries/microservices/audio-analyzer](../edge-ai-libraries/microservices/audio-analyzer) |
-| `text-to-speech` | `8011` | Speech synthesis | [../edge-ai-libraries/microservices/text-to-speech](../edge-ai-libraries/microservices/text-to-speech) |
+| `audio-analyzer` | `8010` | Speech-to-text | [intel/audio-analyzer](https://hub.docker.com/r/intel/audio-analyzer) |
+| `text-to-speech` | `8011` | Speech synthesis | [intel/text-to-speech](https://hub.docker.com/r/intel/text-to-speech) |
 | `rag-service` | `8020` | Retrieval, ingestion, answer generation | [rag-service/README.md](rag-service/README.md) |
 | `kiosk-core` | `8012` | Session API and service orchestration | [main.py](main.py) |
 | `kiosk-ui` | `7860` | Gradio browser interface | [gradio_app.py](gradio_app.py) |
 
 ## Quick Start
 
-Clone the repository and populate only the two upstream microservices this stack needs from the `edge-ai-libraries` submodule:
+Clone the repository and pull the prebuilt images from Docker Hub:
 
 ```bash
 git clone https://github.com/intel-retail/voice-enabled-interactions.git
-cd voice-enabled-interactions
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
-cd smart-kiosk-assistant
-```
-
-If the repository is already present, you can apply the same sparse checkout from the repo root:
-
-```bash
-git submodule update --init --depth 1 edge-ai-libraries
-git -C edge-ai-libraries sparse-checkout set --cone microservices/audio-analyzer microservices/text-to-speech
-```
-
-Build and start the full stack:
-
-```bash
-export LOCAL_UID=$(id -u)
-export LOCAL_GID=$(id -g)
-docker compose build
+cd voice-enabled-interactions/smart-kiosk-assistant
+docker compose pull
 docker compose up -d
 ```
 
 Open [http://127.0.0.1:7860](http://127.0.0.1:7860) for the browser UI.
 
-The compose stack runs most containers as your host user. Exporting `LOCAL_UID` and `LOCAL_GID` keeps bind-mounted files writable from the account that launched the stack.
+All five images (`audio-analyzer`, `text-to-speech`, `rag-service`,
+`kiosk-core`, `kiosk-ui`) are pulled from the `intel/` namespace at the
+tag pinned in [.env](.env). Model files and caches are stored in Docker
+named volumes, so no host directory layout needs to be prepared in
+advance.
+
+To rebuild any service from source instead of pulling, see
+[docs/build-from-source.md](docs/build-from-source.md).
 
 ## Documentation Map
 
