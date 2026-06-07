@@ -22,7 +22,7 @@ from kiosk_core.tts_client import TtsClient
 
 
 logger = logging.getLogger(__name__)
-_SENTENCE_PATTERN = re.compile(r"^(.+?[.!?](?:[\"')\]]+)?)(?:\s+|$)", re.DOTALL)
+_SENTENCE_PATTERN = re.compile(r"^(.+?[.!?,:;](?:[\"')\]]+)?)(?:\s+|$)", re.DOTALL)
 # Whisper hallucination tokens to strip from transcripts
 _WHISPER_JUNK = re.compile(
     r"\[(?:BLANK_AUDIO|Music|Noise|Applause|Laughter|Silence|Background Music|noise|music)\]",
@@ -160,8 +160,6 @@ class BaseAudioSession:
                     end_reason = "max_duration_reached"
                     break
 
-            if chunk_frames and self._speech_started:
-                self._flush_chunk(chunk_frames)
         except Exception as exc:
             final_status = "failed"
             end_reason = "error"
@@ -169,20 +167,35 @@ class BaseAudioSession:
                 self.error = str(exc)
             logger.exception("Audio session %s failed", self.session_id)
 
+        # Final flush is intentionally outside the main try/except so that a
+        # transient ASR error at the very end doesn't flip final_status to
+        # "failed" and cause _finalize_run to skip RAG for an otherwise good
+        # transcript.  Errors here are logged but treated as non-fatal.
+        if chunk_frames and self._speech_started:
+            try:
+                self._flush_chunk(chunk_frames)
+            except Exception as exc:
+                logger.warning(
+                    "Audio session %s: final flush failed (non-fatal): %s",
+                    self.session_id, exc,
+                )
+
         return final_status, end_reason
 
     def _finalize_run(self, final_status: str, end_reason: str) -> None:
-        if final_status == "completed":
-            transcript = " ".join(part for part in self.transcript_parts if part).strip()
-            if transcript:
-                try:
-                    self._stream_rag_response(transcript)
-                except Exception as exc:
-                    with self._lock:
-                        self.error = str(exc)
-                    logger.exception("RAG query failed for session %s", self.session_id)
-            else:
-                self._synthesize_response("How can I help you?")
+        # Attempt RAG whenever there is a transcript, even if the session
+        # ended with an error mid-stream (e.g. a transient ASR failure on one
+        # chunk).  Only skip entirely when NO audio was captured at all.
+        transcript = " ".join(part for part in self.transcript_parts if part).strip()
+        if transcript:
+            try:
+                self._stream_rag_response(transcript)
+            except Exception as exc:
+                with self._lock:
+                    self.error = str(exc)
+                logger.exception("RAG query failed for session %s", self.session_id)
+        elif final_status == "completed":
+            self._synthesize_response("How can I help you?")
 
         with self._lock:
             if final_status == "completed" and self.end_reason == "stopped_by_api":
