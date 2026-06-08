@@ -12,7 +12,7 @@ Smart Kiosk Assistant is a voice-first retrieval-augmented kiosk stack for retai
 
 ## Architecture
 
-![Smart Kiosk Assistant architecture](docs/assets/architecture.png)
+![Smart Kiosk Assistant architecture](./docs/user-guide/_assets/architecture.png "smart kiosk assistant architecture")
 
 ### Request Flow
 
@@ -24,15 +24,15 @@ Smart Kiosk Assistant is a voice-first retrieval-augmented kiosk stack for retai
 
 ## Service Topology
 
-All five services are started by the top-level [docker-compose.yml](docker-compose.yml).
+All five services are started by the top-level [docker-compose.yml](./docker-compose.yml).
 
 | Service | Port | Role | Source |
 |---|---|---|---|
 | `audio-analyzer` | `8010` | Speech-to-text | [intel/audio-analyzer](https://hub.docker.com/r/intel/audio-analyzer) |
 | `text-to-speech` | `8011` | Speech synthesis | [intel/text-to-speech](https://hub.docker.com/r/intel/text-to-speech) |
-| `rag-service` | `8020` | Retrieval, ingestion, answer generation | [rag-service/README.md](rag-service/README.md) |
-| `kiosk-core` | `8012` | Session API and service orchestration | [main.py](main.py) |
-| `kiosk-ui` | `7860` | Gradio browser interface | [gradio_app.py](gradio_app.py) |
+| `rag-service` | `8020` | Retrieval, ingestion, answer generation | [rag-service/README.md](./rag-service/README.md) |
+| `kiosk-core` | `8012` | Session API and service orchestration | [main.py](./main.py) |
+| `kiosk-ui` | `7860` | Gradio browser interface | [gradio_app.py](./gradio_app.py) |
 
 ## Quick Start
 
@@ -49,25 +49,25 @@ Open [http://127.0.0.1:7860](http://127.0.0.1:7860) for the browser UI.
 
 All five images (`audio-analyzer`, `text-to-speech`, `rag-service`,
 `kiosk-core`, `kiosk-ui`) are pulled from the `intel/` namespace at the
-tag pinned in [.env](.env). Model files and caches are stored in Docker
+tag pinned in [.env](./.env). Model files and caches are stored in Docker
 named volumes, so no host directory layout needs to be prepared in
 advance.
 
 To rebuild any service from source instead of pulling, see
-[docs/build-from-source.md](docs/build-from-source.md).
+[Build from Source](./docs/user-guide/get-started/build-from-source.md).
 
 ## Documentation Map
 
-- Start here: [docs/overview.md](docs/overview.md) and [docs/get-started.md](docs/get-started.md)
-- Architecture and request flow: [docs/how-it-works.md](docs/how-it-works.md)
-- Hardware and OS prerequisites: [docs/system-requirements.md](docs/system-requirements.md)
-- Build details: [docs/build-from-source.md](docs/build-from-source.md)
-- Container startup and verification: [docs/run-container.md](docs/run-container.md)
-- Host-run kiosk-core and Gradio UI: [docs/run-standalone.md](docs/run-standalone.md)
-- `kiosk-core` API: [docs/api-reference.md](docs/api-reference.md)
-- Environment variables, model selection, and inference device: [docs/configuration.md](docs/configuration.md)
-- Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
-- Release notes: [docs/release-notes.md](docs/release-notes.md)
+- Start here: [Overview](./docs/user-guide/index.md) and [Get Started](./docs/user-guide/get-started.md)
+- Architecture and request flow: [How It Works](./docs/user-guide/how-it-works.md)
+- Hardware and OS prerequisites: [System Requirements](./docs/user-guide/get-started/system-requirements.md)
+- Build details: [Build from Source](./docs/user-guide/get-started/build-from-source.md)
+- Container startup and verification: [Run Container](./docs/user-guide/get-started/run-container.md)
+- Host-run kiosk-core and Gradio UI: [Run Standalone](./docs/user-guide/get-started/run-standalone.md)
+- `kiosk-core` API: [API Reference](./docs/user-guide/api-reference.md)
+- Environment variables, model selection, and inference device: [Configuration](./docs/user-guide/get-started/configuration.md)
+- Troubleshooting: [Troubleshooting](./docs/user-guide/troubleshooting.md)
+- Release notes: [Release Notes](./docs/user-guide/release-notes.md)
 - RAG service: [rag-service/README.md](rag-service/README.md)
 - Pinned configs for upstream services: [configs/README.md](configs/README.md)
 

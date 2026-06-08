@@ -47,7 +47,7 @@ RAG LLM compile on GPU can also take a few minutes the first time.
 ## Selected Device Is Not Used
 
 The device field lives in the per-service pinned config (see
-[configuration.md](configuration.md#inference-device)). If the device
+[Configuration](./get-started/configuration.md#inference-device)). If the device
 does not appear in the logs:
 
 - Check the value is supported for that model (e.g. `NPU` is only
@@ -116,7 +116,7 @@ services to re-download model assets on next startup.
 
 - Confirm the knowledge base was ingested. The Gradio UI exposes an
   ingestion panel; see also
-  [rag-service/README.md](../rag-service/README.md).
+  [rag-service/README.md](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/rag-service/README.md).
 - Check `rag-service` logs for retrieval scores and reranker output.
 - Try the same question from the API to rule out the UI:
 
@@ -129,7 +129,7 @@ services to re-download model assets on next startup.
 ## TTS Plays No Audio in the Browser
 
 - Confirm the session snapshot has non-empty `tts_audio_segments` and
-  no `tts_errors`. See [api-reference.md](api-reference.md).
+  no `tts_errors`. See [API Reference](./api-reference.md).
 - The `kiosk-core` container and the `kiosk-ui` container share the
   `generated_audio` Docker volume. If you removed the volume, recreate
   the stack:
@@ -150,10 +150,10 @@ you override these URLs for a host-run setup, confirm:
   from the host).
 - For host-run downstreams reached from a container, use
   `host.docker.internal` (see the alternative compose snippets in
-  [run-container.md](run-container.md)).
+  [Run With Docker Compose](./get-started/run-container.md)).
 
 ## See Also
 
-- [Configuration](configuration.md)
-- [Get Started](get-started.md)
-- [Run On The Host](run-standalone.md)
+- [Configuration](./get-started/configuration.md)
+- [Get Started](./get-started.md)
+- [Run On The Host](./get-started/run-standalone.md)

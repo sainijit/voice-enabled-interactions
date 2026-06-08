@@ -8,8 +8,8 @@ Microphone audio is captured by the browser and uploaded to `kiosk-core`
 as a WAV file. No host audio device is passed into the containers.
 
 To rebuild the images from source instead of pulling, see
-[build-from-source.md](build-from-source.md). To run `kiosk-core` and
-the UI directly on the host, see [run-standalone.md](run-standalone.md).
+[Build from Source](./build-from-source.md). To run `kiosk-core` and
+the UI directly on the host, see [Run On the Host](./run-standalone.md).
 
 ## Clone
 
@@ -35,8 +35,8 @@ docker compose up -d
 - `intel/kiosk-core:${RELEASE_TAG}`
 - `intel/kiosk-ui:${RELEASE_TAG}`
 
-`REGISTRY` and `RELEASE_TAG` are read from [.env](../.env) (defaults
-`REGISTRY=intel`, committed `RELEASE_TAG` pins the current release).
+`REGISTRY` and `RELEASE_TAG` are read from [.env](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/.env)
+(defaults: `REGISTRY=intel`, committed `RELEASE_TAG` pins the current release).
 
 This starts five containers:
 
@@ -83,6 +83,6 @@ docker compose down               # teardown
   internal `audio-analyzer`, `rag-service`, and `text-to-speech`
   containers. Override these URLs only when this stack must call
   services outside the local Compose network.
-- See [configuration.md](configuration.md) for environment variables,
+- See [Configuration](./configuration.md) for environment variables,
   model selection, and inference device, and
-  [api-reference.md](api-reference.md) for endpoint details.
+  [API Reference](../api-reference.md) for endpoint details.

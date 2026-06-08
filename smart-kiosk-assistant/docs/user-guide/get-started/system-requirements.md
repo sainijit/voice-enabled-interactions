@@ -12,7 +12,7 @@
   NVMe is preferred for faster first-run model export.
 - **GPU (optional)**: Intel integrated GPU (Meteor Lake or newer iGPU) or
   a supported discrete GPU exposed via `/dev/dri`. The RAG LLM and reranker
-  benefit most from `GPU`; audio-analyzer and text-to-speech can also be
+  benefit most from `GPU`; `audio-analyzer` and `text-to-speech` can also be
   pinned to `GPU` for higher throughput.
 - **NPU (optional)**: Intel Core Ultra NPU. Currently supported as a
   device choice for `text-to-speech` (Qwen-TTS variant); other services

@@ -1,4 +1,4 @@
-# Release Notes
+# Release Notes: Smart Kiosk Assistant
 
 ## 2026.1.0-rc1
 

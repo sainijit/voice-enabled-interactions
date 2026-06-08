@@ -31,8 +31,8 @@ docker compose up -d audio-analyzer text-to-speech rag-service
 ```
 
 `rag-service` builds locally because it ships in this repository under
-[../rag-service/](../rag-service). The other two are pulled from
-`intel/audio-analyzer` and `intel/text-to-speech` on Docker Hub.
+[../rag-service/](https://github.com/intel-retail/voice-enabled-interactions/tree/main/smart-kiosk-assistant/rag-service).
+The other two are pulled from `intel/audio-analyzer` and `intel/text-to-speech` on Docker Hub.
 
 ## Python Setup
 
@@ -86,4 +86,4 @@ curl --noproxy '*' http://127.0.0.1:8012/health   # {"status":"ok"}
 ## Notes
 
 - TTS audio clips are written under `generated_audio/` in the project directory.
-- For endpoint details, see [api-reference.md](api-reference.md).
+- For endpoint details, see [API Reference](../api-reference.md).
