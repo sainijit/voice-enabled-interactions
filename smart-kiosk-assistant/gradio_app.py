@@ -844,6 +844,12 @@ footer { display: none !important; }
     opacity: 0.5;
     filter: grayscale(0.6);
 }
+/* Disable mic while kiosk-core is processing a response (same visual as ingest). */
+.kiosk-mic-locked #kiosk-mic {
+    pointer-events: none;
+    opacity: 0.5;
+    filter: grayscale(0.6);
+}
 """
 
 # ── Chat HTML helpers ─────────────────────────────────────────────────────────
@@ -1068,7 +1074,13 @@ def _gradio_file_url(absolute_path: str) -> str:
     return f"/gradio_api/file={encoded}"
 
 # ── State ─────────────────────────────────────────────────────────────────────
-_INIT: dict = {"session_id": None, "buffer": [], "sample_rate": 16000, "history": []}
+_INIT: dict = {
+    "session_id": None,
+    "buffer": [],
+    "sample_rate": 16000,
+    "history": [],
+    "stream_prev": None,
+}
 
 # Process-wide flag set while a knowledge-base ingest is running. The streaming
 # mic events check this and become no-ops so users can't fire a question while
@@ -1078,36 +1090,59 @@ _INGEST_IN_PROGRESS = threading.Event()
 # ── Handlers ──────────────────────────────────────────────────────────────────
 def on_start(state: dict):
     if _INGEST_IN_PROGRESS.is_set():
-        return state, gr.skip(), gr.update(value=None), gr.skip(), "⏳ Ingestion in progress — please wait…"
-    s = dict(state); s["session_id"] = None; s["buffer"] = []
-    return s, _render_chat(s["history"], partial_user="🎤  Listening…"), gr.update(value=None), gr.skip(), "🎙  Listening — speak now"
+        return state, gr.skip(), gr.update(value=None), gr.skip(), "⏳ Ingestion in progress — please wait…", gr.skip()
+    s = dict(state); s["session_id"] = None; s["buffer"] = []; s["stream_prev"] = None
+    return s, _render_chat(s["history"], partial_user="🎤  Listening…"), gr.update(value=None), gr.skip(), "🎙  Listening — speak now", gr.skip()
+
+
+def _extract_new_stream_audio(prev_chunk: np.ndarray | None, current_chunk: np.ndarray) -> np.ndarray:
+    if prev_chunk is None or len(prev_chunk) == 0:
+        return current_chunk
+
+    prev_len = len(prev_chunk)
+    current_len = len(current_chunk)
+
+    if current_len == prev_len and np.array_equal(current_chunk, prev_chunk):
+        return np.empty(0, dtype=current_chunk.dtype)
+
+    if current_len > prev_len and np.array_equal(current_chunk[:prev_len], prev_chunk):
+        return current_chunk[prev_len:]
+
+    return current_chunk
 
 def on_chunk(state: dict, chunk):
     if _INGEST_IN_PROGRESS.is_set():
-        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     if chunk is None:
-        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     sr, data = chunk
     if data is None or len(data) == 0:
-        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip()
+        return state, gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
     if data.ndim > 1: data = data[:, 0]
     data = data.astype(np.int16)
 
     s = dict(state); s["sample_rate"] = sr
-    s["buffer"] = list(s.get("buffer", [])) + [data]
+    new_data = _extract_new_stream_audio(s.get("stream_prev"), data)
+    s["stream_prev"] = data.copy()
+    if len(new_data) == 0:
+        return s, gr.skip(), gr.skip(), gr.skip(), gr.skip(), gr.skip()
+
+    s["buffer"] = list(s.get("buffer", [])) + [new_data]
 
     if s["session_id"] is None:
         try:
             s["session_id"] = _open_session(sr, history=s.get("history"))["session_id"]
         except Exception as e:
-            return s, gr.skip(), gr.skip(), gr.skip(), f"❌ {e}"
+            return s, gr.skip(), gr.skip(), gr.skip(), f"❌ {e}", gr.skip()
 
     total = sum(len(b) for b in s["buffer"])
     if total >= int(sr * _CHUNK_SECONDS):
         audio = np.concatenate(s["buffer"])
+        try:
+            _push(s["session_id"], _numpy_to_wav(audio, sr))
+        except Exception:
+            pass
         s["buffer"] = []
-        try: _push(s["session_id"], _numpy_to_wav(audio, sr))
-        except Exception: pass
 
     transcript = ""
     try:
@@ -1115,7 +1150,7 @@ def on_chunk(state: dict, chunk):
     except Exception: pass
 
     partial = transcript or "🎤  Listening…"
-    return s, _render_chat(s["history"], partial_user=partial), gr.skip(), gr.skip(), "🎙  Listening — speak now"
+    return s, _render_chat(s["history"], partial_user=partial), gr.skip(), gr.skip(), "🎙  Listening — speak now", gr.skip()
 
 def on_stop(state: dict) -> Generator:
     s = dict(state)
@@ -1124,7 +1159,7 @@ def on_stop(state: dict) -> Generator:
     seen = 0
 
     if not sid:
-        yield s, _render_chat(history), gr.update(value=None), gr.skip(), "No audio — try again"
+        yield s, _render_chat(history), gr.update(value=None), gr.skip(), "No audio — try again", ""
         return
 
     remaining = s.get("buffer", [])
@@ -1134,15 +1169,16 @@ def on_stop(state: dict) -> Generator:
 
     try: _eos(sid)
     except Exception as e:
-        yield s, _render_chat(history), gr.update(value=None), gr.skip(), f"❌ {e}"; return
+        yield s, _render_chat(history), gr.update(value=None), gr.skip(), f"❌ {e}", ""; return
 
     reset_payload = _json.dumps({"reset": True, "ts": time.time()})
-    yield s, _render_chat(history, partial_user="⏳  Processing…"), gr.update(value=None), reset_payload, "⏳  Processing…"
+    yield s, _render_chat(history, partial_user="⏳  Processing…"), gr.update(value=None), reset_payload, "⏳  Processing…", "locked"
 
+    mic_unlocked = False
     while True:
         try: session = _poll(sid)
         except Exception as e:
-            yield s, _render_chat(history), gr.update(value=None), gr.skip(), f"❌ {e}"; return
+            yield s, _render_chat(history), gr.update(value=None), gr.skip(), f"❌ {e}", ""; return
 
         transcript    = str(session.get("transcript","")).strip()
         response_text = str(session.get("response","")).strip()
@@ -1161,13 +1197,18 @@ def on_stop(state: dict) -> Generator:
         elif transcript:    st = "📝  Querying knowledge base…"
         else:               st = "⏳  Processing speech…"
 
-        yield s, _render_chat(history, partial_user=transcript, partial_asst=response_text), gr.skip(), queue_upd, st
+        lock_upd: Any = gr.skip()
+        if response_text and not mic_unlocked:
+            mic_unlocked = True
+            lock_upd = ""
+
+        yield s, _render_chat(history, partial_user=transcript, partial_asst=response_text), gr.skip(), queue_upd, st, lock_upd
 
         if not running:
             if transcript:    history.append({"role":"user",      "text": transcript})
             if response_text: history.append({"role":"assistant", "text": response_text})
-            s["history"] = history; s["session_id"] = None; s["buffer"] = []
-            yield s, _render_chat(history), gr.skip(), gr.skip(), "✓  Done — tap 🎤 for another question"
+            s["history"] = history; s["session_id"] = None; s["buffer"] = []; s["stream_prev"] = None
+            yield s, _render_chat(history), gr.skip(), gr.skip(), "✓  Done — tap 🎤 for another question", ""
             break
         time.sleep(POLL_INTERVAL_SECONDS)
 
@@ -1308,6 +1349,11 @@ def create_app() -> gr.Blocks:
                             visible=False,
                             elem_id="kiosk-tts-queue",
                         )
+                        mic_lock = gr.Textbox(
+                            value="",
+                            visible=False,
+                            elem_id="kiosk-mic-lock",
+                        )
                 with gr.Row(elem_classes=["audio-pair"]):
                     mic = gr.Audio(
                         sources=["microphone"],
@@ -1358,7 +1404,7 @@ def create_app() -> gr.Blocks:
                         elem_classes=["kiosk-hidden"],
                     )
 
-        outs = [state, chat, tts, tts_queue, status]
+        outs = [state, chat, tts, tts_queue, status, mic_lock]
 
         mic.start_recording(fn=on_start, inputs=[state],         outputs=outs)
         mic.stream(         fn=on_chunk, inputs=[state, mic],    outputs=outs, stream_every=0.5)
@@ -1368,6 +1414,19 @@ def create_app() -> gr.Blocks:
             fn=None,
             inputs=[tts_queue],
             js="(payload) => { if (window.kioskTTSEnqueue) window.kioskTTSEnqueue(payload); }",
+        )
+        mic_lock.change(
+            fn=None,
+            inputs=[mic_lock],
+            js="""(val) => {
+                const container = document.querySelector('.gradio-container');
+                if (!container) return;
+                if (val && val.trim() !== '') {
+                    container.classList.add('kiosk-mic-locked');
+                } else {
+                    container.classList.remove('kiosk-mic-locked');
+                }
+            }""",
         )
 
         refresh_btn.click(
