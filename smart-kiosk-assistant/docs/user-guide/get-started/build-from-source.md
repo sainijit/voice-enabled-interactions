@@ -3,11 +3,11 @@
 Build Smart Kiosk Assistant from source. Use this path when you need a
 code change in any of the kiosk services. To run the prebuilt images
 from Docker Hub without rebuilding, see
-[run-container.md](run-container.md).
+[Run With Docker Compose](./run-container.md).
 
 ## Prerequisites
 
-Verify the [system requirements](system-requirements.md).
+Verify the [System Requirements](./system-requirements.md).
 
 ## Clone and Prepare
 
@@ -43,15 +43,15 @@ The sparse checkout pulls only the two microservices the kiosk build
 needs; everything else in `edge-ai-libraries` stays unchecked out. A
 plain `git clone` of `edge-ai-libraries` also works if you do not mind
 the extra files. Only the build flow needs `edge-ai-libraries` on disk
-— the pull flow (see [run-container.md](run-container.md)) does not.
+— the pull flow (see [Run With Docker Compose](./run-container.md)) does not.
 
 ## Build All Images With Compose
 
-The top-level [docker-compose.yml](../docker-compose.yml) declares both
-`image:` and `build:` for each of the five services: `audio-analyzer`,
+The top-level [docker-compose.yml](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/docker-compose.yml)
+declares both `image:` and `build:` for each of the five services: `audio-analyzer`,
 `text-to-speech`, `rag-service`, `kiosk-core`, and `kiosk-ui`. Both
-`REGISTRY` and `RELEASE_TAG` are read from [.env](../.env) (defaults
-`REGISTRY=intel`, committed `RELEASE_TAG` pins the current release).
+`REGISTRY` and `RELEASE_TAG` are read from [.env](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/.env)
+(defaults: `REGISTRY=intel`, committed `RELEASE_TAG` pins the current release).
 
 `docker compose build` rebuilds each service from source and tags the
 result as the same `${REGISTRY}/<svc>:${RELEASE_TAG}` reference used by
@@ -117,7 +117,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-See [run-standalone.md](run-standalone.md) for the launch commands.
+See [Run On the Host](./run-standalone.md) for the launch commands.
 
 ## Verifying the Build
 

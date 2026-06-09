@@ -10,7 +10,7 @@ The browser captures microphone audio and uploads it to `kiosk-core`, which
 orchestrates speech-to-text, retrieval-augmented answer generation, and
 speech synthesis through three model-hosting microservices.
 
-![Smart Kiosk Assistant architecture](assets/architecture.png)
+![Smart Kiosk Assistant architecture](./_assets/architecture.png "smart kiosk assistant architecture")
 
 ## Components
 
@@ -61,5 +61,5 @@ inside the three model-hosting services.
    session snapshot, downloads them from `kiosk-core`, and plays them
    sequentially.
 
-See [configuration.md](configuration.md) for environment variables,
+See the [Configuration](./get-started/configuration.md) guide for environment variables,
 model selection, and per-service device fields.

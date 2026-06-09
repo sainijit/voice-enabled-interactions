@@ -15,9 +15,9 @@ pinned config file used for device selection:
 
 | Service | File | Model fields |
 |---|---|---|
-| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](../configs/audio-analyzer/config.yaml) | `models.asr.name` (e.g. `whisper-tiny`, `whisper-base`); `sentiment.model` (optional) |
-| `text-to-speech` | [`configs/text-to-speech/config.yaml`](../configs/text-to-speech/config.yaml) | `models.tts.name` (e.g. `microsoft/speecht5_tts`, Qwen-TTS variant); `model_variant` |
-| `rag-service` | [`rag-service/config.yaml`](../rag-service/config.yaml) | `models.llm.hf_id`, `models.embedding.hf_id`, `retrieval.reranker.hf_id`; per-model `weight_format` (`int4`, `int8`, `fp16`) |
+| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/configs/audio-analyzer/config.yaml) | `models.asr.name` (e.g. `whisper-tiny`, `whisper-base`); `sentiment.model` (optional) |
+| `text-to-speech` | [`configs/text-to-speech/config.yaml`](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/configs/text-to-speech/config.yaml) | `models.tts.name` (e.g. `microsoft/speecht5_tts`, Qwen-TTS variant); `model_variant` |
+| `rag-service` | [`rag-service/config.yaml`](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/rag-service/config.yaml) | `models.llm.hf_id`, `models.embedding.hf_id`, `retrieval.reranker.hf_id`; per-model `weight_format` (`int4`, `int8`, `fp16`) |
 
 Use Hugging Face IDs where the field name is `hf_id`. Models are
 downloaded and exported on first start into the per-service `models/`
@@ -29,9 +29,9 @@ Each model-hosting service reads its device from a pinned config file:
 
 | Service | File | Fields |
 |---|---|---|
-| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](../configs/audio-analyzer/config.yaml) | `models.asr.device`, `sentiment.device` |
-| `text-to-speech` | [`configs/text-to-speech/config.yaml`](../configs/text-to-speech/config.yaml) | `models.tts.device` |
-| `rag-service` | [`rag-service/config.yaml`](../rag-service/config.yaml) | `models.llm.device`, `models.embedding.device`, `retrieval.reranker.device` |
+| `audio-analyzer` | [`configs/audio-analyzer/config.yaml`](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/configs/audio-analyzer/config.yaml) | `models.asr.device`, `sentiment.device` |
+| `text-to-speech` | [`configs/text-to-speech/config.yaml`](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/configs/text-to-speech/config.yaml) | `models.tts.device` |
+| `rag-service` | [`rag-service/config.yaml`](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/rag-service/config.yaml) | `models.llm.device`, `models.embedding.device`, `retrieval.reranker.device` |
 
 Supported devices:
 
@@ -100,7 +100,7 @@ kiosk-core has no config file. All settings are controlled through environment v
 
 ## Compose Defaults
 
-When running with the top-level [docker-compose.yml](../docker-compose.yml), the defaults are wired to the internal Compose network:
+When running with the top-level [docker-compose.yml](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/docker-compose.yml), the defaults are wired to the internal Compose network:
 
 - `KIOSK_CORE_ANALYZER_URL=http://audio-analyzer:8010/v1/audio/transcriptions`
 - `KIOSK_CORE_RAG_URL=http://rag-service:8020/api/v1/query`
