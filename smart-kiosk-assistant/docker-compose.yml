@@ -85,6 +85,17 @@ services:
       - text_to_speech_storage:/app/text-to-speech/storage
       # Single cache mount — see audio-analyzer block for rationale.
       - text_to_speech_cache:/app/text-to-speech/.cache
+    # Model warmup on GPU can take a while; override the image healthcheck so
+    # connection-refused during boot doesn't trip `unhealthy` and abort
+    # dependent services (kiosk-core / kiosk-ui) via their
+    # `depends_on: service_healthy` gates.
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 10s
+      start_period: 240s
+      retries: 5
     restart: unless-stopped
 
   rag-service:
