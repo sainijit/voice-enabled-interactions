@@ -19,7 +19,7 @@ models:
     # Inference device. Permitted values: CPU | GPU
     #   SpeechT5: CPU or GPU
     #   Qwen:     CPU or GPU
-    device: GPU
+    device: CPU
     # Model precision. Permitted values: int8 | int4 | fp16 | fp32
     # NOTE: int4 on iGPU produces noise; GPU fp16 works great post-warmup
     dtype: int8
