@@ -1,4 +1,4 @@
-# API
+# API Reference
 
 Base URL (default): `http://127.0.0.1:8012`
 
@@ -45,7 +45,7 @@ GET /api/v1/sessions
 
 **Response**
 
-```json
+```text
 {
   "sessions": [
     {

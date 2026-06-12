@@ -13,23 +13,24 @@ spin up from `docker-compose.yml`:
 
 > Note: The `rag-service` reads its settings directly from its own
 > `rag-service/config.yaml` (no override layer), so it does not need the
-> `configs/` indirection — only the two services that come from
-> `edge-ai-libraries/` do.
+> `configs/` indirection — only the two services that come from the
+> upstream [edge-ai-libraries](https://github.com/open-edge-platform/edge-ai-libraries) project do.
 
 ## Why this exists
 
-Both services live in `edge-ai-libraries/microservices/…` and ship their own
-default `config.yaml`. Those defaults can change over time, and the
+Both services are published as `intel/audio-analyzer` and
+`intel/text-to-speech` on Docker Hub and ship their own default
+`config.yaml`. Those defaults can change over time, and the
 kiosk needs reproducible behaviour (specific ASR model, specific TTS voice,
 denoise off, etc.).
 
 By keeping a pinned copy here and mounting it as the service config, we get:
 
 1. The kiosk always boots the exact service configuration it was tested with,
-   regardless of changes made in `edge-ai-libraries`.
+   regardless of upstream image updates.
 2. **No fork / no patches** of the upstream services — they're consumed as-is.
-3. Anyone tweaking kiosk behaviour edits files in this folder, not in
-   `edge-ai-libraries/`.
+3. Anyone tweaking kiosk behaviour edits files in this folder, not in the
+   upstream repository.
 
 ## How it works
 
