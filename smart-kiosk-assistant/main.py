@@ -1,8 +1,5 @@
-import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse
 
-from kiosk_core.config import METRICS_COLLECTOR_URL
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
 from kiosk_core.service import SessionService
 
@@ -14,42 +11,6 @@ service = SessionService()
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-# ---------------------------------------------------------------------------
-# Metrics proxy – forwards requests to the metrics-collector container so the
-# Gradio UI (and any test client) only needs to talk to kiosk-core.
-# ---------------------------------------------------------------------------
-
-async def _proxy_metrics(path: str) -> JSONResponse:
-    """Forward a GET request to metrics-collector and return the JSON response."""
-    url = f"{METRICS_COLLECTOR_URL}/{path}"
-    try:
-        async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
-            resp = await client.get(url)
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="metrics-collector is unavailable")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="metrics-collector timed out")
-
-
-@app.get("/api/v1/metrics")
-async def get_metrics():
-    """Time-series utilization data: CPU, GPU, NPU, memory, power."""
-    return await _proxy_metrics("metrics")
-
-
-@app.get("/api/v1/platform-info")
-async def get_platform_info():
-    """Hardware summary: processor, iGPU, NPU, RAM, storage."""
-    return await _proxy_metrics("platform-info")
-
-
-@app.get("/api/v1/memory")
-async def get_memory():
-    """Latest single memory snapshot."""
-    return await _proxy_metrics("memory")
 
 
 @app.get("/api/v1/devices")

@@ -16,13 +16,22 @@ ARG HTTP_PROXY
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3 \
+        python3-pip \
+        python3-venv \
         pciutils \
     && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir fastapi uvicorn
+
 WORKDIR /app
 
-COPY app.py   ./app.py
-COPY start.sh /start.sh
+COPY app.py      ./app.py
+COPY metrics.py  ./metrics.py
+COPY api/        ./api/
+COPY start.sh    /start.sh
 
 RUN chmod +x /start.sh
 
