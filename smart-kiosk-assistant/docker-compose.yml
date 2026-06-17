@@ -171,8 +171,8 @@ services:
              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/health', timeout=5).read()"]
       interval: 15s
       timeout: 10s
-      start_period: 360s
-      retries: 3
+      start_period: 600s
+      retries: 10
     restart: unless-stopped
 
   kiosk-core:
