@@ -26,6 +26,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir fastapi uvicorn
 
+# Override supervisord.conf to add stdout_logfile_maxbytes=0 on every program,
+# which disables log rotation for non-seekable streams (Docker stdout/stderr pipes)
+# and eliminates the harmless but noisy "OSError: [Errno 29] Illegal seek" errors.
+RUN sed -i '/^stdout_logfile=\/dev\/stdout/a stdout_logfile_maxbytes=0' /supervisord.conf
+
 WORKDIR /app
 
 COPY app.py      ./app.py
