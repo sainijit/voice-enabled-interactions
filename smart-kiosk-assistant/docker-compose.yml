@@ -26,7 +26,7 @@ services:
   # ---------------------------------------------------------------------------
   metrics-collector:
     build:
-      context: ./metrics-collector
+      context: ./kiosk_core/metrics-collector
       dockerfile: Dockerfile
     container_name: metrics-collector
     privileged: true
@@ -221,7 +221,6 @@ services:
       KIOSK_CORE_UI_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
       KIOSK_CORE_UI_RAG_URL:      http://rag-service:8020/api/v1/query
       KIOSK_CORE_UI_TTS_URL:      http://text-to-speech:8011/v1/audio/speech
-      KIOSK_CORE_UI_METRICS_URL:  http://metrics-collector:9000
     volumes:
       - generated_audio:/app/generated_audio
     command: ["python3", "gradio_app.py"]
