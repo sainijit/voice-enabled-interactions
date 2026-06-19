@@ -1238,6 +1238,14 @@ def _fmt_ms(val: Any) -> str:
     return f"{val:,.0f} ms" if val is not None else "—"
 
 
+def _fmt_tps(val: Any) -> str:
+    return f"{val:,.2f} tok/s" if val is not None else "—"
+
+
+def _fmt_count(val: Any) -> str:
+    return f"{int(val):,}" if val is not None else "—"
+
+
 def _badge(val: str | None) -> str:
     if not val:
         return "—"
@@ -1320,6 +1328,9 @@ def _render_kpi_html(asr: dict, rag: dict, tts: dict) -> str:
         ("Top-K",          _esc(str(rag.get("top_k") or "—"))),
         ("Retrieval lat.", _fmt_ms(rp_retrieval.get("last_ms"))),
         ("LLM lat.",       _fmt_ms(rp_llm.get("last_ms"))),
+        ("TTFT", _fmt_ms(rp_llm.get("ttft_ms"))),
+        ("Tokens / sec",      _fmt_tps(rp_llm.get("tokens_per_sec"))),
+        ("Total tokens",      _fmt_count(rp_llm.get("total_tokens"))),
     ])
 
     tts_runtime = _PROVIDER_LABELS.get(str(tts.get("runtime", "")).lower(),
