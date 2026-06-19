@@ -1,5 +1,7 @@
+import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
+from kiosk_core import config as kiosk_config
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
 from kiosk_core.service import SessionService
 
@@ -11,6 +13,18 @@ service = SessionService()
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/metrics")
+def metrics() -> dict:
+    """Proxy metrics payload from metrics-collector through kiosk-core."""
+    try:
+        with httpx.Client(timeout=4.0, trust_env=False) as client:
+            response = client.get(f"{kiosk_config.METRICS_COLLECTOR_URL}/metrics")
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Failed to fetch metrics: {exc}") from exc
 
 
 @app.get("/api/v1/devices")

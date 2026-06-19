@@ -23,7 +23,6 @@ KIOSK_CORE_URL          = os.getenv("KIOSK_CORE_UI_BASE_URL",           "http://
 RAG_URL                 = os.getenv("KIOSK_CORE_UI_RAG_URL",            "http://127.0.0.1:8020/api/v1/query")
 TTS_URL                 = os.getenv("KIOSK_CORE_UI_TTS_URL",            "http://127.0.0.1:8011/v1/audio/speech")
 ANALYZER_URL            = os.getenv("KIOSK_CORE_UI_ANALYZER_URL",       "http://127.0.0.1:8010/v1/audio/transcriptions")
-METRICS_URL             = os.getenv("KIOSK_CORE_UI_METRICS_URL",        "http://127.0.0.1:9000")
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_UI_TIMEOUT_SECONDS",       "120.0"))
 POLL_INTERVAL_SECONDS   = float(os.getenv("KIOSK_CORE_UI_POLL_INTERVAL_SECONDS", "0.35"))
 _CHUNK_SECONDS          = kiosk_config.DEFAULT_CHUNK_SECONDS
@@ -1350,10 +1349,10 @@ def _render_kpi_html(asr: dict, rag: dict, tts: dict) -> str:
 
 # ── Metrics / Performance helpers ────────────────────────────────────────────
 def _fetch_metrics() -> dict:
-    """Fetch time-series metrics from the metrics-collector service."""
+    """Fetch time-series metrics via kiosk-core proxy endpoint."""
     try:
         with httpx.Client(timeout=4.0, trust_env=False) as c:
-            r = c.get(f"{METRICS_URL}/metrics")
+            r = c.get(f"{KIOSK_CORE_URL}/api/v1/metrics")
             r.raise_for_status()
             return r.json()
     except Exception:
