@@ -1,11 +1,13 @@
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 
+from kiosk_core.api.endpoints import router as api_router
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
 from kiosk_core.service import SessionService
 
 
 app = FastAPI(title="kiosk-core")
 service = SessionService()
+app.include_router(api_router)
 
 
 @app.get("/health")
