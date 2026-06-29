@@ -26,9 +26,9 @@ import { ExecutiveKpis } from './ExecutiveKpis';
 import { HardwareCharts } from './HardwareCharts';
 import DeviceSettings from '../Panels/DeviceSettings';
 import KnowledgeBase from '../Panels/KnowledgeBase';
-import OrderPanel from '../Order/OrderPanel';
+import QsrPanel from '../Panels/QsrPanel';
 
-type Tab = 'performance' | 'settings';
+type Tab = 'performance' | 'settings' | 'qsr';
 
 interface PerformanceDashboardProps {
   kpis: KpiBundle;
@@ -67,6 +67,7 @@ export function PerformanceDashboard({
           [
             { id: 'performance' as Tab, label: 'Performance', icon: '📊' },
             { id: 'settings'    as Tab, label: 'Settings',    icon: '⚙️' },
+            { id: 'qsr'         as Tab, label: 'QSR',         icon: '🍔' },
           ] as { id: Tab; label: string; icon: string }[]
         ).map((tab) => (
           <button
@@ -126,18 +127,6 @@ export function PerformanceDashboard({
 
         {activeTab === 'settings' && (
           <div className="space-y-4 p-4">
-            {/* Current Order */}
-            <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-              <div className="border-b border-gray-100 bg-gray-50 px-3 py-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
-                  🛒 Current Order
-                </span>
-              </div>
-              <div className="p-0">
-                <OrderPanel active={orderActive} />
-              </div>
-            </div>
-
             {/* Device Settings */}
             <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
               <div className="border-b border-gray-100 bg-gray-50 px-3 py-2">
@@ -171,6 +160,8 @@ export function PerformanceDashboard({
             <ModelDetails kpis={kpis} />
           </div>
         )}
+
+        {activeTab === 'qsr' && <QsrPanel orderActive={orderActive} />}
       </div>
     </aside>
   );

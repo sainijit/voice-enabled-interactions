@@ -15,6 +15,7 @@ export const endpoints = {
     `/api/v1/sessions/${sid}/audio/${encodeURIComponent(filename)}`,
   // ordering
   products: '/api/v1/products',
+  order: (orderId: number) => `/api/v1/orders/${orderId}`,
   currentOrder: (userId: string) =>
     `/api/v1/users/${encodeURIComponent(userId)}/orders/current`,
   upsell: '/api/v1/upsell',
