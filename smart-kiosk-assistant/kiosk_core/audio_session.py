@@ -19,6 +19,10 @@ from kiosk_core import config
 from kiosk_core.agent_client import AgentClient
 from kiosk_core.analyzer_client import AnalyzerClient
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest
+from kiosk_core.pipeline_latency import (
+    AgentSpan, AsrSpan, LlmSpan, PipelineLatencyStore, RetrievalSpan,
+    TtsSpan, TurnTrace, WallTimes, pipeline_store,
+)
 from kiosk_core.rag_client import RagClient
 from kiosk_core.tts_client import TtsClient
 
@@ -93,6 +97,18 @@ class BaseAudioSession:
         self._speech_started = False
         self._captured_samples = 0
         self._source_kind = "audio"
+
+        # ── Pipeline timing (monotonic clock) ──────────────────────────────────
+        # All _t_* fields are set during _finalize_run / _stream_rag_response.
+        # Using time.monotonic() for accurate durations; datetime only for display.
+        self._t_turn_start: float | None = None     # start of _finalize_run
+        self._t_agent_start: float | None = None    # just before agent HTTP call
+        self._t_agent_end: float | None = None      # agent reply received
+        self._t_first_tts: float | None = None      # first TTS sentence queued
+        self._t_last_tts: float | None = None       # last TTS segment written (in worker thread)
+        self._t_turn_end: float | None = None       # after worker.join()
+        self._tts_segment_count: int = 0
+        # ───────────────────────────────────────────────────────────────────────
 
         self._frame_samples = max(1, int(self.request.sample_rate * config.DEFAULT_BLOCK_DURATION_SECONDS))
         self._frame_duration_seconds = self._frame_samples / self.request.sample_rate
@@ -220,6 +236,7 @@ class BaseAudioSession:
         # Attempt RAG whenever there is a transcript, even if the session
         # ended with an error mid-stream (e.g. a transient ASR failure on one
         # chunk).  Only skip entirely when NO audio was captured at all.
+        self._t_turn_start = time.monotonic()
         transcript = " ".join(part for part in self.transcript_parts if part).strip()
         if transcript:
             try:
@@ -270,6 +287,9 @@ class BaseAudioSession:
         if self.agent_client is not None:
             logger.info("[SESSION] Routing turn to agent: session=%s (conv=%s) message=%r",
                         self.session_id, self.agent_session_id, transcript[:80])
+        if self.agent_client is not None:
+            logger.info("[SESSION] Routing turn to agent: session=%s (conv=%s) message=%r",
+                        self.session_id, self.agent_session_id, transcript[:80])
             token_source = self.agent_client.get_reply(
                 transcription=transcript,
                 session_id=self.agent_session_id,  # persistent across voice turns
@@ -283,26 +303,120 @@ class BaseAudioSession:
 
         print(f"\n{label} response for session {self.session_id}:\n", end="", flush=True)
         sentence_index = 0
+        _first_token_seen = False
+        _tool_calls: list[str] = []
+        # t_agent_start set here — generator body (HTTP call) runs on first iteration
+        if self.agent_client is not None:
+            self._t_agent_start = time.monotonic()
         try:
             for token in token_source:
                 with self._lock:
                     self.response_parts.append(token)
                 print(token, end="", flush=True)
 
+                if not _first_token_seen:
+                    _first_token_seen = True
+                    self._t_agent_end = time.monotonic()
+
+                # Capture tool_calls metadata sentinel yielded by AgentClient
+                if isinstance(token, dict) and "_tool_calls" in token:
+                    _tool_calls = token["_tool_calls"]
+                    continue
+
                 pending_text += token
                 complete_sentences, pending_text = self._drain_complete_sentences(pending_text)
                 for sentence in complete_sentences:
                     sentence_index += 1
+                    if sentence_index == 1:
+                        self._t_first_tts = time.monotonic()
                     sentence_queue.put((sentence_index, sentence))
 
             trailing_text = pending_text.strip()
             if trailing_text:
                 sentence_index += 1
+                if sentence_index == 1:
+                    self._t_first_tts = time.monotonic()
                 sentence_queue.put((sentence_index, trailing_text))
+
+            # If agent_end wasn't set (empty reply), set it now
+            if self._t_agent_start is not None and self._t_agent_end is None:
+                self._t_agent_end = time.monotonic()
+
         finally:
             sentence_queue.put((None, None))
             worker.join()
+            self._t_turn_end = time.monotonic()
+            self._tts_segment_count = sentence_index
             print(flush=True)
+
+        # ── Record pipeline turn trace ──────────────────────────────────────
+        self._record_turn_trace(_tool_calls)
+
+    def _record_turn_trace(self, tool_calls: list[str]) -> None:
+        """Build and persist a TurnTrace for the completed voice turn."""
+        t0 = self._t_turn_start
+        t_agent_s = self._t_agent_start
+        t_agent_e = self._t_agent_end
+        t_first = self._t_first_tts
+        t_last = self._t_last_tts
+        t_end = self._t_turn_end
+
+        def _ms(a: float | None, b: float | None) -> float | None:
+            if a is None or b is None:
+                return None
+            return round((b - a) * 1000, 1)
+
+        # ASR = from turn_start to when agent was called (includes VAD→transcribe)
+        asr_ms = _ms(t0, t_agent_s)
+        # Agent TTFT = from agent_start to when first token (reply) arrived
+        ttft_ms = _ms(t_agent_s, t_agent_e)
+        # Agent total = from agent_start to last TTS segment done (whole orchestration)
+        agent_total_ms = _ms(t_agent_s, t_end)
+        # TTS = from first sentence queued to last segment written
+        tts_ms = _ms(t_first, t_last)
+        # Time to first audio = from agent call start to first TTS sentence queued
+        ttfa_ms = _ms(t_agent_s, t_first)
+        # Wall E2E: measured end-to-end (turn_start → turn_end), never summed
+        wall_total_ms = _ms(t0, t_end)
+
+        retrieval_invoked = any(
+            "retrieval" in tc.lower() or "knowledge" in tc.lower() or "lookup" in tc.lower()
+            for tc in tool_calls
+        )
+
+        trace = TurnTrace(
+            turn_id=self.session_id,
+            conversation_id=self.agent_session_id,
+            started_at=self.started_at.isoformat() if self.started_at else datetime.now(UTC).isoformat(),
+            ended_at=datetime.now(UTC).isoformat(),
+            wall=WallTimes(
+                turn_total_ms=wall_total_ms,
+                time_to_first_audio_ms=ttfa_ms,
+            ),
+            asr=AsrSpan(ms=asr_ms),
+            agent=AgentSpan(
+                ttft_ms=ttft_ms,
+                total_ms=agent_total_ms,
+                retrieval=RetrievalSpan(invoked=retrieval_invoked),
+                llm=LlmSpan(device="GPU"),
+            ),
+            tts=TtsSpan(
+                ms=tts_ms,
+                segments=self._tts_segment_count,
+                overlapped_with_agent=True,
+            ),
+        )
+        pipeline_store.record(trace)
+        logger.info(
+            "[PIPELINE] turn=%s wall=%.0fms asr=%.0fms ttft=%.0fms tts=%.0fms retrieval=%s tools=%s",
+            self.session_id,
+            wall_total_ms or 0,
+            asr_ms or 0,
+            ttft_ms or 0,
+            tts_ms or 0,
+            retrieval_invoked,
+            tool_calls,
+        )
 
     @staticmethod
     def _drain_complete_sentences(buffer: str) -> tuple[list[str], str]:
@@ -335,6 +449,7 @@ class BaseAudioSession:
                     instructions=self.request.tts_instructions,
                 )
                 with self._lock:
+                    self._t_last_tts = time.monotonic()
                     self.tts_audio_segments.append(
                         {
                             "index": sentence_index,

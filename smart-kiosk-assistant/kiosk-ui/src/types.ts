@@ -72,10 +72,58 @@ export interface KpiData {
   perf?: Record<string, unknown>;
 }
 
+// ── Pipeline turn trace (from /api/v1/pipeline/latest) ──────────────────────
+export interface PipelineWall {
+  turn_total_ms: number | null;
+  time_to_first_audio_ms: number | null;
+}
+
+export interface PipelineAsrSpan {
+  ms: number | null;
+  device: string;
+}
+
+export interface PipelineRetrievalSpan {
+  invoked: boolean;
+  ms: number | null;
+}
+
+export interface PipelineLlmSpan {
+  ms: number | null;
+  calls: number;
+  device: string;
+}
+
+export interface PipelineAgentSpan {
+  ttft_ms: number | null;
+  total_ms: number | null;
+  retrieval: PipelineRetrievalSpan;
+  llm: PipelineLlmSpan;
+}
+
+export interface PipelineTtsSpan {
+  ms: number | null;
+  device: string;
+  segments: number;
+  overlapped_with_agent: boolean;
+}
+
+export interface PipelineTurnTrace {
+  turn_id: string;
+  conversation_id: string;
+  started_at: string;
+  ended_at: string | null;
+  wall: PipelineWall;
+  asr: PipelineAsrSpan;
+  agent: PipelineAgentSpan;
+  tts: PipelineTtsSpan;
+}
+
 export interface KpiBundle {
   asr: KpiData;
   rag: KpiData;
   tts: KpiData;
+  pipeline?: PipelineTurnTrace | null;
 }
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
