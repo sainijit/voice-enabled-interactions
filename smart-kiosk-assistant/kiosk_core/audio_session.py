@@ -310,6 +310,12 @@ class BaseAudioSession:
             self._t_agent_start = time.monotonic()
         try:
             for token in token_source:
+                # Handle metadata sentinel from AgentClient BEFORE appending to response_parts
+                # to avoid dict items in response_parts (which causes TypeError in snapshot())
+                if isinstance(token, dict) and "_tool_calls" in token:
+                    _tool_calls = token["_tool_calls"]
+                    continue
+
                 with self._lock:
                     self.response_parts.append(token)
                 print(token, end="", flush=True)
@@ -317,11 +323,6 @@ class BaseAudioSession:
                 if not _first_token_seen:
                     _first_token_seen = True
                     self._t_agent_end = time.monotonic()
-
-                # Capture tool_calls metadata sentinel yielded by AgentClient
-                if isinstance(token, dict) and "_tool_calls" in token:
-                    _tool_calls = token["_tool_calls"]
-                    continue
 
                 pending_text += token
                 complete_sentences, pending_text = self._drain_complete_sentences(pending_text)
