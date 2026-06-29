@@ -31,6 +31,8 @@ export const endpoints = {
   ttsPerformance: '/tts/v1/performance',
   // metrics-collector (proxied under /metrics-svc)
   metrics: '/metrics-svc/metrics',
+  // pipeline latency (kiosk-core)
+  pipelineLatest: '/api/v1/pipeline/latest',
 };
 
 // Tuning constants (mirror kiosk_core config defaults).

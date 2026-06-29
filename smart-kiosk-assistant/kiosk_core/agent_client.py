@@ -90,3 +90,5 @@ class AgentClient:
 
         if reply:
             yield reply
+        # Yield tool_calls as metadata so callers can record pipeline traces
+        yield {"_tool_calls": tool_calls}

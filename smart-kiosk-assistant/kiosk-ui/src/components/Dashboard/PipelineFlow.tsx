@@ -2,23 +2,27 @@
  * PipelineFlow — visualises the AI inference pipeline as a horizontal node
  * graph with per-stage latency chips and animated flow arrows.
  *
- *  🎤 → [ASR] → [Retrieval] → [LLM] → [TTS] → 🔊
+ *  🎤 → [ASR] → [Agent/LLM] → [TTS] → 🔊
+ *
+ * Latency data comes from the turn trace at kiosk-core /api/v1/pipeline/latest.
+ * Wall-clock E2E is measured (not summed), so TTS overlap is handled correctly.
+ * Retrieval stage shows "—" when not invoked this turn (ordering turns skip it).
  *
  * Color coding  CPU=Blue  GPU=Green  NPU=Purple
  * Stage colors: ASR=Orange  Retrieval=Yellow  LLM=Cyan  TTS=Pink
  */
 
-import type { KpiBundle } from '../../types';
+import type { KpiBundle, PipelineTurnTrace } from '../../types';
 import type { VoicePhase } from '../../types';
 
 interface StageConfig {
   id: string;
   label: string;
   icon: string;
-  bg: string;         // Tailwind bg class
-  border: string;     // Tailwind border class
-  textColor: string;  // Tailwind text class
-  glowColor: string;  // CSS box-shadow color string
+  bg: string;
+  border: string;
+  textColor: string;
+  glowColor: string;
 }
 
 const STAGES: StageConfig[] = [
@@ -61,32 +65,47 @@ const STAGES: StageConfig[] = [
 ];
 
 interface LatencyMap {
-  asrMs: number | null;
-  retrievalMs: number | null;
-  llmMs: number | null;
-  ttsMs: number | null;
+  asr: number | null;
+  retrieval: number | null;         // null when not invoked this turn
+  llm: number | null;               // agent TTFT — perceived latency
+  tts: number | null;
+  retrievalInvoked: boolean;
 }
 
 function extractLatencies(kpis: KpiBundle): LatencyMap {
+  const trace = kpis.pipeline as PipelineTurnTrace | null | undefined;
+
+  if (trace) {
+    return {
+      asr:              trace.asr?.ms ?? null,
+      retrieval:        trace.agent?.retrieval?.invoked ? (trace.agent.retrieval.ms ?? null) : null,
+      llm:              trace.agent?.ttft_ms ?? null,
+      tts:              trace.tts?.ms ?? null,
+      retrievalInvoked: trace.agent?.retrieval?.invoked ?? false,
+    };
+  }
+
+  // Fallback to legacy last_ms registers when no turn trace is available yet
   const ap = (kpis.asr?.perf ?? {}) as Record<string, unknown>;
   const rp = (kpis.rag?.perf ?? {}) as Record<string, unknown>;
   const retr = (rp.retrieval ?? {}) as Record<string, unknown>;
-  const llm = (rp.llm ?? {}) as Record<string, unknown>;
+  const llm  = (rp.llm ?? {}) as Record<string, unknown>;
   const tp = (kpis.tts?.perf ?? {}) as Record<string, unknown>;
-
   const n = (v: unknown) => (typeof v === 'number' ? v : null);
   return {
-    asrMs:       n(ap.last_ms),
-    retrievalMs: n(retr.last_ms),
-    llmMs:       n(llm.last_ms),
-    ttsMs:       n(tp.last_ms),
+    asr:              n(ap.last_ms),
+    retrieval:        n(retr.last_ms),
+    llm:              n(llm.last_ms),
+    tts:              n(tp.last_ms),
+    retrievalInvoked: true,   // legacy: always show when present
   };
 }
 
-function latencyLabel(ms: number | null): string {
+function latencyLabel(ms: number | null, invoked = true): string {
+  if (!invoked) return '—';
   if (ms === null) return '—';
   if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 function deviceBadge(device: unknown): { label: string; cls: string } | null {
@@ -99,7 +118,7 @@ function deviceBadge(device: unknown): { label: string; cls: string } | null {
 
 function activeStageFromPhase(phase: VoicePhase): string | null {
   if (phase === 'listening')  return 'asr';
-  if (phase === 'processing') return 'retrieval'; // approximate: cycles through
+  if (phase === 'processing') return 'llm';
   if (phase === 'speaking')   return 'tts';
   return null;
 }
@@ -111,27 +130,34 @@ interface PipelineFlowProps {
 
 export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
   const lats = extractLatencies(kpis);
+  const trace = kpis.pipeline as PipelineTurnTrace | null | undefined;
+
   const latencyByStage: Record<string, number | null> = {
-    asr:       lats.asrMs,
-    retrieval: lats.retrievalMs,
-    llm:       lats.llmMs,
-    tts:       lats.ttsMs,
+    asr:       lats.asr,
+    retrieval: lats.retrieval,
+    llm:       lats.llm,
+    tts:       lats.tts,
+  };
+
+  const invokedByStage: Record<string, boolean> = {
+    asr:       true,
+    retrieval: lats.retrievalInvoked,
+    llm:       true,
+    tts:       true,
   };
 
   const deviceByStage: Record<string, unknown> = {
-    asr:       kpis.asr?.device,
+    asr:       kpis.asr?.device ?? trace?.asr?.device,
     retrieval: (kpis.rag as Record<string, unknown>)?.embedding_device,
-    llm:       (kpis.rag as Record<string, unknown>)?.llm_device,
-    tts:       kpis.tts?.device,
+    llm:       trace?.agent?.llm?.device ?? (kpis.rag as Record<string, unknown>)?.llm_device,
+    tts:       kpis.tts?.device ?? trace?.tts?.device,
   };
 
   const activeStage = activeStageFromPhase(phase);
 
-  // E2E latency: sum of all known stages
-  const allLats = [lats.asrMs, lats.retrievalMs, lats.llmMs, lats.ttsMs].filter(
-    (v): v is number => v !== null,
-  );
-  const e2eMs = allLats.length > 0 ? allLats.reduce((a, b) => a + b, 0) : null;
+  // Use measured wall E2E from turn trace; never sum stages (avoids TTS overlap error)
+  const e2eMs = trace?.wall?.turn_total_ms ?? null;
+  const ttfaMs = trace?.wall?.time_to_first_audio_ms ?? null;
 
   return (
     <div className="space-y-3">
@@ -140,11 +166,20 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
         <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-400">
           AI Inference Pipeline
         </h2>
-        {e2eMs !== null && (
-          <span className="rounded-full bg-intel-blue/10 px-2.5 py-0.5 text-[11px] font-semibold text-intel-blue">
-            E2E {latencyLabel(e2eMs)}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {ttfaMs !== null && (
+            <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700 border border-green-200"
+              title="Time to first audio — perceived response latency">
+              TTFA {latencyLabel(ttfaMs)}
+            </span>
+          )}
+          {e2eMs !== null && (
+            <span className="rounded-full bg-intel-blue/10 px-2.5 py-0.5 text-[11px] font-semibold text-intel-blue"
+              title="Measured wall-clock E2E (not summed)">
+              E2E {latencyLabel(e2eMs)}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Pipeline nodes */}
@@ -166,6 +201,7 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
         {STAGES.map((stage, idx) => {
           const isActive = activeStage === stage.id;
           const latMs = latencyByStage[stage.id];
+          const invoked = invokedByStage[stage.id];
           const badge = deviceBadge(deviceByStage[stage.id]);
 
           return (
@@ -175,14 +211,14 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
                 <svg width="24" height="12" viewBox="0 0 24 12" className="overflow-visible">
                   <line
                     x1="0" y1="6" x2="18" y2="6"
-                    stroke={isActive ? '#0071c5' : '#cbd5e1'}
+                    stroke={isActive ? '#0071c5' : (!invoked ? '#e5e7eb' : '#cbd5e1')}
                     strokeWidth={isActive ? 2.5 : 1.5}
-                    strokeDasharray={isActive ? '4 2' : undefined}
+                    strokeDasharray={isActive ? '4 2' : (!invoked ? '3 3' : undefined)}
                     style={isActive ? { animation: 'dash-flow 0.8s linear infinite' } : undefined}
                   />
                   <polygon
                     points="18,2 24,6 18,10"
-                    fill={isActive ? '#0071c5' : '#cbd5e1'}
+                    fill={isActive ? '#0071c5' : (!invoked ? '#e5e7eb' : '#cbd5e1')}
                   />
                 </svg>
               </div>
@@ -191,13 +227,16 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
               <div
                 className={`
                   relative flex flex-1 flex-col items-center justify-between rounded-lg border p-2 transition-all duration-300
-                  ${stage.bg} ${stage.border}
+                  ${invoked ? stage.bg : 'bg-gray-50'} ${invoked ? stage.border : 'border-gray-200'}
                   ${isActive ? 'animate-stage-pulse shadow-lg' : 'shadow-sm hover:shadow-md'}
+                  ${!invoked ? 'opacity-50' : ''}
                 `}
                 style={isActive ? { boxShadow: `0 0 16px 2px ${stage.glowColor}` } : undefined}
+                title={stage.id === 'retrieval' && !invoked ? 'Not invoked this turn (ordering path)' :
+                       stage.id === 'llm' ? 'Time to first token (TTFT)' : undefined}
               >
                 {/* Device badge top-right */}
-                {badge && (
+                {badge && invoked && (
                   <span
                     className={`absolute -right-1 -top-2 rounded-full border px-1.5 py-0 text-[9px] font-bold ${badge.cls}`}
                   >
@@ -208,18 +247,18 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
                 {/* Icon + label */}
                 <div className="flex flex-col items-center gap-0.5">
                   <span className="text-base leading-none">{stage.icon}</span>
-                  <span className={`text-[10px] font-semibold ${stage.textColor}`}>
+                  <span className={`text-[10px] font-semibold ${invoked ? stage.textColor : 'text-gray-400'}`}>
                     {stage.label}
                   </span>
                 </div>
 
                 {/* Latency chip */}
                 <div
-                  className={`mt-1 rounded-full px-1.5 py-0.5 text-[10px] font-mono font-semibold ${stage.textColor} bg-white/70`}
+                  className={`mt-1 rounded-full px-1.5 py-0.5 text-[10px] font-mono font-semibold ${invoked ? stage.textColor : 'text-gray-400'} bg-white/70`}
                   key={String(latMs)}
                   style={{ animation: latMs !== null ? 'number-tick 0.25s ease-out' : undefined }}
                 >
-                  {latencyLabel(latMs)}
+                  {latencyLabel(latMs, invoked)}
                 </div>
 
                 {/* Active indicator dot */}
@@ -255,8 +294,16 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
           <span className="mt-1 text-[10px] text-gray-400">Output</span>
         </div>
       </div>
+
+      {/* LLM label clarification when turn trace is available */}
+      {trace && (
+        <p className="text-[9px] text-gray-400 text-right">
+          LLM = time-to-first-token · E2E = measured wall-clock (TTS overlaps LLM)
+        </p>
+      )}
     </div>
   );
 }
 
 export default PipelineFlow;
+

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 
 from kiosk_core import config as cfg
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
+from kiosk_core.pipeline_latency import pipeline_store
 from kiosk_core.service import SessionService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -68,6 +69,22 @@ if cfg.ORDERING_ENABLED:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/pipeline/latest")
+def pipeline_latest() -> dict:
+    """Return the most recent completed voice turn trace with per-stage latencies."""
+    trace = pipeline_store.latest()
+    if trace is None:
+        return {"trace": None, "message": "No completed turns yet"}
+    return {"trace": trace}
+
+
+@app.get("/api/v1/pipeline/recent")
+def pipeline_recent(n: int = 5) -> dict:
+    """Return the last n completed turn traces (default 5, max 20)."""
+    count = min(max(1, n), 20)
+    return {"traces": pipeline_store.recent(count)}
 
 
 @app.get("/api/v1/devices")
