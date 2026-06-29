@@ -1,0 +1,314 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+# =============================================================================
+# Smart Kiosk Assistant - Makefile
+# =============================================================================
+
+.PHONY: help init-env setup-dirs setup-models check-env show-config \
+		build up down restart status logs \
+		logs-ovms logs-rag logs-core logs-ui logs-audio logs-tts logs-metrics \
+		test clean dev-build
+
+# =============================================================================
+# Load .env (silent if missing — check-env will warn)
+# =============================================================================
+-include .env
+export
+
+# =============================================================================
+# Configuration variables (defaults match .env)
+# =============================================================================
+
+COMPOSE_FILE     ?= docker-compose.yml
+
+# REGISTRY=false  → build images locally from source (default for dev)
+# REGISTRY=true   → pull pre-built images from Docker Hub
+REGISTRY         ?= false
+
+RELEASE_TAG      ?= 2026.1.0
+export TAG       := $(RELEASE_TAG)
+
+TARGET_DEVICE    ?= GPU
+OVMS_MODEL_NAME  ?= OpenVINO/Qwen3-4B-int8-ov
+
+# Locally-buildable services (audio-analyzer and text-to-speech require
+# edge-ai-libraries checkout; ovms-llm is always pulled upstream)
+LOCAL_BUILD_SERVICES := metrics-collector audio-analyzer text-to-speech \
+                        rag-service kiosk-core kiosk-ui
+
+# Colors
+RED    := \033[0;31m
+GREEN  := \033[0;32m
+YELLOW := \033[0;33m
+BLUE   := \033[0;34m
+NC     := \033[0m
+
+# =============================================================================
+# Help
+# =============================================================================
+
+help: ## Show this help message
+	@echo "$(BLUE)Smart Kiosk Assistant — Available Commands$(NC)"
+	@echo "==========================================="
+	@echo ""
+	@echo "$(YELLOW)Setup:$(NC)"
+	@echo "  make init-env          Create .env from .env.example"
+	@echo "  make setup-dirs        Create required runtime directories"
+	@echo "  make setup-models      Download OVMS LLM model (Qwen3-4B) via setup_models.sh"
+	@echo "  make check-env         Validate .env and required variables"
+	@echo "  make show-config       Print resolved configuration"
+	@echo ""
+	@echo "$(YELLOW)Core Commands:$(NC)"
+	@echo "  make build             Build (REGISTRY=false) or pull (REGISTRY=true) images"
+	@echo "  make up                Start all services"
+	@echo "  make down              Stop all services"
+	@echo "  make restart           Stop then start all services"
+	@echo "  make status            Show container status"
+	@echo "  make test              Run health checks on all service endpoints"
+	@echo ""
+	@echo "$(YELLOW)Logs:$(NC)"
+	@echo "  make logs              Tail logs for all services"
+	@echo "  make logs-ovms         Tail ovms-llm logs"
+	@echo "  make logs-rag          Tail rag-service logs"
+	@echo "  make logs-core         Tail kiosk-core logs"
+	@echo "  make logs-ui           Tail kiosk-ui logs"
+	@echo "  make logs-audio        Tail audio-analyzer logs"
+	@echo "  make logs-tts          Tail text-to-speech logs"
+	@echo "  make logs-metrics      Tail metrics-collector logs"
+	@echo ""
+	@echo "$(YELLOW)Development:$(NC)"
+	@echo "  make dev-build         Build a single service: make dev-build SVC=rag-service"
+	@echo "  make clean             Stop containers and remove named volumes"
+	@echo ""
+	@echo "$(YELLOW)Examples:$(NC)"
+	@echo "  make init-env                     # first-time setup"
+	@echo "  make setup-models                 # download LLM model"
+	@echo "  make build REGISTRY=false         # build all images locally"
+	@echo "  make up                           # start the stack"
+	@echo "  make build SVC=kiosk-ui           # rebuild a single service"
+	@echo "  make setup-models TARGET_DEVICE=CPU  # CPU-only setup"
+	@echo ""
+	@echo "$(YELLOW)Current settings:$(NC)"
+	@echo "  REGISTRY=$(REGISTRY)  TARGET_DEVICE=$(TARGET_DEVICE)  OVMS_MODEL_NAME=$(OVMS_MODEL_NAME)"
+	@echo ""
+
+# =============================================================================
+# Setup
+# =============================================================================
+
+init-env: ## Create .env from .env.example (backs up existing .env)
+	@if [ -f .env ]; then \
+		echo "$(YELLOW).env already exists. Back up and overwrite? [y/N]$(NC)"; \
+		read -r answer; \
+		if [ "$$answer" = "y" ] || [ "$$answer" = "Y" ]; then \
+			cp .env .env.backup; \
+			echo "$(GREEN)  Backed up to .env.backup$(NC)"; \
+			cp .env.example .env; \
+			echo "$(GREEN)✓ Created .env from .env.example$(NC)"; \
+		else \
+			echo "$(YELLOW)  Skipped$(NC)"; \
+		fi; \
+	else \
+		cp .env.example .env; \
+		echo "$(GREEN)✓ Created .env from .env.example$(NC)"; \
+	fi
+	@echo "  Edit .env and set HF_TOKEN before running 'make setup-models' or 'make up'."
+
+setup-dirs: ## Create required runtime directories
+	@echo "$(BLUE)Creating required directories...$(NC)"
+	@mkdir -p models storage
+	@echo "$(GREEN)✓ Directories ready$(NC)"
+
+setup-models: ## Download the OVMS LLM model (Qwen3-4B) via setup_models.sh
+	@echo "$(BLUE)Downloading OVMS LLM model for TARGET_DEVICE=$(TARGET_DEVICE)...$(NC)"
+	@if [ "$(TARGET_DEVICE)" = "CPU" ]; then \
+		./setup_models.sh --device CPU; \
+	elif [ "$(OVMS_MODEL_NAME)" = "OpenVINO/Qwen3-4B-int4-ov" ]; then \
+		./setup_models.sh --device $(TARGET_DEVICE) --int4; \
+	else \
+		./setup_models.sh --device $(TARGET_DEVICE); \
+	fi
+	@echo "$(GREEN)✓ Model download complete$(NC)"
+
+check-env: ## Validate .env and required variables
+	@echo "$(BLUE)Checking environment...$(NC)"
+	@if [ ! -f .env ]; then \
+		echo "$(YELLOW)  Warning: .env not found. Run 'make init-env' first.$(NC)"; \
+	fi
+	@if [ -z "$(HF_TOKEN)" ]; then \
+		echo "$(RED)  Error: HF_TOKEN is not set. Add it to .env$(NC)"; \
+		echo "  Get yours at: https://huggingface.co/settings/tokens"; \
+		exit 1; \
+	fi
+	@if [ "$(TARGET_DEVICE)" != "CPU" ] && [ "$(TARGET_DEVICE)" != "GPU" ] && [ "$(TARGET_DEVICE)" != "NPU" ]; then \
+		echo "$(RED)  Error: TARGET_DEVICE must be CPU, GPU, or NPU (got: $(TARGET_DEVICE))$(NC)"; \
+		exit 1; \
+	fi
+	@if [ "$(TARGET_DEVICE)" = "GPU" ] && [ ! -e /dev/dri/renderD128 ] && [ -z "$$(ls /dev/dri/renderD* 2>/dev/null)" ]; then \
+		echo "$(YELLOW)  Warning: TARGET_DEVICE=GPU but no /dev/dri/renderD* device found.$(NC)"; \
+		echo "  Install Intel GPU drivers or set TARGET_DEVICE=CPU in .env."; \
+	fi
+	@if [ ! -d models/$(OVMS_MODEL_NAME) ]; then \
+		echo "$(YELLOW)  Warning: OVMS model not found at models/$(OVMS_MODEL_NAME)$(NC)"; \
+		echo "  Run 'make setup-models' to download it before 'make up'."; \
+	fi
+	@echo "$(GREEN)✓ Environment OK$(NC)"
+
+show-config: ## Print resolved configuration
+	@echo "$(BLUE)Current Configuration:$(NC)"
+	@echo "======================"
+	@echo ""
+	@echo "$(YELLOW)Build:$(NC)"
+	@echo "  REGISTRY          = $(REGISTRY)"
+	@echo "  RELEASE_TAG       = $(RELEASE_TAG)"
+	@echo "  COMPOSE_FILE      = $(COMPOSE_FILE)"
+	@echo ""
+	@echo "$(YELLOW)Inference:$(NC)"
+	@echo "  TARGET_DEVICE     = $(TARGET_DEVICE)"
+	@echo "  OVMS_MODEL_NAME   = $(OVMS_MODEL_NAME)"
+	@echo "  RENDER_GID        = $(RENDER_GID)"
+	@echo ""
+	@echo "$(YELLOW)Authentication:$(NC)"
+	@echo "  HF_TOKEN          = $$([ -n '$(HF_TOKEN)' ] && echo '***set***' || echo 'NOT SET')"
+	@echo ""
+
+# =============================================================================
+# Build
+# =============================================================================
+
+build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
+	@echo "$(BLUE)Preparing Docker images...$(NC)"
+	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
+		echo "$(YELLOW)  REGISTRY=false → Building all images locally$(NC)"; \
+		docker compose -f $(COMPOSE_FILE) build $(SVC); \
+	else \
+		echo "$(YELLOW)  REGISTRY=true → Pulling images from registry$(NC)"; \
+		docker compose -f $(COMPOSE_FILE) pull \
+			metrics-collector audio-analyzer text-to-speech rag-service kiosk-core kiosk-ui; \
+	fi
+	@echo "$(GREEN)✓ Images ready$(NC)"
+
+# =============================================================================
+# Up / Down
+# =============================================================================
+
+up: check-env setup-dirs ## Start all services
+	@echo "$(BLUE)Starting Smart Kiosk Assistant...$(NC)"
+	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
+		docker compose -f $(COMPOSE_FILE) up -d --build; \
+	else \
+		docker compose -f $(COMPOSE_FILE) up -d; \
+	fi
+	@echo ""
+	@echo "$(GREEN)✓ Stack started$(NC)"
+	@echo "  Kiosk UI        → http://localhost:7860"
+	@echo "  kiosk-core API  → http://localhost:8012/docs"
+	@echo "  rag-service API → http://localhost:8020/docs"
+	@echo "  OVMS LLM        → http://localhost:8000/v3/models"
+	@echo "  Metrics         → http://localhost:9000/metrics"
+	@echo ""
+	@echo "  Run 'make logs' to follow service output"
+	@echo "  Run 'make test' to verify all endpoints are healthy"
+
+down: ## Stop all services
+	@echo "$(BLUE)Stopping Smart Kiosk Assistant...$(NC)"
+	docker compose -f $(COMPOSE_FILE) down
+	@echo "$(GREEN)✓ All services stopped$(NC)"
+
+restart: down up ## Stop then restart all services
+
+# =============================================================================
+# Status & Monitoring
+# =============================================================================
+
+status: ## Show container status
+	@echo "$(BLUE)Container Status:$(NC)"
+	@docker compose -f $(COMPOSE_FILE) ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+
+# =============================================================================
+# Health Tests
+# =============================================================================
+
+test: ## Run health checks on all service endpoints
+	@echo "$(BLUE)Running health checks...$(NC)"
+	@_pass=0; _fail=0; \
+	_check() { \
+		name=$$1; url=$$2; \
+		result=$$(curl --noproxy '*' -s -o /dev/null -w "%{http_code}" --max-time 5 "$$url" 2>/dev/null); \
+		if [ "$$result" = "200" ]; then \
+			echo "  $(GREEN)✓ $$name$(NC) ($$url)"; \
+		else \
+			echo "  $(RED)✗ $$name$(NC) ($$url) → HTTP $$result"; \
+		fi; \
+	}; \
+	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8000/v3/models | grep -q "model" \
+		&& echo "  $(GREEN)✓ ovms-llm$(NC) (http://127.0.0.1:8000/v3/models)" \
+		|| echo "  $(RED)✗ ovms-llm$(NC) (http://127.0.0.1:8000/v3/models)"; \
+	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8010/health | grep -q "ok" \
+		&& echo "  $(GREEN)✓ audio-analyzer$(NC) (http://127.0.0.1:8010/health)" \
+		|| echo "  $(RED)✗ audio-analyzer$(NC) (http://127.0.0.1:8010/health)"; \
+	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8011/health | grep -q "ok" \
+		&& echo "  $(GREEN)✓ text-to-speech$(NC) (http://127.0.0.1:8011/health)" \
+		|| echo "  $(RED)✗ text-to-speech$(NC) (http://127.0.0.1:8011/health)"; \
+	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8020/health | grep -q "ok" \
+		&& echo "  $(GREEN)✓ rag-service$(NC) (http://127.0.0.1:8020/health)" \
+		|| echo "  $(RED)✗ rag-service$(NC) (http://127.0.0.1:8020/health)"; \
+	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8012/health | grep -q "ok" \
+		&& echo "  $(GREEN)✓ kiosk-core$(NC) (http://127.0.0.1:8012/health)" \
+		|| echo "  $(RED)✗ kiosk-core$(NC) (http://127.0.0.1:8012/health)"; \
+	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:7860 | grep -q "html" \
+		&& echo "  $(GREEN)✓ kiosk-ui$(NC) (http://127.0.0.1:7860)" \
+		|| echo "  $(RED)✗ kiosk-ui$(NC) (http://127.0.0.1:7860)"
+
+# =============================================================================
+# Logs
+# =============================================================================
+
+logs: ## Tail logs for all services
+	docker compose -f $(COMPOSE_FILE) logs -f
+
+logs-ovms: ## Tail ovms-llm logs
+	docker logs -f ovms-llm
+
+logs-rag: ## Tail rag-service logs
+	docker logs -f rag-service
+
+logs-core: ## Tail kiosk-core logs
+	docker logs -f kiosk-core
+
+logs-ui: ## Tail kiosk-ui logs
+	docker logs -f kiosk-ui
+
+logs-audio: ## Tail audio-analyzer logs
+	docker logs -f audio-analyzer
+
+logs-tts: ## Tail text-to-speech logs
+	docker logs -f text-to-speech
+
+logs-metrics: ## Tail metrics-collector logs
+	docker logs -f metrics-collector
+
+# =============================================================================
+# Development
+# =============================================================================
+
+dev-build: ## Rebuild and restart a single service: make dev-build SVC=rag-service
+	@if [ -z "$(SVC)" ]; then \
+		echo "$(RED)Error: specify a service — e.g. make dev-build SVC=rag-service$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Rebuilding $(SVC)...$(NC)"
+	docker compose -f $(COMPOSE_FILE) build $(SVC)
+	docker compose -f $(COMPOSE_FILE) up -d $(SVC)
+	@echo "$(GREEN)✓ $(SVC) rebuilt and restarted$(NC)"
+
+# =============================================================================
+# Clean
+# =============================================================================
+
+clean: ## Stop containers and remove named volumes
+	@echo "$(BLUE)Stopping services and removing volumes...$(NC)"
+	docker compose -f $(COMPOSE_FILE) down -v
+	@echo "$(GREEN)✓ Containers stopped and volumes removed$(NC)"
+	@echo "  Note: models/ directory is preserved. Delete it manually to free ~4 GB."
