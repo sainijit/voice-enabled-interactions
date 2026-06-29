@@ -66,10 +66,23 @@ async def _attach_upsell(order_result: dict[str, Any]) -> dict[str, Any]:
         suggestions = await _svc().get_upsell_suggestions(
             UpsellRequest(product_ids=product_ids)
         )
-        order_result["upsell_suggestions"] = [s.model_dump() for s in suggestions]
+        # Pre-format a ready-to-speak display string per suggestion so the LLM
+        # echoes the exact name and price verbatim instead of hallucinating
+        # prices (e.g. inventing "Pepsi (₹40)" when the real price is ₹59).
+        formatted: list[dict[str, Any]] = []
+        for s in suggestions:
+            item = s.model_dump()
+            prod = item.get("product", {})
+            name = prod.get("name", "")
+            price = prod.get("price")
+            price_int = int(price) if price is not None and float(price).is_integer() else price
+            item["display"] = f"{name} (₹{price_int})" if name else ""
+            formatted.append(item)
+        order_result["upsell_suggestions"] = formatted
         logger.info(
-            "[MCP-SERVER] attached %d upsell suggestion(s) to order",
-            len(suggestions),
+            "[MCP-SERVER] attached %d upsell suggestion(s) to order: %s",
+            len(formatted),
+            [f["display"] for f in formatted],
         )
     except Exception as exc:  # upsell must never break order placement
         logger.warning("[MCP-SERVER] upsell attach failed: %s", exc)
