@@ -23,8 +23,16 @@ export
 COMPOSE_FILE     ?= docker-compose.yml
 
 # REGISTRY=false  → build images locally from source (default for dev)
-# REGISTRY=true   → pull pre-built images from Docker Hub
+# REGISTRY=true   → pull pre-built images from Docker Hub / use .env REGISTRY value
+# NOTE: "false" is a build-mode flag only. docker-compose always receives the real
+#       registry name (REGISTRY=intel) so image tags are never "false/<svc>:...".
 REGISTRY         ?= false
+
+# _DOCKER_REGISTRY: the actual registry prefix passed to docker-compose.
+# When the user passes REGISTRY=false it is treated as a build-mode switch;
+# the real registry name comes from .env (default: intel).
+_ENV_REGISTRY    ?= intel
+_DOCKER_REGISTRY  = $(if $(filter false FALSE,$(REGISTRY)),$(_ENV_REGISTRY),$(REGISTRY))
 
 RELEASE_TAG      ?= 2026.1.0
 export TAG       := $(RELEASE_TAG)
@@ -32,10 +40,15 @@ export TAG       := $(RELEASE_TAG)
 TARGET_DEVICE    ?= GPU
 OVMS_MODEL_NAME  ?= OpenVINO/Qwen3-4B-int8-ov
 
-# Locally-buildable services (audio-analyzer and text-to-speech require
-# edge-ai-libraries checkout; ovms-llm is always pulled upstream)
-LOCAL_BUILD_SERVICES := metrics-collector audio-analyzer text-to-speech \
-                        rag-service kiosk-core kiosk-ui
+# edge-ai-libraries path (audio-analyzer + text-to-speech build contexts live here)
+EAL_PATH         := ../edge-ai-libraries/microservices
+
+# Services with fully local build contexts (no edge-ai-libraries needed)
+LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui
+
+# Services that require edge-ai-libraries checkout to build from source.
+# When EAL_PATH is absent, pre-built images (intel/*:RELEASE_TAG) are used instead.
+EAL_SERVICES     := audio-analyzer text-to-speech
 
 # Colors
 RED    := \033[0;31m
@@ -193,9 +206,10 @@ show-config: ## Print resolved configuration
 	@echo "======================"
 	@echo ""
 	@echo "$(YELLOW)Build:$(NC)"
-	@echo "  REGISTRY          = $(REGISTRY)"
+	@echo "  REGISTRY          = $(REGISTRY)  (docker-compose prefix: $(_DOCKER_REGISTRY))"
 	@echo "  RELEASE_TAG       = $(RELEASE_TAG)"
 	@echo "  COMPOSE_FILE      = $(COMPOSE_FILE)"
+	@echo "  EAL_PATH          = $(EAL_PATH)  ($$([ -d '$(EAL_PATH)' ] && echo 'found' || echo 'not present — EAL services use pre-built images'))"
 	@echo ""
 	@echo "$(YELLOW)Inference:$(NC)"
 	@echo "  TARGET_DEVICE     = $(TARGET_DEVICE)"
@@ -213,12 +227,20 @@ show-config: ## Print resolved configuration
 build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 	@echo "$(BLUE)Preparing Docker images...$(NC)"
 	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
-		echo "$(YELLOW)  REGISTRY=false → Building all images locally$(NC)"; \
-		docker compose -f $(COMPOSE_FILE) build $(SVC); \
+		echo "$(YELLOW)  REGISTRY=false → Building local services from source$(NC)"; \
+		REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) build $(LOCAL_ONLY_SERVICES); \
+		if [ -d "$(EAL_PATH)/audio-analyzer" ] && [ -d "$(EAL_PATH)/text-to-speech" ]; then \
+			echo "$(YELLOW)  Building EAL services (audio-analyzer, text-to-speech)...$(NC)"; \
+			REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) build audio-analyzer text-to-speech; \
+		else \
+			echo "$(YELLOW)  ⚠ edge-ai-libraries not found at $(EAL_PATH)$(NC)"; \
+			echo "    audio-analyzer and text-to-speech use pre-built images ($(_DOCKER_REGISTRY)/*:$(RELEASE_TAG))"; \
+			echo "    To build from source: see docs/user-guide/get-started.md (edge-ai-libraries sparse clone)"; \
+		fi; \
 	else \
-		echo "$(YELLOW)  REGISTRY=true → Pulling images from registry$(NC)"; \
-		docker compose -f $(COMPOSE_FILE) pull \
-			metrics-collector audio-analyzer text-to-speech rag-service kiosk-core kiosk-ui; \
+		echo "$(YELLOW)  REGISTRY=$(REGISTRY) → Pulling images from registry$(NC)"; \
+		REGISTRY=$(REGISTRY) docker compose -f $(COMPOSE_FILE) pull \
+			$(LOCAL_ONLY_SERVICES) $(EAL_SERVICES); \
 	fi
 	@echo "$(GREEN)✓ Images ready$(NC)"
 
@@ -228,11 +250,7 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 
 up: check-env setup-dirs ## Start all services
 	@echo "$(BLUE)Starting Smart Kiosk Assistant...$(NC)"
-	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
-		docker compose -f $(COMPOSE_FILE) up -d --build; \
-	else \
-		docker compose -f $(COMPOSE_FILE) up -d; \
-	fi
+	REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) up -d
 	@echo ""
 	@echo "$(GREEN)✓ Stack started$(NC)"
 	@echo "  Kiosk UI        → http://localhost:7860"
