@@ -20,6 +20,9 @@ const CATEGORY_META: { key: string; label: string; icon: string }[] = [
   { key: 'desserts', label: 'Desserts', icon: '🍰' },
 ];
 
+/** Categories shown during peak hours (fast-prep, low-queue impact). */
+const PEAK_CATEGORIES = new Set(['burgers', 'beverages', 'sides']);
+
 const categoryMeta = (key: string) =>
   CATEGORY_META.find((c) => c.key === key) ?? {
     key,
@@ -27,7 +30,12 @@ const categoryMeta = (key: string) =>
     icon: '🍽',
   };
 
-export function MenuPanel() {
+interface MenuPanelProps {
+  /** When true, only fast-prep peak categories are shown. */
+  peakOnly?: boolean;
+}
+
+export function MenuPanel({ peakOnly = false }: MenuPanelProps) {
   const [products, setProducts] = useState<Product[] | null>(null);
   const mountedRef = useRef(false);
 
@@ -45,8 +53,11 @@ export function MenuPanel() {
   // Group products by category, ordered per CATEGORY_META then any extras.
   const grouped = useMemo(() => {
     if (!products) return [];
+    const filtered = peakOnly
+      ? products.filter((p) => PEAK_CATEGORIES.has(p.category))
+      : products;
     const byCat = new Map<string, Product[]>();
-    for (const p of products) {
+    for (const p of filtered) {
       const list = byCat.get(p.category) ?? [];
       list.push(p);
       byCat.set(p.category, list);
@@ -59,7 +70,7 @@ export function MenuPanel() {
       ...categoryMeta(key),
       items: (byCat.get(key) ?? []).sort((a, b) => a.name.localeCompare(b.name)),
     }));
-  }, [products]);
+  }, [products, peakOnly]);
 
   if (products === null) {
     return <p className="px-1 py-3 text-sm text-kiosk-textlo">Loading menu…</p>;

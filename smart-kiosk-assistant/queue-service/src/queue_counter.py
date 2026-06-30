@@ -208,6 +208,14 @@ class QueueCounter:
 
     def _update_count(self, now: float) -> None:
         count = self._current_count()
+        # Always push the latest count into the shared queue_state so the API
+        # endpoint always returns a fresh value regardless of log_mode.
+        try:
+            import queue_state
+            queue_state.set_count(count, self._medium_threshold, self._high_threshold)
+        except Exception:  # noqa: BLE001
+            pass
+
         if self._log_mode == "interval":
             if now - self._last_log_time >= self._log_interval:
                 logger.info("queue_count=%d", count)
@@ -259,5 +267,13 @@ class QueueCounter:
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 cv2.putText(mat, f"FPS: {self._fps:.0f}",
                             (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                # Push the annotated frame into the shared buffer so the
+                # HTTP MJPEG streaming endpoint can serve it.
+                try:
+                    import frame_buffer
+                    frame_buffer.put(mat.copy())
+                except Exception:  # noqa: BLE001 - frame push is best-effort
+                    pass
         except Exception:  # noqa: BLE001 - overlay is best-effort
             logger.debug("Debug overlay skipped", exc_info=True)

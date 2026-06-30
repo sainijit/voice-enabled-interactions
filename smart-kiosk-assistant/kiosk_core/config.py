@@ -80,3 +80,16 @@ IDENTITY_SERVICE_URL = os.getenv(
     "KIOSK_CORE_IDENTITY_URL",
     "http://127.0.0.1:8013",
 )
+
+# ---------------------------------------------------------------------------
+# Queue-service integration (dynamic peak-hour menu)
+# ---------------------------------------------------------------------------
+# When enabled, the queue-service exposes a queue count that kiosk-core can
+# query (future server-side menu filtering).  The UI also polls this directly
+# via /queue-svc/api/v1/queue/count proxied through nginx.
+QUEUE_SERVICE_ENABLED = os.getenv("KIOSK_CORE_QUEUE_SERVICE_ENABLED", "true").lower() not in ("false", "0", "no")
+
+QUEUE_SERVICE_URL = os.getenv(
+    "KIOSK_CORE_QUEUE_SERVICE_URL",
+    "http://127.0.0.1:8090",
+)

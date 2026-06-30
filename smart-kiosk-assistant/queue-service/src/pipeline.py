@@ -74,6 +74,13 @@ class QueuePipeline:
         self._debug_sink = str(debug_cfg.get("sink", "autovideosink"))
         self._fps_logging = bool(debug_cfg.get("fps_logging", False))
 
+        api_cfg = self._config.get("api", {}) or {}
+        self._api_enabled = bool(api_cfg.get("enabled", False))
+        jpeg_quality = int(api_cfg.get("jpeg_quality", 80))
+        if self._api_enabled:
+            import frame_buffer
+            frame_buffer.configure(jpeg_quality)
+
         # GStreamer's rtspsrc connects through GIO, which honours the proxy
         # environment variables. The internal RTSP host must bypass any HTTP
         # proxy or the connection is wrongly routed and fails immediately.
@@ -193,6 +200,8 @@ class QueuePipeline:
             return {"sync": False}
         if etype == "autovideosink":
             return {"sync": False}
+        if etype == "appsink":
+            return {"emit-signals": True, "max-buffers": 1, "drop": True, "sync": False}
         if etype == "capsfilter":
             return {"caps": "video/x-raw,format=BGRx"}
         # decodebin, videoconvert and any other elements need no properties.
@@ -206,6 +215,9 @@ class QueuePipeline:
         types = [element["type"] for element in elements]
         if self._debug:
             types = self._debug_element_chain(types)
+        elif self._api_enabled:
+            # API enabled but no debug display: use appsink for MJPEG streaming.
+            types = self._api_element_chain(types)
         if self._is_yolo_model():
             # Insert the PersonFilter (a gvapython element) right before
             # gvatrack so multi-class YOLO detections are reduced to persons at
@@ -258,6 +270,24 @@ class QueuePipeline:
             chain.append(etype)
         return chain
 
+    def _api_element_chain(self, types: list[str]) -> list[str]:
+        """Replace fakesink with appsink branch for MJPEG streaming.
+
+        Inserts gvawatermark + videoconvert + BGRx capsfilter before gvapython
+        (so _draw_overlay has colour frames) then routes to an appsink whose
+        new-sample signal feeds frame_buffer. Used when api.enabled=true and
+        visualization=false.
+        """
+        chain: list[str] = []
+        for etype in types:
+            if etype == "gvapython":
+                chain.extend(["gvawatermark", "videoconvert", "capsfilter"])
+            if etype == "fakesink":
+                chain.extend(["videoconvert", "appsink"])
+                continue
+            chain.append(etype)
+        return chain
+
     def build(self) -> None:
         """Construct the GStreamer pipeline and attach the bus watch."""
         launch_string = self._build_launch_string()
@@ -267,9 +297,52 @@ class QueuePipeline:
         if source is not None:
             self._setup_rtsp_source(source)
 
+        # Wire appsink new-sample signal → frame_buffer when API streaming is on.
+        if self._api_enabled and not self._debug:
+            appsink = self.pipeline.get_by_name("appsink0")
+            if appsink is None:
+                # parse_launch auto-names elements; try without index suffix too.
+                appsink = self.pipeline.get_by_name("appsink")
+            if appsink is not None:
+                appsink.connect("new-sample", self._on_new_sample)
+                logger.info("Appsink wired for MJPEG streaming")
+            else:
+                logger.warning("API enabled but appsink element not found in pipeline")
+
         self._bus = self.pipeline.get_bus()
         self._bus.add_signal_watch()
         self._bus.connect("message", self._on_bus_message)
+
+    def _on_new_sample(self, appsink) -> int:
+        """Appsink callback: pull buffer, convert to numpy, push to frame_buffer."""
+        try:
+            import numpy as np
+            import frame_buffer
+
+            sample = appsink.emit("pull-sample")
+            if sample is None:
+                return Gst.FlowReturn.OK
+
+            buf = sample.get_buffer()
+            caps = sample.get_caps()
+            structure = caps.get_structure(0)
+            width = structure.get_int("width")[1]
+            height = structure.get_int("height")[1]
+
+            success, map_info = buf.map(Gst.MapFlags.READ)
+            if not success:
+                return Gst.FlowReturn.OK
+            try:
+                # BGRx (4-channel) from capsfilter; drop alpha channel for cv2
+                arr = np.frombuffer(map_info.data, dtype=np.uint8)
+                arr = arr.reshape((height, width, 4))
+                bgr = arr[:, :, :3].copy()
+                frame_buffer.put(bgr)
+            finally:
+                buf.unmap(map_info)
+        except Exception:  # noqa: BLE001
+            logger.debug("appsink frame push failed", exc_info=True)
+        return Gst.FlowReturn.OK
 
     def _setup_rtsp_source(self, source: Gst.Element) -> None:
         """Apply RTSP transport settings to the source element.
