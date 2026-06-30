@@ -36,6 +36,15 @@ class VerifyResponse(BaseModel):
     reason: str | None = None
 
 
+class StatsResponse(BaseModel):
+    """Operational counts for the identity subsystem (Phase 3)."""
+
+    profiles: int
+    face_index_size: int
+    voice_index_size: int
+    inference_ready: bool
+
+
 class RegisterRequest(BaseModel):
     """Admin/manual enrolment request (used by bootstrap and ops tooling)."""
 

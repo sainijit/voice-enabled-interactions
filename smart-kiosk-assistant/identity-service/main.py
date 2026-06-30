@@ -20,6 +20,7 @@ from identity_core.models import (
     ChallengeResponse,
     RegisterRequest,
     RegisterResponse,
+    StatsResponse,
     VerifyRequest,
     VerifyResponse,
 )
@@ -41,6 +42,8 @@ async def lifespan(app: FastAPI):
     logger.info(
         "[STARTUP] db_path=%s faiss_dir=%s", settings.db_path, settings.faiss_dir
     )
+    # ── Storage bootstrap (Phase 3) ──────────────────────────────────────────
+    await service.init_storage()
     # ── Bootstrap automatic test registration (Phase 5) ──────────────────────
     if settings.bootstrap_on_start:
         if settings.profiles:
@@ -68,6 +71,11 @@ def health() -> dict[str, str]:
 @app.get("/api/v1/identity/challenge", response_model=ChallengeResponse)
 def get_challenge() -> ChallengeResponse:
     return service.get_challenge()
+
+
+@app.get("/api/v1/identity/stats", response_model=StatsResponse)
+async def get_stats() -> StatsResponse:
+    return await service.get_stats()
 
 
 @app.post("/api/v1/identity/verify", response_model=VerifyResponse)
