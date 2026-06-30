@@ -26,7 +26,7 @@ services:
   # ---------------------------------------------------------------------------
   metrics-collector:
     build:
-      context: ./metrics-collector
+      context: ./kiosk_core/metrics-collector
       dockerfile: Dockerfile
     container_name: metrics-collector
     privileged: true
@@ -97,7 +97,7 @@ services:
     # dependent services (kiosk-core / kiosk-ui).
     healthcheck:
       test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=5).read()"]
+            "import urllib.request; opener = urllib.request.build_opener(urllib.request.ProxyHandler({})); opener.open('http://127.0.0.1:8010/health', timeout=5).read()"]
       interval: 15s
       timeout: 10s
       start_period: 240s
@@ -138,7 +138,7 @@ services:
     # `depends_on: service_healthy` gates.
     healthcheck:
       test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=5).read()"]
+            "import urllib.request; opener = urllib.request.build_opener(urllib.request.ProxyHandler({})); opener.open('http://127.0.0.1:8011/health', timeout=5).read()"]
       interval: 15s
       timeout: 10s
       start_period: 240s
@@ -287,6 +287,14 @@ services:
     container_name: kiosk-ui
     ports:
       - "7860:7860"
+    environment:
+      KIOSK_CORE_UI_BASE_URL:     http://kiosk-core:8012
+      KIOSK_CORE_UI_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
+      KIOSK_CORE_UI_RAG_URL:      http://rag-service:8020/api/v1/query
+      KIOSK_CORE_UI_TTS_URL:      http://text-to-speech:8011/v1/audio/speech
+    volumes:
+      - generated_audio:/app/generated_audio
+    command: ["python3", "gradio_app.py"]
     depends_on:
       kiosk-core:
         condition: service_healthy

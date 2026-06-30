@@ -85,11 +85,20 @@ class LLMService:
         text = str(result)
         completion_tokens = self.count_tokens(text)
         tps = (completion_tokens / dt) if dt > 0 else 0.0
+        # For non-streaming, approximate TTFT as total_time - decode_window.
+        # decode_window = completion_tokens / tps (when tps > 0).
+        decode_secs = (completion_tokens / tps) if tps > 0 else 0.0
+        approx_ttft_ms = max(0.0, (dt - decode_secs) * 1000)
         logger.info(
             "[LLM] generate prompt_tokens=%d completion_tokens=%d elapsed=%.2fs tps=%.1f",
             prompt_tokens, completion_tokens, dt, tps,
         )
         llm_latency.record(dt * 1000)
+        llm_latency.record_metrics(
+            ttft_ms=approx_ttft_ms,
+            tokens_per_sec=tps,
+            total_tokens=completion_tokens,
+        )
         return text
 
     def generate_stream(
@@ -100,11 +109,16 @@ class LLMService:
     ) -> Generator[str, None, None]:
         gen_kwargs = self._generation_kwargs(max_tokens=max_tokens, temperature=temperature)
         _t0 = time.monotonic()
+        first_token_time: float | None = None
+        generated_chunks: list[str] = []
         with self._lock:
             try:
                 streamer = self._llm.generate_stream(prompt, **gen_kwargs)
                 try:
                     for token in streamer:
+                        if first_token_time is None:
+                            first_token_time = time.monotonic()
+                        generated_chunks.append(token)
                         yield token
                 except queue.Empty:
                     # TextIteratorStreamer raises queue.Empty when no token arrives
@@ -122,9 +136,25 @@ class LLMService:
                 self._reload_llm_locked()
                 result = self._llm.generate(prompt, **gen_kwargs)
                 if result:
-                    yield result
+                    if first_token_time is None:
+                        first_token_time = time.monotonic()
+                    text = str(result)
+                    generated_chunks.append(text)
+                    yield text
             finally:
-                llm_latency.record((time.monotonic() - _t0) * 1000)
+                end_time = time.monotonic()
+                elapsed = end_time - _t0
+                llm_latency.record(elapsed * 1000)
+                completion_text = "".join(generated_chunks)
+                completion_tokens = self.count_tokens(completion_text)
+                ttft_ms = ((first_token_time - _t0) * 1000) if first_token_time is not None else None
+                decode_secs = (end_time - first_token_time) if first_token_time is not None else elapsed
+                tps = (completion_tokens / decode_secs) if decode_secs > 0 and completion_tokens > 0 else None
+                llm_latency.record_metrics(
+                    ttft_ms=ttft_ms,
+                    tokens_per_sec=tps,
+                    total_tokens=completion_tokens,
+                )
                 self._post_generation_locked()
 
     def count_tokens(self, text: str) -> int:
