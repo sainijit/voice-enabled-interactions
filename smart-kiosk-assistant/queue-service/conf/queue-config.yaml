@@ -64,5 +64,13 @@ debug:
   # counting/tracking. For validation only.
   fps_logging: false
 
+api:
+  # HTTP API + MJPEG stream server.
+  # Runs in a daemon thread alongside the GLib pipeline main loop.
+  enabled: true
+  port: 8090
+  host: "0.0.0.0"
+  jpeg_quality: 80              # JPEG encoding quality for MJPEG stream (1-100)
+
 logging:
   level: "INFO"

@@ -32,5 +32,6 @@ RUN mkdir -p /app/queue-service/models \
 
 USER ${APP_UID}:${APP_GID}
 
-# Scaffolding only — entry point logic is not implemented yet.
+EXPOSE 8090
+
 ENTRYPOINT ["python3", "src/main.py"]

@@ -59,6 +59,43 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
+  # queue-service: YOLOv8 + OpenVINO person-counting pipeline.
+  #
+  # Reads the RTSP stream from rtsp-streamer, runs person detection + tracking,
+  # counts people in a configurable ROI, and exposes:
+  #   GET /api/v1/queue/count  — JSON { count, status, timestamp }
+  #   GET /stream              — MJPEG video with bounding-box overlay
+  #
+  # The kiosk-ui nginx proxy routes /queue-svc/* → http://queue-service:8090/
+  # ---------------------------------------------------------------------------
+  queue-service:
+    build:
+      context: ./queue-service
+      dockerfile: docker/Dockerfile
+    image: ${REGISTRY:-intel}/queue-service:${RELEASE_TAG:-latest}
+    container_name: queue-service
+    user: "1000:1000"
+    ports:
+      - "8090:8090"
+    environment:
+      NO_PROXY: "localhost,127.0.0.1,rtsp-streamer,queue-service"
+      no_proxy: "localhost,127.0.0.1,rtsp-streamer,queue-service"
+    volumes:
+      - ./queue-service/conf:/app/queue-service/conf:ro
+      - ./queue-service/models:/app/queue-service/models:ro
+    depends_on:
+      rtsp-streamer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
   # metrics-collector: OS-level hardware utilization collector.
   # Built on intel/retail-benchmark which provides supervisord, qmassa (Intel
   # GPU), Intel NPU tool, Intel PCM (power), sar (CPU), and free (memory).
@@ -309,9 +346,12 @@ services:
       # start with `--profile identity` to bring up the identity-service.
       KIOSK_CORE_IDENTITY_ENABLED: "${KIOSK_CORE_IDENTITY_ENABLED:-false}"
       KIOSK_CORE_IDENTITY_URL:     http://identity-service:8013
+      # Queue-service integration (dynamic peak-hour menu)
+      KIOSK_CORE_QUEUE_SERVICE_ENABLED: "${KIOSK_CORE_QUEUE_SERVICE_ENABLED:-true}"
+      KIOSK_CORE_QUEUE_SERVICE_URL:     http://queue-service:8090
       # Bypass corporate proxy for intra-cluster traffic
-      NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,172.16.0.0/12,10.0.0.0/8"
-      no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,172.16.0.0/12,10.0.0.0/8"
+      NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,queue-service,172.16.0.0/12,10.0.0.0/8"
+      no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,queue-service,172.16.0.0/12,10.0.0.0/8"
     volumes:
       - generated_audio:/app/generated_audio
       - kiosk_db:/app/data
