@@ -1,12 +1,12 @@
 """IdentityService — orchestration layer.
 
-Owns the challenge provider and (in later phases) the storage repository, FAISS
-index manager, and OpenVINO inference engines.  Routers call this service only;
-they never touch SQLite, FAISS, or inference directly.
+Owns the challenge provider, the SQLite loyalty-profile repository, and the FAISS
+index managers (face + voice).  Routers call this service only; they never touch
+SQLite, FAISS, or inference directly.
 
-Phase 2 status: ``challenge`` is fully functional; ``verify`` and ``register``
-return structured "pipeline not ready" responses until the inference layer
-(Phases 4–6) is wired in.
+Phase 3 status: storage layer (SQLite + FAISS) is wired and ``challenge`` /
+``stats`` are functional.  ``verify`` and ``register`` remain gated on the
+inference pipeline (Phases 4–6) since they need OpenVINO embeddings.
 """
 
 from __future__ import annotations
@@ -19,9 +19,13 @@ from identity_core.models import (
     ChallengeResponse,
     RegisterRequest,
     RegisterResponse,
+    StatsResponse,
     VerifyRequest,
     VerifyResponse,
 )
+from identity_core.persistence.db import get_db, init_db
+from identity_core.persistence.faiss_index import FaissIndexManager
+from identity_core.persistence.repository import SqliteProfileRepository
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +35,35 @@ class IdentityService:
 
     def __init__(self, settings: Settings):
         self._settings = settings
+        self._db_path = settings.db_path
         self._challenge = ChallengeProvider(settings.prompts)
+
+        # ── Storage layer (Phase 3) ──────────────────────────────────────────
+        self._face_index = FaissIndexManager(
+            dim=settings.face_embedding_dim,
+            index_path=settings.face_index_path,
+            name="face",
+        )
+        self._voice_index = FaissIndexManager(
+            dim=settings.voice_embedding_dim,
+            index_path=settings.voice_index_path,
+            name="voice",
+        )
+
         # Wired in later phases:
-        #   self._profiles  : AbstractProfileRepository  (Phase 3)
-        #   self._face_index / self._voice_index : FaissIndexManager (Phase 3)
         #   self._face_engine / self._voice_engine : OpenVINO (Phase 4)
         self._inference_ready = False
+
+    # ── lifecycle ────────────────────────────────────────────────────────────
+
+    async def init_storage(self) -> None:
+        """Bootstrap the shared SQLite schema (idempotent)."""
+        await init_db(self._db_path)
+        logger.info(
+            "[IDENTITY] Storage ready — face_index=%d voice_index=%d",
+            self._face_index.size,
+            self._voice_index.size,
+        )
 
     # ── Challenge ────────────────────────────────────────────────────────────
 
@@ -44,6 +71,19 @@ class IdentityService:
         challenge_id, prompt_text = self._challenge.next_challenge()
         logger.debug("[IDENTITY] Issued challenge %s", challenge_id)
         return ChallengeResponse(challenge_id=challenge_id, prompt_text=prompt_text)
+
+    # ── Stats ────────────────────────────────────────────────────────────────
+
+    async def get_stats(self) -> StatsResponse:
+        async with get_db(self._db_path) as db:
+            repo = SqliteProfileRepository(db)
+            profiles = await repo.count()
+        return StatsResponse(
+            profiles=profiles,
+            face_index_size=self._face_index.size,
+            voice_index_size=self._voice_index.size,
+            inference_ready=self._inference_ready,
+        )
 
     # ── Verify ───────────────────────────────────────────────────────────────
 
