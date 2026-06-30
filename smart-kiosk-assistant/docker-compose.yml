@@ -256,6 +256,10 @@ services:
       KIOSK_CORE_DB_PATH:          /app/data/kiosk.db
       KIOSK_CORE_PRODUCTS_YAML:    /app/configs/ordering/products.yaml
       KIOSK_CORE_UPSELL_RULES_YAML: /app/configs/ordering/upsell_rules.yaml
+      # Identity / biometric auth feature (app-layer flag). Set to "true" AND
+      # start with `--profile identity` to bring up the identity-service.
+      KIOSK_CORE_IDENTITY_ENABLED: "${KIOSK_CORE_IDENTITY_ENABLED:-false}"
+      KIOSK_CORE_IDENTITY_URL:     http://identity-service:8013
       # Bypass corporate proxy for intra-cluster traffic
       NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,172.16.0.0/12,10.0.0.0/8"
       no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,172.16.0.0/12,10.0.0.0/8"
@@ -277,6 +281,62 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # identity-service: multimodal biometric authentication (Face ID + Voiceprint).
+  #
+  # Gated behind the `identity` compose profile (container-layer flag) — it only
+  # starts when you run, e.g.:
+  #     KIOSK_CORE_IDENTITY_ENABLED=true docker compose --profile identity up -d
+  # The app-layer flag KIOSK_CORE_IDENTITY_ENABLED tells kiosk-core to call it.
+  #
+  # Shares the same kiosk_db volume as kiosk-core (loyalty_profiles table lives
+  # in kiosk.db). FAISS indices live in the separate identity_data volume.
+  # ---------------------------------------------------------------------------
+  identity-service:
+    build:
+      context: .
+      dockerfile: identity-service/Dockerfile
+    image: ${REGISTRY:-intel}/identity-service:${RELEASE_TAG:-latest}
+    container_name: identity-service
+    profiles: ["identity"]
+    user: "1000:1000"
+    ports:
+      - "8013:8013"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - "${RENDER_GID:-992}"
+    environment:
+      BOOTSTRAP_ON_START:        "${BOOTSTRAP_ON_START:-true}"
+      IDENTITY_DB_PATH:          /app/data/kiosk.db
+      IDENTITY_FAISS_DIR:        /app/data/identity
+      IDENTITY_MODELS_DIR:       /app/models
+      IDENTITY_DEVICE:           "${IDENTITY_DEVICE:-GPU}"
+      IDENTITY_CONFIG_YAML:      /app/configs/identity/identity_config.yaml
+      IDENTITY_PROMPTS_YAML:     /app/configs/identity/verification_prompts.yaml
+      NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,identity-service,172.16.0.0/12,10.0.0.0/8"
+      no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,identity-service,172.16.0.0/12,10.0.0.0/8"
+    volumes:
+      # Shared SQLite DB (same file kiosk-core uses).
+      - kiosk_db:/app/data
+      # FAISS indices live alongside the DB volume but in their own subdir.
+      - identity_data:/app/data/identity
+      # Pinned config (challenge prompts + bootstrap profiles).
+      - ./configs/identity:/app/configs/identity:ro
+      # OpenVINO models (face detection/reid, ECAPA-TDNN voice).
+      - ./models:/app/models
+      # Sample enrolment data is mounted here once provided (Phase 5):
+      # - ./identity-service/sample-data:/app/sample-data:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8013/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
     restart: unless-stopped
 
   kiosk-ui:
@@ -313,5 +373,7 @@ volumes:
   rag_service_storage:
   rag_service_hf_cache:
   kiosk_db:
+  # FAISS biometric indices for identity-service (face_index.bin / voice_index.bin)
+  identity_data:
   # OpenVINO compilation cache for ovms-llm — avoids re-compiling model IR on restart
   ovms_ov_cache:
