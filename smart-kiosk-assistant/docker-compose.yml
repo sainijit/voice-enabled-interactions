@@ -83,6 +83,10 @@ services:
     volumes:
       - ./queue-service/conf:/app/queue-service/conf:ro
       - ./queue-service/models:/app/queue-service/models:ro
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - "${RENDER_GID:-992}"
     depends_on:
       rtsp-streamer:
         condition: service_healthy
