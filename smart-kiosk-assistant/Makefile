@@ -46,6 +46,15 @@ EAL_PATH         := ../edge-ai-libraries/microservices
 # Services with fully local build contexts (no edge-ai-libraries needed)
 LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui
 
+# Identity feature (profile-gated). Pass IDENTITY=true to build/start the
+# identity-service container AND tell kiosk-core to call it. Default off so the
+# standard stack is unchanged.
+IDENTITY          ?= false
+_IDENTITY_ON       = $(filter true TRUE,$(IDENTITY))
+_IDENTITY_PROFILE  = $(if $(_IDENTITY_ON),--profile identity,)
+_IDENTITY_SVC      = $(if $(_IDENTITY_ON),identity-service,)
+export KIOSK_CORE_IDENTITY_ENABLED = $(if $(_IDENTITY_ON),true,false)
+
 # Services that require edge-ai-libraries checkout to build from source.
 # When EAL_PATH is absent, pre-built images (intel/*:RELEASE_TAG) are used instead.
 EAL_SERVICES     := audio-analyzer text-to-speech
@@ -228,7 +237,7 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 	@echo "$(BLUE)Preparing Docker images...$(NC)"
 	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
 		echo "$(YELLOW)  REGISTRY=false → Building local services from source$(NC)"; \
-		REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) build $(LOCAL_ONLY_SERVICES); \
+		REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) $(_IDENTITY_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC); \
 		if [ -d "$(EAL_PATH)/audio-analyzer" ] && [ -d "$(EAL_PATH)/text-to-speech" ]; then \
 			echo "$(YELLOW)  Building EAL services (audio-analyzer, text-to-speech)...$(NC)"; \
 			REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) build audio-analyzer text-to-speech; \
@@ -241,6 +250,10 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 		echo "$(YELLOW)  REGISTRY=$(REGISTRY) → Pulling images from registry$(NC)"; \
 		REGISTRY=$(REGISTRY) docker compose -f $(COMPOSE_FILE) pull \
 			$(LOCAL_ONLY_SERVICES) $(EAL_SERVICES); \
+		if [ -n "$(_IDENTITY_SVC)" ]; then \
+			echo "$(YELLOW)  Building identity-service locally (no registry image)...$(NC)"; \
+			REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) $(_IDENTITY_PROFILE) build identity-service; \
+		fi; \
 	fi
 	@echo "$(GREEN)✓ Images ready$(NC)"
 
@@ -250,7 +263,7 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 
 up: check-env setup-dirs ## Start all services
 	@echo "$(BLUE)Starting Smart Kiosk Assistant...$(NC)"
-	REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) up -d
+	REGISTRY=$(_DOCKER_REGISTRY) docker compose -f $(COMPOSE_FILE) $(_IDENTITY_PROFILE) up -d
 	@echo ""
 	@echo "$(GREEN)✓ Stack started$(NC)"
 	@echo "  Kiosk UI        → http://localhost:7860"
@@ -308,6 +321,11 @@ test: ## Run health checks on all service endpoints
 	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8012/health | grep -q "ok" \
 		&& echo "  $(GREEN)✓ kiosk-core$(NC) (http://127.0.0.1:8012/health)" \
 		|| echo "  $(RED)✗ kiosk-core$(NC) (http://127.0.0.1:8012/health)"; \
+	if [ -n "$(_IDENTITY_ON)" ]; then \
+		curl --noproxy '*' -s --max-time 5 http://127.0.0.1:8013/health | grep -q "ok" \
+			&& echo "  $(GREEN)✓ identity-service$(NC) (http://127.0.0.1:8013/health)" \
+			|| echo "  $(RED)✗ identity-service$(NC) (http://127.0.0.1:8013/health)"; \
+	fi; \
 	curl --noproxy '*' -s --max-time 5 http://127.0.0.1:7860 | grep -q "html" \
 		&& echo "  $(GREEN)✓ kiosk-ui$(NC) (http://127.0.0.1:7860)" \
 		|| echo "  $(RED)✗ kiosk-ui$(NC) (http://127.0.0.1:7860)"
@@ -339,6 +357,9 @@ logs-tts: ## Tail text-to-speech logs
 
 logs-metrics: ## Tail metrics-collector logs
 	docker logs -f metrics-collector
+
+logs-identity: ## Tail identity-service logs
+	docker logs -f identity-service
 
 # =============================================================================
 # Development

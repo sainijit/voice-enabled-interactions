@@ -64,3 +64,19 @@ UPSELL_RULES_YAML_PATH = os.getenv(
     "KIOSK_CORE_UPSELL_RULES_YAML",
     "./configs/ordering/upsell_rules.yaml",
 )
+
+# ── Identity / biometric authentication feature ──────────────────────────────
+# Master switch for the multimodal (face + voice) identity subsystem.  When
+# false, kiosk-core does not mount the identity router, does not construct the
+# IdentityClient, and the standalone identity-service container is never called.
+# Set KIOSK_CORE_IDENTITY_ENABLED=true to turn the feature on (the
+# identity-service container must also be started, e.g. via the `identity`
+# compose profile).
+IDENTITY_ENABLED = os.getenv("KIOSK_CORE_IDENTITY_ENABLED", "false").lower() not in ("false", "0", "no")
+
+# Base URL of the standalone identity-service.  Within Docker the service is
+# reachable as http://identity-service:8013.
+IDENTITY_SERVICE_URL = os.getenv(
+    "KIOSK_CORE_IDENTITY_URL",
+    "http://127.0.0.1:8013",
+)

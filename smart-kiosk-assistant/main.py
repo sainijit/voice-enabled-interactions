@@ -53,6 +53,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("[STARTUP] Ordering feature disabled (KIOSK_CORE_ORDERING_ENABLED=false)")
 
+        # ── Identity feature startup ─────────────────────────────────────────
+        if cfg.IDENTITY_ENABLED:
+            from kiosk_core.identity.client import IdentityClient
+            from kiosk_core.identity.api import init_identity_client
+
+            identity_client = IdentityClient(base_url=cfg.IDENTITY_SERVICE_URL)
+            init_identity_client(identity_client)
+            healthy = await identity_client.health()
+            logger.info(
+                "[STARTUP] Identity feature enabled ✓ (identity-service=%s, reachable=%s)",
+                cfg.IDENTITY_SERVICE_URL,
+                healthy,
+            )
+        else:
+            logger.info("[STARTUP] Identity feature disabled (KIOSK_CORE_IDENTITY_ENABLED=false)")
+
         yield  # application runs
 
 
@@ -66,6 +82,11 @@ if cfg.ORDERING_ENABLED:
     app.include_router(ordering_router)
     if _mcp_http_app is not None:
         app.mount("/mcp", _mcp_http_app)
+
+# ── Identity router ──────────────────────────────────────────────────────────
+if cfg.IDENTITY_ENABLED:
+    from kiosk_core.identity.api import router as identity_router
+    app.include_router(identity_router)
 
 
 @app.get("/health")
