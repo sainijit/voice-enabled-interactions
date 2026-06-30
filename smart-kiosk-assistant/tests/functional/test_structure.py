@@ -76,8 +76,10 @@ class TestProjectStructure:
 
     @pytest.mark.tier1
     def test_metrics_collector_present(self):
-        """metrics-collector/ directory must exist."""
-        assert (_KIOSK_ROOT / "metrics-collector").is_dir(), "metrics-collector/ directory not found"
+        """metrics-collector/ directory must exist (lives under kiosk_core/)."""
+        assert (_KIOSK_ROOT / "kiosk_core" / "metrics-collector").is_dir(), (
+            "kiosk_core/metrics-collector/ directory not found"
+        )
 
     @pytest.mark.tier1
     def test_kiosk_core_service_module_present(self):
