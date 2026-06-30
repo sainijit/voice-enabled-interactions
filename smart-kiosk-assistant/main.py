@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from kiosk_core import config as cfg
+from kiosk_core.api.endpoints import router as api_router
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
 from kiosk_core.pipeline_latency import pipeline_store
 from kiosk_core.service import SessionService
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="kiosk-core", lifespan=lifespan)
 service = SessionService()
+app.include_router(api_router)
 
 # ── Ordering router + MCP mount ──────────────────────────────────────────────
 if cfg.ORDERING_ENABLED:

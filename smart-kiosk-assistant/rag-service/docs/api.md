@@ -30,7 +30,15 @@ Typical response fields include:
 
 ### `GET /api/v1/performance`
 
-Returns latency metrics collected for answer generation.
+Returns runtime performance metrics collected for answer generation.
+
+Response includes:
+
+- `latency.retrieval.last_ms`
+- `latency.llm.last_ms`
+- `latency.llm.ttft_ms` (time to first token)
+- `latency.llm.tokens_per_sec`
+- `latency.llm.total_tokens`
 
 ## Context Ingestion
 
