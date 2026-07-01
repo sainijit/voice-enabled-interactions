@@ -83,7 +83,6 @@ jobs:
             pytest==8.3.5 \
             pytest-timeout==2.3.1 \
             pyyaml \
-            pydantic>=2.0 \
             requests
 
       - name: Run Tier 1 functional tests
@@ -149,7 +148,6 @@ jobs:
             pytest==8.3.5 \
             pytest-timeout==2.3.1 \
             pyyaml \
-            pydantic>=2.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -253,7 +251,6 @@ jobs:
             pytest==8.3.5 \
             pytest-timeout==2.3.1 \
             pyyaml \
-            pydantic>=2.0 \
             requests
 
       - name: Set up Docker Buildx
