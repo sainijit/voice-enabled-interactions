@@ -19,6 +19,14 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+# Pre-import pydantic submodules so they are in sys.modules BEFORE any
+# patch.dict("sys.modules", ...) block runs.  patch.dict snapshots sys.modules
+# on entry and restores it on exit — if pydantic.root_model is first imported
+# *inside* a patch.dict block it gets evicted on exit, causing a
+# KeyError: 'pydantic.root_model' on the next attempt to create a generic
+# submodel of RootModel (e.g. mcp.types.JSONRPCMessage).
+import pydantic.root_model  # noqa: F401
+
 import pytest
 
 _CSV_PATH = Path(__file__).resolve().parent / "test_results.csv"
