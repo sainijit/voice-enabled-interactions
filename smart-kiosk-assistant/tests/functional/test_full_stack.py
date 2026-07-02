@@ -4,7 +4,7 @@ Tier 2 — Full-Stack Integration Tests
 Covers test cases #8–#13:
   #8  — Health checks: all 7 services report healthy within timeout
   #9  — CPU metrics accessible via metrics-collector
-  #10 — RAG ingestion: POST /api/v1/ingest returns 200 and the document
+  #10 — RAG ingestion: POST /api/v1/context returns 200 and the document
          is retrievable in subsequent queries
   #11 — Menu endpoint: GET /api/v1/products returns all 26 expected products
   #12 — Agent ordering flow: menu → add item → confirm (text-mode, no audio)
@@ -222,7 +222,7 @@ class TestRagIngestion:
 
     @pytest.mark.tier2
     def test_rag_ingest_document(self):
-        """POST /api/v1/ingest must accept a document and return 200."""
+        """POST /api/v1/context must accept a document and return 200."""
         _skip_if_not_running("rag-service", f"{RAG_BASE}/health")
         payload = {
             "text": self.SAMPLE_DOCUMENT,
@@ -232,7 +232,7 @@ class TestRagIngestion:
             },
         }
         resp = requests.post(
-            f"{RAG_BASE}/api/v1/ingest",
+            f"{RAG_BASE}/api/v1/context",
             json=payload,
             timeout=60,
         )
@@ -246,7 +246,7 @@ class TestRagIngestion:
         _skip_if_not_running("rag-service", f"{RAG_BASE}/health")
         resp = requests.post(
             f"{RAG_BASE}/api/v1/query",
-            json={"question": "Do you have a vegetarian menu?"},
+            json={"transcription": "Do you have a vegetarian menu?"},
             timeout=LLM_RESPONSE_TIMEOUT,
         )
         assert resp.status_code == 200, (
@@ -342,14 +342,14 @@ class TestAgentOrderingFlow:
         _skip_if_not_running("rag-service", f"{RAG_BASE}/health")
         resp = requests.post(
             f"{RAG_BASE}/api/v1/agent/chat",
-            json={"message": "Show me the items you have.", "session_id": "ci-test-session"},
+            json={"transcription": "Show me the items you have.", "session_id": "ci-test-session"},
             timeout=LLM_RESPONSE_TIMEOUT,
         )
         assert resp.status_code == 200, (
             f"Agent /chat failed: {resp.status_code} — {resp.text[:500]}"
         )
         body = resp.json()
-        response_text = body.get("response") or body.get("message") or body.get("text") or ""
+        response_text = body.get("reply") or body.get("response") or body.get("message") or body.get("text") or ""
         assert len(response_text.strip()) > 0, (
             f"Agent returned empty response to menu query: {body}"
         )
@@ -368,7 +368,7 @@ class TestAgentOrderingFlow:
         resp = requests.post(
             f"{RAG_BASE}/api/v1/agent/chat",
             json={
-                "message": "I would like to order a Classic Chicken Burger.",
+                "transcription": "I would like to order a Classic Chicken Burger.",
                 "session_id": "ci-test-session",
             },
             timeout=LLM_RESPONSE_TIMEOUT,
@@ -377,7 +377,7 @@ class TestAgentOrderingFlow:
             f"Agent /chat failed: {resp.status_code} — {resp.text[:500]}"
         )
         body = resp.json()
-        response_text = body.get("response") or body.get("message") or body.get("text") or ""
+        response_text = body.get("reply") or body.get("response") or body.get("message") or body.get("text") or ""
         # Agent should acknowledge the item was added
         assert any(
             kw in response_text.lower()
@@ -393,14 +393,14 @@ class TestAgentOrderingFlow:
         resp = requests.post(
             f"{RAG_BASE}/api/v1/agent/chat",
             json={
-                "message": "What would you recommend to go with my burger?",
+                "transcription": "What would you recommend to go with my burger?",
                 "session_id": "ci-test-session",
             },
             timeout=LLM_RESPONSE_TIMEOUT,
         )
         assert resp.status_code == 200
         body = resp.json()
-        response_text = body.get("response") or body.get("message") or body.get("text") or ""
+        response_text = body.get("reply") or body.get("response") or body.get("message") or body.get("text") or ""
         # Should recommend sides or drinks
         assert any(
             kw in response_text.lower()
@@ -416,14 +416,14 @@ class TestAgentOrderingFlow:
         resp = requests.post(
             f"{RAG_BASE}/api/v1/agent/chat",
             json={
-                "message": "What is in my order?",
+                "transcription": "What is in my order?",
                 "session_id": "ci-test-session",
             },
             timeout=LLM_RESPONSE_TIMEOUT,
         )
         assert resp.status_code == 200
         body = resp.json()
-        response_text = body.get("response") or body.get("message") or body.get("text") or ""
+        response_text = body.get("reply") or body.get("response") or body.get("message") or body.get("text") or ""
         # Either shows order contents or says cart is empty
         assert len(response_text.strip()) > 0, (
             f"Agent returned empty response to order summary request: {body}"
@@ -440,16 +440,17 @@ class TestEndToEndLatency:
 
     @pytest.mark.tier2
     def test_kiosk_core_sessions_endpoint(self):
-        """GET /api/v1/sessions must return 200 (even if empty list)."""
+        """GET /api/v1/sessions must return 200 with a 'sessions' list."""
         _skip_if_not_running("kiosk-core", f"{KIOSK_BASE}/health")
         resp = requests.get(f"{KIOSK_BASE}/api/v1/sessions", timeout=10)
         assert resp.status_code == 200, (
             f"GET /api/v1/sessions failed: {resp.status_code} — {resp.text[:300]}"
         )
         body = resp.json()
-        # Must be a list (may be empty if no sessions have been started)
-        assert isinstance(body, list), (
-            f"Expected sessions to be a list, got: {type(body)}"
+        # kiosk-core wraps the session list in a {"sessions": [...]} envelope
+        # (may be empty if no sessions have been started)
+        assert isinstance(body, dict) and isinstance(body.get("sessions"), list), (
+            f"Expected {{'sessions': [...]}} envelope, got: {body}"
         )
 
     @pytest.mark.tier2
@@ -461,7 +462,7 @@ class TestEndToEndLatency:
         # Make a RAG query to generate latency data
         requests.post(
             f"{RAG_BASE}/api/v1/query",
-            json={"question": "What are your opening hours?"},
+            json={"transcription": "What are your opening hours?"},
             timeout=LLM_RESPONSE_TIMEOUT,
         )
 
@@ -483,7 +484,7 @@ class TestEndToEndLatency:
         start = time.monotonic()
         resp = requests.post(
             f"{RAG_BASE}/api/v1/query",
-            json={"question": "What burgers do you have?"},
+            json={"transcription": "What burgers do you have?"},
             timeout=LLM_RESPONSE_TIMEOUT,
         )
         elapsed = time.monotonic() - start
@@ -501,17 +502,17 @@ class TestEndToEndLatency:
 # TC — Upsell API
 # ---------------------------------------------------------------------------
 class TestUpsellApi:
-    """POST /api/v1/orders/upsell must return suggestions for a known product."""
+    """POST /api/v1/upsell must return suggestions for a known product."""
 
     @pytest.mark.tier2
     def test_upsell_for_burger(self):
         """Upsell API must return suggestions for a burger product."""
         _skip_if_not_running("kiosk-core", f"{KIOSK_BASE}/health")
         payload = {
-            "cart_product_ids": ["BURGER-NV-001"],  # Classic Chicken Burger
+            "product_ids": ["BURGER-NV-001"],  # Classic Chicken Burger
         }
         resp = requests.post(
-            f"{KIOSK_BASE}/api/v1/orders/upsell",
+            f"{KIOSK_BASE}/api/v1/upsell",
             json=payload,
             timeout=30,
         )
@@ -542,8 +543,8 @@ class TestUpsellApi:
             for p in (products_body if isinstance(products_body, list) else products_body.get("products", []))
         }
 
-        payload = {"cart_product_ids": ["PIZZA-NV-002"]}
-        resp = requests.post(f"{KIOSK_BASE}/api/v1/orders/upsell", json=payload, timeout=30)
+        payload = {"product_ids": ["PIZZA-NV-002"]}
+        resp = requests.post(f"{KIOSK_BASE}/api/v1/upsell", json=payload, timeout=30)
         if resp.status_code != 200:
             pytest.skip(f"Upsell API unavailable: {resp.status_code}")
 
@@ -553,7 +554,13 @@ class TestUpsellApi:
             else body.get("suggestions", body.get("upsell_suggestions", []))
         )
         for s in suggestions:
-            pid = s.get("product_id") or s.get("id") or ""
+            # UpsellSuggestion wraps the full Product under "product"
+            pid = (
+                (s.get("product") or {}).get("product_id")
+                or s.get("product_id")
+                or s.get("id")
+                or ""
+            )
             if pid:
                 assert pid in known_ids, (
                     f"Upsell suggestion '{pid}' is not in the product catalogue"
