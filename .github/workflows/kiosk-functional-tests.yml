@@ -204,9 +204,15 @@ jobs:
         if: steps.cache-models.outputs.cache-hit != 'true'
         timeout-minutes: 30
         run: |
+          set -o pipefail
           chmod +x setup_models.sh
-          # CPU device, INT8 Qwen3-4B, skip identity models not needed for kiosk tests
-          ./setup_models.sh --device CPU --skip-identity 2>&1 | tee /tmp/model-download.log
+          # CPU device, INT8 Qwen3-4B. Identity-service models are opt-in via
+          # --identity and already skipped by default, so no flag is needed for
+          # them (passing the now-removed --skip-identity flag made the script
+          # exit 1 immediately with "Unknown argument", and because this step
+          # previously lacked `set -o pipefail`, the failure was masked by the
+          # `tee` pipe — silently leaving the OVMS model undownloaded).
+          ./setup_models.sh --device CPU 2>&1 | tee /tmp/model-download.log
         env:
           # HF_TOKEN is not required for Qwen3-4B (public model)
           # It would be required for Pyannote but diarization is disabled in CI
