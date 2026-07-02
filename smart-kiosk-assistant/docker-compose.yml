@@ -117,6 +117,7 @@ services:
     build:
       context: ./kiosk_core/metrics-collector
       dockerfile: Dockerfile
+    image: ${REGISTRY:-intel}/metrics-collector:${RELEASE_TAG:-latest}
     container_name: metrics-collector
     privileged: true
     pid: host
