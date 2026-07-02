@@ -110,108 +110,9 @@ jobs:
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # TIER 2A — Docker build tests
-  # Covers TC #5 from functional-test-cases-sheet.md
-  # Runs `make build REGISTRY=false` and verifies all images are present —
-  # including audio-analyzer and text-to-speech which are pulled (not built)
-  # when edge-ai-libraries is absent.
-  # Runs on every push.
-  # ---------------------------------------------------------------------------
-  tier2-build-tests:
-    name: "Tier 2A — Docker build tests"
-    runs-on: ubuntu-latest
-    needs: tier1-functional-tests
-
-    permissions:
-      contents: read
-
-    env:
-      RELEASE_TAG: "2026.1.0"
-      TARGET_DEVICE: "CPU"
-      RENDER_GID: "109"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: smart-kiosk-assistant/requirements.txt
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install \
-            pytest==8.3.5 \
-            pytest-timeout==2.3.1 \
-            pyyaml \
-            pydantic==2.11.7 \
-            requests
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-
-      # Cache Docker layer builds so repeated pushes don't rebuild from scratch.
-      # Key includes the hash of all Dockerfiles and requirement files.
-      - name: Cache Docker image layers
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
-        with:
-          path: /tmp/docker-cache
-          key: ${{ runner.os }}-docker-build-${{ hashFiles('smart-kiosk-assistant/**/Dockerfile', 'smart-kiosk-assistant/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-docker-build-
-
-      - name: Create CI .env
-        # check-env requires .env to exist. HF_TOKEN is not needed because
-        # KIOSK_CORE_DIARIZATION_ENABLED=false (pyannote is never downloaded).
-        # TARGET_DEVICE must be overridden here (not just via step env) because
-        # the Makefile does `-include .env`, so .env.example's TARGET_DEVICE=GPU
-        # default would otherwise win over the job-level TARGET_DEVICE=CPU env.
-        run: |
-          cp .env.example .env
-          echo "KIOSK_CORE_DIARIZATION_ENABLED=false" >> .env
-          echo "TARGET_DEVICE=CPU" >> .env
-
-      - name: Build all service images
-        timeout-minutes: 30
-        run: |
-          make build REGISTRY=false KIOSK_CORE_DIARIZATION_ENABLED=false
-
-      - name: Run Tier 2 build tests
-        env:
-          PYTHONPATH: .
-          RELEASE_TAG: "2026.1.0"
-        timeout-minutes: 5
-        run: |
-          python -m pytest tests/functional/test_make_build.py \
-            -m "tier2" \
-            --tb=short \
-            --strict-markers \
-            -v \
-            --timeout=60 \
-            --junitxml=test-results/tier2a-build-results.xml
-
-      - name: Upload Tier 2A test results
-        if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
-        with:
-          name: tier2a-build-test-results
-          path: |
-            smart-kiosk-assistant/test-results/tier2a-build-results.xml
-            smart-kiosk-assistant/tests/functional/test_results.csv
-          retention-days: 30
-
-      - name: Docker cleanup
-        if: always()
-        run: |
-          docker image prune -f 2>/dev/null || true
-
-  # ---------------------------------------------------------------------------
-  # TIER 2B — Full-stack integration tests
-  # Covers TC #8–#13 from functional-test-cases-sheet.md:
+  # TIER 2 — Build, deploy & full-stack integration tests
+  # Covers TC #5 and TC #8–#13 from functional-test-cases-sheet.md:
+  #   #5  Docker build tests (all images present after `make build`)
   #   #8  Health checks for all services
   #   #9  CPU metrics via metrics-collector
   #   #10 RAG ingestion and retrieval
@@ -219,14 +120,20 @@ jobs:
   #   #12 Agent ordering flow (text-mode, no audio)
   #   #13 End-to-end latency within bounds
   #
+  # Single job: builds all images once, verifies them, then starts the full
+  # stack against those same images and runs the full-stack tests. Previously
+  # split into Tier 2A (build-only) and Tier 2B (full-stack) — merged because
+  # Tier 2B already has to build the images itself, making Tier 2A's build
+  # redundant.
+  #
   # Runs on push to main branch or when manually triggered with run_full_stack=true.
   # Requires ~6 GB disk for models + Docker images.
   # Uses KIOSK_CORE_DIARIZATION_ENABLED=false so HF_TOKEN is NOT required.
   # ---------------------------------------------------------------------------
-  tier2-full-stack-tests:
-    name: "Tier 2B — Full-stack integration tests"
+  tier2-build-and-full-stack-tests:
+    name: "Tier 2 — Build & full-stack integration tests"
     runs-on: ubuntu-latest
-    needs: tier2-build-tests
+    needs: tier1-functional-tests
 
     permissions:
       contents: read
@@ -270,6 +177,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
+      # Cache Docker layer builds so repeated pushes don't rebuild from scratch.
+      # Key includes the hash of all Dockerfiles and requirement files.
+      - name: Cache Docker image layers
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: /tmp/docker-cache
+          key: ${{ runner.os }}-docker-build-${{ hashFiles('smart-kiosk-assistant/**/Dockerfile', 'smart-kiosk-assistant/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-build-
+
       # Cache downloaded ML models between runs.
       # Key: hash of setup_models.sh — any change to downloads busts the cache.
       - name: Cache ML models
@@ -308,6 +225,31 @@ jobs:
         timeout-minutes: 30
         run: |
           make build REGISTRY=false KIOSK_CORE_DIARIZATION_ENABLED=false
+
+      - name: Run Tier 2 build tests
+        # Verifies all expected images are present (TC #5) before starting the stack.
+        env:
+          PYTHONPATH: .
+          RELEASE_TAG: "2026.1.0"
+        timeout-minutes: 5
+        run: |
+          python -m pytest tests/functional/test_make_build.py \
+            -m "tier2" \
+            --tb=short \
+            --strict-markers \
+            -v \
+            --timeout=60 \
+            --junitxml=test-results/tier2-build-results.xml
+
+      - name: Upload Tier 2 build test results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
+        with:
+          name: tier2-build-test-results
+          path: |
+            smart-kiosk-assistant/test-results/tier2-build-results.xml
+            smart-kiosk-assistant/tests/functional/test_results.csv
+          retention-days: 30
 
       - name: Start all services (diarization disabled)
         timeout-minutes: 5
@@ -359,20 +301,20 @@ jobs:
             --strict-markers \
             -v \
             --timeout=360 \
-            --junitxml=test-results/tier2b-stack-results.xml
+            --junitxml=test-results/tier2-stack-results.xml
 
       - name: Show service logs (post-test)
         if: always()
         run: |
           docker compose logs --tail=100 2>/dev/null || true
 
-      - name: Upload Tier 2B test results
+      - name: Upload Tier 2 full-stack test results
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
         with:
-          name: tier2b-full-stack-test-results
+          name: tier2-full-stack-test-results
           path: |
-            smart-kiosk-assistant/test-results/tier2b-stack-results.xml
+            smart-kiosk-assistant/test-results/tier2-stack-results.xml
             smart-kiosk-assistant/tests/functional/test_results.csv
           retention-days: 30
 
