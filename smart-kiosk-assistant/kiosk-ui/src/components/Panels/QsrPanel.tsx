@@ -25,7 +25,7 @@ interface QsrPanelProps {
 
 const QUEUE_STREAM_URL = '/queue-svc/stream';
 const QUEUE_COUNT_URL  = '/queue-svc/api/v1/queue/count';
-const QUEUE_POLL_MS    = 10_000;
+const QUEUE_POLL_MS    = 2_000;
 
 const STATUS_STYLE: Record<QueueStatus, string> = {
   LOW:     'bg-green-50  border-green-200  text-green-800',
@@ -72,7 +72,7 @@ function useQueueCount(
 //
 // Layout (top → bottom):
 //   1. Live MJPEG feed from queue-service (bounding boxes + count overlay)
-//   2. Queue status banner  (count + LOW/MEDIUM/HIGH), updates every 10 s
+//   2. Queue status banner  (count + LOW/MEDIUM/HIGH), updates every 2 s
 //   3. Peak-hour notice     (MEDIUM/HIGH only, while showing express menu)
 //   4. Sub-tab pills        (Menu / Cart)
 //   5. MenuPanel + OrderPanel — BOTH always mounted so OrderPanel keeps
