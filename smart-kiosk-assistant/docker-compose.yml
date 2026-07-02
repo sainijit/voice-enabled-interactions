@@ -174,6 +174,14 @@ services:
       # resolves to the token instead of null. The config_loader uses AUDIO_ANALYZER__
       # prefix with __ as path separator (models__asr__hf_token → models.asr.hf_token).
       AUDIO_ANALYZER__MODELS__ASR__HF_TOKEN: ${HF_TOKEN:-}
+      # Gate pyannote speaker-diarization + segmentation model preload with the
+      # same flag kiosk-core uses to decide whether to request diarization.
+      # ./configs/audio-analyzer/config.yaml pins models.asr.diarization: True,
+      # which makes preload_models() load pyannote at startup unconditionally —
+      # this override lets KIOSK_CORE_DIARIZATION_ENABLED=false (e.g. in CI,
+      # where no HF_TOKEN/model-licence acceptance is available) also skip that
+      # preload, instead of crashing with an unauthenticated 403 download.
+      AUDIO_ANALYZER__MODELS__ASR__DIARIZATION: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
       # service config without modifying edge-ai-libraries.
@@ -261,6 +269,13 @@ services:
       AGENT_LLM_URL:   http://ovms-llm:8000/v3
       AGENT_LLM_MODEL: ${OVMS_MODEL_NAME:-OpenVINO/Qwen3-4B-int4-ov}
       AGENT_MCP_CONFIG: /app/rag-service/agentic/resources/mcp_servers.json
+      # Embedding + reranker models are loaded in-process via OpenVINO at
+      # startup (config.yaml pins device: GPU for both). Override with
+      # TARGET_DEVICE=CPU (same variable used for the ovms-llm container) so
+      # environments without a GPU (e.g. CI runners) don't crash on startup
+      # with "[GPU] no supported devices found".
+      SMART_KIOSK_RAG__MODELS__EMBEDDING__DEVICE: ${TARGET_DEVICE:-GPU}
+      SMART_KIOSK_RAG__RETRIEVAL__RERANKER__DEVICE: ${TARGET_DEVICE:-GPU}
       # Bypass corporate proxy for all intra-cluster traffic so that
       # requests to ovms-llm, kiosk-core, etc. go directly on the
       # Docker bridge network instead of through the Intel proxy.
