@@ -158,6 +158,8 @@ async def _ingest_single_file(pipeline, file: UploadFile) -> FileIngestResult:
         return FileIngestResult(source=filename, chunks_added=added, status="ok")
     except HTTPException as exc:
         return FileIngestResult(source=filename, status="failed", detail=str(exc.detail))
+    except Exception as exc:  # noqa: BLE001
+        return FileIngestResult(source=filename, status="failed", detail=f"Unexpected error: {exc}")
 
 
 @router.post("/api/v1/context/file", response_model=BatchIngestResponse)
