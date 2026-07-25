@@ -164,7 +164,7 @@ async def _ingest_single_file(pipeline, file: UploadFile) -> FileIngestResult:
 
 @router.post("/api/v1/context/file", response_model=BatchIngestResponse)
 async def ingest_context_file(
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] = File(..., alias="file"),
 ) -> BatchIngestResponse:
     """Ingest one or more documents. Each file is processed independently so a
     single bad file does not fail the whole batch. All ingested documents share
@@ -219,7 +219,6 @@ def query_context(request: QueryRequest) -> StreamingResponse:
                 if request.include_performance_metrics:
                     metrics_payload["performance_metrics"] = {
                         "retrieval": retrieval_latency.stats(),
-                        "llm": llm_latency.stats(),
                     }
                 if request.include_llm_metrics:
                     metrics_payload["llm_metrics"] = llm_latency.stats()

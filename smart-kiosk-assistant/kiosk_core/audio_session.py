@@ -785,7 +785,12 @@ class BrowserStreamSession(BaseAudioSession):
                     sample_rate,
                     self.request.sample_rate,
                 )
-        except Exception:
+        except (wave.Error, EOFError) as exc:
+            logger.debug(
+                "[CHUNK] session=%s | WAV decode failed; falling back to raw PCM (%s)",
+                self.session_id,
+                exc,
+            )
             # Backward-compat fallback for legacy clients that might post raw
             # PCM bytes directly instead of a WAV container.
             audio = np.frombuffer(wav_bytes, dtype=np.int16)
