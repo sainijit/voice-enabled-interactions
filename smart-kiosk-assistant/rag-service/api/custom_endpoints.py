@@ -5,8 +5,9 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from docx import Document as DocxDocument
 from pypdf import PdfReader
 
@@ -163,14 +164,24 @@ async def _ingest_single_file(pipeline, file: UploadFile) -> FileIngestResult:
 
 
 @router.post("/api/v1/context/file", response_model=BatchIngestResponse)
-async def ingest_context_file(
-    files: list[UploadFile] = File(..., alias="file"),
-) -> BatchIngestResponse:
+async def ingest_context_file(request: Request) -> BatchIngestResponse:
     """Ingest one or more documents. Each file is processed independently so a
     single bad file does not fail the whole batch. All ingested documents share
-    one collection, so queries are answered across every context."""
+    one collection, so queries are answered across every context.
+
+    Files are read from the multipart form regardless of the field name used
+    (e.g. ``file`` or ``files``) so the endpoint is resilient to client changes.
+    """
+    form = await request.form()
+    uploads = [value for value in form.values() if isinstance(value, StarletteUploadFile)]
+    if not uploads:
+        raise HTTPException(
+            status_code=422,
+            detail="No file provided. Attach one or more files in the multipart form body.",
+        )
+
     pipeline = get_shared_pipeline()
-    results = [await _ingest_single_file(pipeline, file) for file in files]
+    results = [await _ingest_single_file(pipeline, file) for file in uploads]
     succeeded = [r for r in results if r.status == "ok"]
     return BatchIngestResponse(
         total_chunks_added=sum(r.chunks_added for r in results),
