@@ -39,12 +39,12 @@ tracker:
 
 roi:
   # Normalized polygon points (0.0-1.0). Default covers the full frame.
-  point_mode: "foot"            # foot | centroid
+  point_mode: "centroid"        # foot | centroid
   polygon:
-    - [0.0, 0.0]
-    - [1.0, 0.0]
-    - [1.0, 1.0]
-    - [0.0, 1.0]
+    - [0.30, 0.00]
+    - [0.70, 0.00]
+    - [0.70, 1.00]
+    - [0.30, 1.00]
 
 counter:
   dwell_timeout_seconds: 2.0
@@ -52,14 +52,14 @@ counter:
   log_interval_seconds: 5.0
   # Queue Status thresholds: count <= medium_max => LOW, <= high_max => MEDIUM,
   # otherwise HIGH. Used for the debug overlay only.
-  medium_threshold: 3
-  high_threshold: 7
+  medium_threshold: 2
+  high_threshold: 3
 
 debug:
   # visualization: false in container (no display available). Set to true only
   # when running with a physical display for local debugging.
   # The MJPEG stream is served via api.enabled=true → appsink → /stream endpoint.
-  visualization: false
+  visualization: true
   sink: "autovideosink"
   fps_logging: false
 

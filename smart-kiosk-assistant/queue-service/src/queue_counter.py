@@ -28,8 +28,11 @@ class TrackState:
 
     track_id: int
     bbox: tuple[float, float, float, float]  # normalized (x_min, y_min, x_max, y_max)
+    centroid: tuple[float, float]             # normalized (x, y)
+    confidence: float                         # detector score, best-effort
     timestamp: float                          # monotonic seconds, last seen
-    inside: bool                              # ROI status
+    inside: bool                              # ROI status flag
+    roi_status: str                           # "Inside" | "Outside"
 
 
 class QueueCounter:
@@ -74,6 +77,7 @@ class QueueCounter:
         # Debug visualization (overlay drawn on top of gvawatermark output).
         debug = self._debug_config()
         self._debug = bool(debug.get("visualization", False))
+        self._overlay_enabled = self._debug or bool(self._api_config().get("enabled", False))
         self._medium_threshold = int(counter.get("medium_threshold", 3))
         self._high_threshold = int(counter.get("high_threshold", 7))
         self._fps = 0.0
@@ -122,6 +126,18 @@ class QueueCounter:
         except Exception:  # noqa: BLE001 - config optional for unit tests
             return {}
 
+    @staticmethod
+    def _api_config() -> dict:
+        try:
+            from config_loader import config
+
+            api = getattr(config, "api", None)
+            if api is None:
+                return {}
+            return vars(api) if hasattr(api, "__dict__") else dict(api)
+        except Exception:  # noqa: BLE001 - config optional for unit tests
+            return {}
+
     # ── gvapython entry point ────────────────────────────────────────────────
 
     def process_frame(self, frame) -> bool:
@@ -140,12 +156,21 @@ class QueueCounter:
             if not self._accept(region):
                 continue
             bbox = self._normalized_bbox(region, width, height)
-            inside = self._roi.is_bbox_inside(bbox)
-            self._tracks[track_id] = TrackState(track_id, bbox, now, inside)
+            centroid = self._roi.point_from_bbox(bbox)
+            inside = self._roi.is_inside_roi(centroid)
+            self._tracks[track_id] = TrackState(
+                track_id=track_id,
+                bbox=bbox,
+                centroid=centroid,
+                confidence=self._confidence(region),
+                timestamp=now,
+                inside=inside,
+                roi_status="Inside" if inside else "Outside",
+            )
 
         self._evict(now)
         self._update_count(now)
-        if self._debug:
+        if self._overlay_enabled:
             self._draw_overlay(frame, width, height, now)
         return True
 
@@ -192,6 +217,13 @@ class QueueCounter:
             return (x / width, y / height, (x + w) / width, (y + h) / height)
         return (float(x), float(y), float(x + w), float(y + h))
 
+    @staticmethod
+    def _confidence(region) -> float:
+        try:
+            return float(region.confidence())
+        except Exception:  # noqa: BLE001 - confidence accessor differs across gstgva versions
+            return 0.0
+
     # ── track table / counting ───────────────────────────────────────────────
 
     def _evict(self, now: float) -> None:
@@ -235,11 +267,9 @@ class QueueCounter:
         return "HIGH"
 
     def _draw_overlay(self, frame, width: int, height: int, now: float) -> None:
-        """Draw ROI polygon, queue count, status and FPS over the frame.
+        """Draw ROI polygon, per-track ROI state, queue count, status and FPS.
 
-        gvawatermark already draws boxes, tracker IDs and confidence; this only
-        adds the custom overlays. Failures are non-fatal -- counting/logging is
-        never affected.
+        Failures are non-fatal -- counting/logging is never affected.
         """
         if width <= 0 or height <= 0:
             return
@@ -263,6 +293,50 @@ class QueueCounter:
                         dtype=np.int32,
                     )
                     cv2.polylines(mat, [pts], True, (255, 0, 0), 2)
+
+                for state in self._tracks.values():
+                    x_min, y_min, x_max, y_max = state.bbox
+                    x1 = max(0, min(width - 1, int(x_min * width)))
+                    y1 = max(0, min(height - 1, int(y_min * height)))
+                    x2 = max(0, min(width - 1, int(x_max * width)))
+                    y2 = max(0, min(height - 1, int(y_max * height)))
+                    color = (0, 255, 0) if state.inside else (0, 0, 255)
+                    logger.info(
+                        "Track %s | Inside=%s | ROI Status=%s | Color=%s",
+                        state.track_id,
+                        state.inside,
+                        state.roi_status,
+                        color,
+                    )
+
+                    cv2.rectangle(mat, (x1, y1), (x2, y2), color, 3)
+
+                    cx, cy = state.centroid
+                    cx_px = max(0, min(width - 1, int(cx * width)))
+                    cy_px = max(0, min(height - 1, int(cy * height)))
+                    cv2.circle(mat, (cx_px, cy_px), 4, color, -1)
+
+                    label = f"ID:{state.track_id} | {state.roi_status}"
+                    label_y = y1 - 8 if y1 > 18 else y1 + 18
+                    (text_w, text_h), baseline = cv2.getTextSize(
+                        label,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        2,
+                    )
+                    label_top = max(0, label_y - text_h - baseline - 4)
+                    label_bottom = min(height - 1, label_y + baseline + 4)
+                    label_right = min(width - 1, x1 + text_w + 8)
+                    cv2.putText(
+                        mat,
+                        label,
+                        (x1, label_y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        color,
+                        2,
+                    )
+
                 cv2.putText(mat, f"Queue Count: {count}  Status: {status}",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 cv2.putText(mat, f"FPS: {self._fps:.0f}",

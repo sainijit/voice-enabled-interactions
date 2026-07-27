@@ -196,6 +196,11 @@ class QueuePipeline:
                 "class": counter.get("class", _DEFAULT_COUNTER_CLASS),
                 "function": counter.get("function", _DEFAULT_COUNTER_FUNCTION),
             }
+        if etype == "gvawatermark":
+            class_label = str(cfg.get("model", {}).get("class_label", "")).strip()
+            if class_label:
+                return {"displ-cfg": f"hide-roi={class_label}"}
+            return {}
         if etype == "fakesink":
             return {"sync": False}
         if etype == "autovideosink":
@@ -256,10 +261,10 @@ class QueuePipeline:
     def _debug_element_chain(self, types: list[str]) -> list[str]:
         """Insert gvawatermark and a display sink for debug visualization.
 
-        gvawatermark draws boxes/IDs/confidence from the existing gvadetect +
-        gvatrack metadata; the queue_counter overlay then adds ROI/count/
-        status/FPS before the frame is rendered. fakesink is replaced by a
-        videoconvert + display sink. No second inference is performed.
+        gvawatermark stays in the chain for metadata-to-frame integration, but
+        person ROI drawing is disabled via displ-cfg so QueueCounter is the
+        only bounding-box renderer. fakesink is replaced by a videoconvert +
+        display sink. No second inference is performed.
         """
         chain: list[str] = []
         for etype in types:
@@ -279,8 +284,9 @@ class QueuePipeline:
 
         Inserts gvawatermark + videoconvert + BGRx capsfilter before gvapython
         (so _draw_overlay has colour frames) then routes to an appsink whose
-        new-sample signal feeds frame_buffer. Used when api.enabled=true and
-        visualization=false.
+        new-sample signal feeds frame_buffer. gvawatermark's person ROI drawing
+        is disabled so QueueCounter owns the final box colors. Used when
+        api.enabled=true and visualization=false.
         """
         chain: list[str] = []
         for etype in types:
