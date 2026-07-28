@@ -301,7 +301,7 @@ class QueueCounter:
                     x2 = max(0, min(width - 1, int(x_max * width)))
                     y2 = max(0, min(height - 1, int(y_max * height)))
                     color = (0, 255, 0) if state.inside else (0, 0, 255)
-                    logger.info(
+                    logger.debug(
                         "Track %s | Inside=%s | ROI Status=%s | Color=%s",
                         state.track_id,
                         state.inside,
