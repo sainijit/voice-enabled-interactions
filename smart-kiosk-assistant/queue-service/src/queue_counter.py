@@ -318,15 +318,6 @@ class QueueCounter:
 
                     label = f"ID:{state.track_id} | {state.roi_status}"
                     label_y = y1 - 8 if y1 > 18 else y1 + 18
-                    (text_w, text_h), baseline = cv2.getTextSize(
-                        label,
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        2,
-                    )
-                    label_top = max(0, label_y - text_h - baseline - 4)
-                    label_bottom = min(height - 1, label_y + baseline + 4)
-                    label_right = min(width - 1, x1 + text_w + 8)
                     cv2.putText(
                         mat,
                         label,

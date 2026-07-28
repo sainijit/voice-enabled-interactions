@@ -278,7 +278,7 @@ if [ "$RTSP_SOURCE_MODE" = live ]; then
     -hide_banner \
     -loglevel info \
     -f v4l2 \
-    -input_format mjpeg \
+    -input_format ${CAMERA_INPUT_FORMAT:-mjpeg} \
     -video_size "${CAMERA_VIDEO_SIZE:-1920x1080}" \
     -framerate "${CAMERA_FRAMERATE:-30}" \
     -i "$CAMERA_DEVICE" \
@@ -288,7 +288,7 @@ if [ "$RTSP_SOURCE_MODE" = live ]; then
     -pix_fmt yuv420p \
     -preset ultrafast \
     -tune zerolatency \
-    -g 30 \
+    -g ${CAMERA_GOP:-${CAMERA_FRAMERATE:-30}} \
     -rtsp_transport tcp \
     -f rtsp \
     "rtsp://127.0.0.1:${RTSP_PORT}/${stream_name}" &

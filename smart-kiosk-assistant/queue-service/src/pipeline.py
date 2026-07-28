@@ -262,9 +262,10 @@ class QueuePipeline:
         """Insert gvawatermark and a display sink for debug visualization.
 
         gvawatermark stays in the chain for metadata-to-frame integration, but
-        person ROI drawing is disabled via displ-cfg so QueueCounter is the
-        only bounding-box renderer. fakesink is replaced by a videoconvert +
-        display sink. No second inference is performed.
+        person ROI drawing is disabled when model.class_label is configured,
+        allowing QueueCounter to be the only bounding-box renderer. fakesink
+        is replaced by a videoconvert + display sink. No second inference is
+        performed.
         """
         chain: list[str] = []
         for etype in types:
@@ -285,8 +286,9 @@ class QueuePipeline:
         Inserts gvawatermark + videoconvert + BGRx capsfilter before gvapython
         (so _draw_overlay has colour frames) then routes to an appsink whose
         new-sample signal feeds frame_buffer. gvawatermark's person ROI drawing
-        is disabled so QueueCounter owns the final box colors. Used when
-        api.enabled=true and visualization=false.
+        is disabled when model.class_label is configured, allowing QueueCounter
+        to own the final box colors. Used when api.enabled=true and
+        visualization=false.
         """
         chain: list[str] = []
         for etype in types:

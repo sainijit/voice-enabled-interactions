@@ -48,6 +48,11 @@ services:
       BLANK_DURATION: "0"       # seconds of black frames between loops
       NO_PROXY: "localhost,127.0.0.1,rtsp-streamer,queue-management,kiosk-core"
       no_proxy: "localhost,127.0.0.1,rtsp-streamer,queue-management,kiosk-core"
+    # Device mapping is required for RTSP_SOURCE_MODE=live. Docker Compose does
+    # not support conditional device mappings, so this is always present. In
+    # sample mode, the device is not accessed by ffmpeg (sample files are used),
+    # so no permission errors occur. In live mode, this grants the container
+    # read access to the V4L2 camera device.
     devices:
       - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
     group_add:
