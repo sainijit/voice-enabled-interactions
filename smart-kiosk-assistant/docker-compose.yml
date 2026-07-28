@@ -16,8 +16,8 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # rtsp-streamer: publishes every *.mp4 under /media as an RTSP stream via
-  # MediaMTX + ffmpeg (see ./rtsp-streamer/start.sh).
+  # rtsp-streamer: publishes either bundled sample clips or a live webcam as
+  # an RTSP stream via MediaMTX + ffmpeg (see ./rtsp-streamer/start.sh).
   #
   # Stream path is set by STREAM_NAME (see rtsp-streamer environment below).
   # Default: rtsp://rtsp-streamer:8554/queue
@@ -34,22 +34,31 @@ services:
     ports:
       - "8554:8554"
     environment:
+      RTSP_SOURCE_MODE: ${RTSP_SOURCE_MODE:-sample}  # "sample" or "live" (see .env)
       MEDIA_DIR:      /media
-      # Play these clips back-to-back, then loop the whole sequence forever
-      # (sample_1 -> sample_2 -> sample_1 -> ...). They are concatenated by
-      # ffmpeg's concat demuxer and published as ONE stream, so a single ffmpeg
-      # process owns the RTSP path. For a single continuous clip instead, remove
-      # MEDIA_FILES and set MEDIA_FILE (e.g. MEDIA_FILE: /media/sample_1.mp4).
-      MEDIA_FILES:    /media/sample_1.mp4,/media/sample_2.mp4
-      # STREAM_NAME is required when MEDIA_FILES is used (the concat demuxer
-      # publishes a single stream so there is no filename to derive a path from).
-      STREAM_NAME:    queue
+      # Sample mode uses the existing MEDIA_FILES / MEDIA_FILE branches.
+      # The bundled clips are mounted from ./Sample_data into /media.
+      MEDIA_FILES:    ${MEDIA_FILES:-sample_1.mp4,sample_2.mp4}
+      # Live mode uses the same configurable device path for both the mount
+      # and the ffmpeg input. Sample mode ignores this value.
+      CAMERA_DEVICE:  ${CAMERA_DEVICE:-/dev/video0}
+      STREAM_NAME:    ${STREAM_NAME:-queue}
       RTSP_PORT:      "8554"
       LOOP_COUNT:     "-1"      # -1 = infinite loop for a continuous feed
       BLANK_DURATION: "0"       # seconds of black frames between loops
       NO_PROXY: "localhost,127.0.0.1,rtsp-streamer,queue-management,kiosk-core"
       no_proxy: "localhost,127.0.0.1,rtsp-streamer,queue-management,kiosk-core"
+    # Device mapping is required for RTSP_SOURCE_MODE=live. Docker Compose does
+    # not support conditional device mappings, so this is always present. In
+    # sample mode, the device is not accessed by ffmpeg (sample files are used),
+    # so no permission errors occur. In live mode, this grants the container
+    # read access to the V4L2 camera device.
+    devices:
+      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
+    group_add:
+      - video
     volumes:
+      - ./rtsp-streamer/start.sh:/opt/rtsp-streamer/start.sh:ro
       - ./Sample_data:/media:ro
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "8554"]

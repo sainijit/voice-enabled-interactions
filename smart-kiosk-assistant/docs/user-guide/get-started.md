@@ -137,6 +137,54 @@ The clips are saved as `Sample_data/sample_1.mp4` and `Sample_data/sample_2.mp4`
 to match the `MEDIA_FILES` entry in `docker-compose.yml`. You can also copy your
 own MP4 files to those paths manually.
 
+To switch the RTSP streamer between the bundled sample clips and a live webcam,
+edit `.env` only and restart the stack:
+
+```bash
+RTSP_SOURCE_MODE=sample  # or live
+CAMERA_DEVICE=/dev/video0
+```
+
+`sample` mode uses the existing `MEDIA_FILES` / `MEDIA_FILE` flow and publishes
+the sample clips continuously. `live` mode uses the configured `CAMERA_DEVICE`
+and keeps the RTSP endpoint unchanged at `rtsp://rtsp-streamer:8554/queue`.
+
+### Live Camera Streaming
+
+To stream a webcam instead of the bundled sample clips, set the RTSP source mode
+to `live` in `.env` and choose the device node that matches your camera:
+
+```bash
+RTSP_SOURCE_MODE=live
+CAMERA_DEVICE=/dev/video2
+```
+
+If you are not sure which device node to use, list the available camera
+devices on the host:
+
+```bash
+ls /dev/video*
+```
+
+If `v4l2-ctl` is installed, you can also run:
+
+```bash
+v4l2-ctl --list-devices
+```
+
+Update `.env` with the correct `CAMERA_DEVICE` value, then restart the RTSP
+streamer or restart Docker Compose so the new configuration is picked up:
+
+```bash
+docker compose up -d rtsp-streamer
+```
+
+The RTSP endpoint stays the same in both modes:
+
+```bash
+rtsp://rtsp-streamer:8554/queue
+```
+
 ## Step 6: Build Images and Start the Stack
 
 ```bash

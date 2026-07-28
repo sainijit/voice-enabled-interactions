@@ -32,7 +32,28 @@ if [ ! -x "$MEDIAMTX_BIN" ]; then
   exit 1
 fi
 
-# Input selection (checked in priority order):
+# RTSP_SOURCE_MODE selects the source family:
+#   sample - reuse the existing MEDIA_FILES / MEDIA_FILE / glob implementation
+#   live   - reuse the existing camera branch with CAMERA_DEVICE
+# When unset, legacy behavior is preserved: CAMERA_DEVICE wins if set, else the
+# media-file path is used.
+
+RTSP_SOURCE_MODE=${RTSP_SOURCE_MODE:-}
+if [ -n "$RTSP_SOURCE_MODE" ]; then
+  case "$RTSP_SOURCE_MODE" in
+    sample|live) ;;
+    *)
+      log "ERROR Unsupported RTSP_SOURCE_MODE '$RTSP_SOURCE_MODE'. Supported values: sample, live" >&2
+      exit 1
+      ;;
+  esac
+elif [ -n "${CAMERA_DEVICE:-}" ]; then
+  RTSP_SOURCE_MODE=live
+else
+  RTSP_SOURCE_MODE=sample
+fi
+
+# Input selection (checked in priority order in sample mode):
 #   MEDIA_FILES - comma-separated list of clips played back-to-back and then
 #                 looped as a whole (e.g. "sample_1.mp4,sample_2.mp4"). Entries
 #                 are absolute paths or relative to MEDIA_DIR. The clips are
@@ -53,7 +74,65 @@ PLAYLIST_FILE=""
 # single-file/glob workflows so their ffmpeg invocation is unchanged.
 INPUT_FORMAT_ARGS=""
 
-if [ -n "${MEDIA_FILES:-}" ]; then
+camera_device_troubleshooting() {
+  device_path=$1
+
+  log "ERROR: Camera device '$device_path' was not found or is not accessible." >&2
+  log "" >&2
+  log "To find available camera devices on your system, run:" >&2
+  log "" >&2
+  log "    ls /dev/video*" >&2
+  log "" >&2
+  log "or" >&2
+  log "" >&2
+  log "    v4l2-ctl --list-devices" >&2
+  log "" >&2
+  log "Then update CAMERA_DEVICE in your .env file." >&2
+  log "" >&2
+  log "Example:" >&2
+  log "" >&2
+  log "CAMERA_DEVICE=/dev/video2" >&2
+  log "" >&2
+  log "Detected video devices:" >&2
+
+  found_device=0
+  for candidate in /dev/video*; do
+    if [ -e "$candidate" ]; then
+      log "    $candidate" >&2
+      found_device=1
+    fi
+  done
+
+  if [ "$found_device" -eq 0 ]; then
+    log "    No video devices were detected." >&2
+  fi
+}
+
+if [ "$RTSP_SOURCE_MODE" = live ]; then
+  # Camera mode: V4L2 device passthrough — no file inputs needed.
+  # STREAM_NAME is required so the consumer path stays stable.
+  if [ -z "${CAMERA_DEVICE:-}" ]; then
+    camera_device_troubleshooting "<unset>"
+    exit 1
+  fi
+  if [ ! -e "$CAMERA_DEVICE" ]; then
+    camera_device_troubleshooting "$CAMERA_DEVICE"
+    exit 1
+  fi
+  if [ ! -r "$CAMERA_DEVICE" ]; then
+    camera_device_troubleshooting "$CAMERA_DEVICE"
+    exit 1
+  fi
+  if [ ! -c "$CAMERA_DEVICE" ]; then
+    camera_device_troubleshooting "$CAMERA_DEVICE"
+    exit 1
+  fi
+  if [ -z "${STREAM_NAME:-}" ]; then
+    log "ERROR STREAM_NAME must be set when RTSP_SOURCE_MODE=live" >&2
+    exit 1
+  fi
+  set --  # empty positional params; the for-file loop below is skipped
+elif [ -n "${MEDIA_FILES:-}" ]; then
   # Multi-file sequential playback via the concat demuxer.
   if [ -z "${STREAM_NAME:-}" ]; then
     log "ERROR STREAM_NAME must be set when MEDIA_FILES is used" >&2
@@ -190,6 +269,33 @@ create_looped_video() {
   rm -f "$black_file"
   rmdir "$tmpdir" 2>/dev/null || true
 }
+
+# Camera mode: start a single ffmpeg reading from the V4L2 device.
+if [ "$RTSP_SOURCE_MODE" = live ]; then
+  stream_name="$STREAM_NAME"
+  log "Camera mode: $CAMERA_DEVICE → rtsp://127.0.0.1:${RTSP_PORT}/${stream_name}"
+  "$FFMPEG_BIN" \
+    -hide_banner \
+    -loglevel info \
+    -f v4l2 \
+    -input_format ${CAMERA_INPUT_FORMAT:-mjpeg} \
+    -video_size "${CAMERA_VIDEO_SIZE:-1920x1080}" \
+    -framerate "${CAMERA_FRAMERATE:-30}" \
+    -i "$CAMERA_DEVICE" \
+    -an \
+    -c:v libx264 \
+    -profile:v baseline \
+    -pix_fmt yuv420p \
+    -preset ultrafast \
+    -tune zerolatency \
+    -g ${CAMERA_GOP:-${CAMERA_FRAMERATE:-30}} \
+    -rtsp_transport tcp \
+    -f rtsp \
+    "rtsp://127.0.0.1:${RTSP_PORT}/${stream_name}" &
+  pid=$!
+  pids="$pids $pid"
+  log "ffmpeg camera stream started (PID=$pid, RTSP=rtsp://0.0.0.0:${RTSP_PORT}/${stream_name})"
+fi
 
 # Map stream_name → station for logging
 station_index=0
