@@ -10,6 +10,9 @@ POST /api/v1/agent/chat
   Response:
     reply          str        — agent's text response
     tool_calls     list[str]  — tools invoked during this turn
+    llm_ms         float|None — cumulative genuine LLM time for the turn
+    llm_calls      int        — number of LLM round-trips for the turn
+    retrieval_ms   float|None — knowledge-base retrieval time for the turn
 """
 
 from __future__ import annotations
@@ -42,6 +45,21 @@ class AgentChatRequest(BaseModel):
 class AgentChatResponse(BaseModel):
     reply: str
     tool_calls: list[str] = Field(default_factory=list)
+    llm_ms: float | None = Field(
+        default=None,
+        description="Cumulative LLM round-trip time for this turn, in milliseconds",
+    )
+    llm_calls: int = Field(
+        default=0,
+        description="Number of LLM round-trips made during this turn",
+    )
+    retrieval_ms: float | None = Field(
+        default=None,
+        description=(
+            "Knowledge-base retrieval time for this turn, in milliseconds. "
+            "None when the agent did not call knowledge_lookup."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -88,4 +106,7 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     return AgentChatResponse(
         reply=result["reply"],
         tool_calls=result.get("tool_calls", []),
+        llm_ms=result.get("llm_ms"),
+        llm_calls=result.get("llm_calls", 0),
+        retrieval_ms=result.get("retrieval_ms"),
     )

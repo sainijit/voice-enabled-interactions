@@ -16,6 +16,7 @@ from collections.abc import Generator
 import httpx
 
 from kiosk_core import config
+from kiosk_core.ordering.order_claim_guard import validate_reply
 
 logger = logging.getLogger(__name__)
 
@@ -80,15 +81,40 @@ class AgentClient:
 
         reply = data.get("reply", "")
         tool_calls = data.get("tool_calls", [])
+        llm_ms = data.get("llm_ms")
+        llm_calls = data.get("llm_calls", 0)
+        retrieval_ms = data.get("retrieval_ms")
 
         logger.info(
-            "[AGENT-CLIENT] session=%s reply_len=%d tool_calls=%s",
+            "[AGENT-CLIENT] session=%s reply_len=%d tool_calls=%s llm_ms=%s llm_calls=%s "
+            "retrieval_ms=%s",
             session_id,
             len(reply),
             tool_calls,
+            llm_ms,
+            llm_calls,
+            retrieval_ms,
         )
+
+        # Reconcile the reply against the tools that actually ran before any of
+        # it reaches TTS. The agent has been observed announcing a placed and
+        # confirmed order without invoking a single ordering tool, so this
+        # claim is verified here rather than trusted.
+        reply, corrected = validate_reply(reply, tool_calls)
+        if corrected:
+            logger.error(
+                "[AGENT-CLIENT] session=%s reply failed order-claim validation "
+                "and was corrected (tool_calls=%s)",
+                session_id, tool_calls,
+            )
 
         if reply:
             yield reply
-        # Yield tool_calls as metadata so callers can record pipeline traces
-        yield {"_tool_calls": tool_calls}
+        # Yield tool_calls and LLM timings as metadata so callers can record
+        # pipeline traces with genuine LLM time (not whole-agent round-trip).
+        yield {
+            "_tool_calls": tool_calls,
+            "_llm_ms": llm_ms,
+            "_llm_calls": llm_calls,
+            "_retrieval_ms": retrieval_ms,
+        }
