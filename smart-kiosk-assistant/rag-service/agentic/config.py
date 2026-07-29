@@ -68,3 +68,22 @@ MAX_TOKENS: int = int(os.getenv("AGENT_MAX_TOKENS", "320"))
 RETRY_ON_MISSING_TOOL_CALL: bool = os.getenv(
     "AGENT_RETRY_ON_MISSING_TOOL_CALL", "true"
 ).lower() in ("true", "1", "yes")
+
+# Emit complete sentences to the caller as the model produces them, instead of
+# withholding the reply until the whole turn is post-processed.
+#
+# Measured on OVMS/Qwen3-4B-int4: the first sentence of a reply is ready at
+# ~700 ms while the full reply takes 1.3-4.0 s, so the customer currently
+# waits for text that already exists. Streaming it moves time-to-first-audio
+# from ~5.0 s to ~2.8 s.
+#
+# This is OFF by default and deliberately so. chat() applies several
+# whole-reply guards that can *replace* or *regenerate* an answer after the
+# fact (unbacked order claims, forced knowledge/catalogue recovery, leaked
+# tool syntax). A sentence that has already been spoken cannot be recalled,
+# so early emission is only safe for sentences that provably cannot trigger
+# any of those paths — see _SentenceGate. Set to false to fall back to the
+# buffered path with no rebuild.
+STREAM_SENTENCES: bool = os.getenv(
+    "AGENT_STREAM_SENTENCES", "false"
+).lower() in ("true", "1", "yes")

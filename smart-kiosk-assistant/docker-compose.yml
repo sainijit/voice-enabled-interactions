@@ -296,6 +296,13 @@ services:
       AGENT_LLM_URL:   http://ovms-llm:8000/v3
       AGENT_LLM_MODEL: ${OVMS_MODEL_NAME:-OpenVINO/Qwen3-4B-int4-ov}
       AGENT_MCP_CONFIG: /app/rag-service/agentic/resources/mcp_servers.json
+      # Release complete sentences to kiosk-core as they are generated rather
+      # than after the whole turn, but only for turns the agent's whole-reply
+      # guards provably cannot rewrite (see _SentenceGate in ordering_agent.py).
+      # Must agree with KIOSK_CORE_AGENT_STREAM_ENABLED on kiosk-core; either
+      # flag alone falls back to the buffered /api/v1/agent/chat path.
+      # Set AGENT_STREAM_SENTENCES=false to revert with a restart, no rebuild.
+      AGENT_STREAM_SENTENCES: ${AGENT_STREAM_SENTENCES:-true}
       # Embedding + reranker models are loaded in-process via OpenVINO at
       # startup (config.yaml pins device: GPU for both). Override with
       # TARGET_DEVICE=CPU (same variable used for the ovms-llm container) so
@@ -408,6 +415,14 @@ services:
       # Ordering & agent routing
       KIOSK_CORE_ORDERING_ENABLED: "true"
       KIOSK_CORE_AGENT_URL:        http://rag-service:8020/api/v1/agent/chat
+      # Consume the agent's streaming endpoint so TTS synthesis overlaps with
+      # generation instead of waiting for the whole turn. Measured on a
+      # multi-sentence menu reply: time-to-first-audio 6.8s -> 5.2s, turn total
+      # 12.9s -> 11.1s. Single-sentence replies see little change, since most
+      # of the latency is tool calls and retrieval rather than token emission.
+      # Driven by the same var as AGENT_STREAM_SENTENCES on rag-service; the
+      # two must agree, and either alone falls back to the buffered path.
+      KIOSK_CORE_AGENT_STREAM_ENABLED: ${AGENT_STREAM_SENTENCES:-true}
       KIOSK_CORE_DB_PATH:          /app/data/kiosk.db
       KIOSK_CORE_PRODUCTS_YAML:    /app/configs/ordering/products.yaml
       KIOSK_CORE_UPSELL_RULES_YAML: /app/configs/ordering/upsell_rules.yaml

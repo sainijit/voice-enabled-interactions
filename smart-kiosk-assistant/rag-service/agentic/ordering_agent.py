@@ -365,6 +365,121 @@ def _strip_tool_syntax(reply: str) -> str:
     )
     return cleaned
 
+
+# Sentence terminators used to decide when a streamed fragment is speakable.
+# A sentence is only released once its terminator has arrived, so TTS never
+# receives a half-formed clause.
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _normalise_for_compare(text: str) -> str:
+    """Collapse whitespace so streamed and final text can be prefix-compared.
+
+    The streamed sentences are re-joined with single spaces, whereas the final
+    reply keeps the model's original spacing, so a raw prefix test would report
+    a spurious mismatch.
+    """
+    return _WS_RE.sub(" ", text).strip()
+
+
+class _SentenceGate:
+    """Releases complete sentences early, but only when they are provably safe.
+
+    ``chat()`` applies several whole-reply guards *after* generation finishes.
+    Some of them replace the reply outright (an unbacked order claim, leaked
+    tool syntax) or regenerate the turn (the missing-tool-call retry). Speech
+    cannot be recalled, so a sentence may only be released when none of those
+    paths can still fire for this turn.
+
+    The conditions below mirror the guards in ``chat()`` one-for-one. They are
+    evaluated per sentence against the tool calls observed *so far*, which is
+    sound because ADK emits every ``function_call`` part before the final text
+    parts: by the time text streams, the turn's tool set is already known.
+
+    The gate is one-way. Once a sentence fails a check the gate closes for the
+    remainder of the turn and the caller falls back to the buffered reply,
+    because a later guard may rewrite text we would otherwise have spoken.
+    """
+
+    def __init__(self, message: str, emit) -> None:
+        """Initialise the gate.
+
+        Args:
+            message: The customer's utterance, needed to detect confirm intent.
+            emit:    Callback invoked with each sentence cleared for speech.
+        """
+        self._message = message
+        self._emit = emit
+        self._buffer = ""
+        self._released: list[str] = []
+        self._open = True
+        # A confirm intent can trigger _force_confirm(), which replaces the
+        # whole reply. Nothing in such a turn may be spoken early.
+        self._confirm_intent = bool(_CONFIRM_INTENT_RE.search(message))
+
+    @property
+    def released_text(self) -> str:
+        """Concatenation of everything already handed to the caller."""
+        return " ".join(self._released)
+
+    def close(self) -> None:
+        """Stop releasing sentences for the rest of this turn."""
+        self._open = False
+
+    def _is_safe(self, sentence: str, tool_calls: list[str]) -> bool:
+        """Return True when no post-hoc guard in chat() can rewrite ``sentence``."""
+        # (a) Every recovery path in chat() is gated on `not tool_calls`.
+        #     Until a tool has run, any of them may still replace the reply.
+        if not tool_calls:
+            return False
+        # (b) _force_confirm() replaces the reply on confirm-intent turns.
+        if self._confirm_intent:
+            return False
+        # (c) An order claim is only trustworthy if an order tool actually ran;
+        #     otherwise chat() substitutes _ORDER_CLAIM_FALLBACK.
+        if _ORDER_CLAIM_RE.search(sentence) and not any(
+            tool in _ORDER_TOOLS for tool in tool_calls
+        ):
+            return False
+        # (d) Anything that would be stripped or substituted wholesale.
+        if _ERROR_PAYLOAD_RE.search(sentence) or _TOOL_SYNTAX_RE.search(sentence):
+            return False
+        if _TOOL_MENTION_RE.search(sentence) or "<think" in sentence.lower():
+            return False
+        return True
+
+    def feed(self, delta: str, tool_calls: list[str]) -> None:
+        """Accumulate a streamed fragment and release any complete safe sentences.
+
+        Args:
+            delta:      Newly generated text.
+            tool_calls: Tools invoked so far this turn, in call order.
+        """
+        if not self._open or not delta:
+            return
+        self._buffer += delta
+        parts = _SENTENCE_END_RE.split(self._buffer)
+        # The trailing element has no terminator yet, so it stays buffered.
+        self._buffer = parts.pop() if parts else ""
+        for sentence in parts:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if not self._is_safe(sentence, tool_calls):
+                logger.info(
+                    "[AGENT][STREAM] Gate closed — sentence withheld for "
+                    "buffered validation | tools=%s sentence=%r",
+                    tool_calls, sentence[:120],
+                )
+                self.close()
+                return
+            spoken = _strip_markdown(sentence)
+            if not spoken:
+                continue
+            self._released.append(spoken)
+            self._emit(spoken)
+
+
 # Maps JSON-schema primitive types to Python types so ADK can build an
 # accurate function-call declaration (parameter names + types) for each MCP
 # tool. Without this, a ``**kwargs`` wrapper advertises zero parameters and the
@@ -824,6 +939,7 @@ class OrderingAgent:
         session_id: str,
         user_id: str = "anonymous",
         history: list[dict[str, str]] | None = None,
+        on_safe_sentence=None,
     ) -> dict[str, Any]:
         """Run one conversational turn and return the agent's response.
 
@@ -877,7 +993,14 @@ class OrderingAgent:
         llm_metrics.reset()
 
         try:
-            reply_parts, tool_calls = await self._run_turn(user_id, session_id, content)
+            gate = (
+                _SentenceGate(message, on_safe_sentence)
+                if (on_safe_sentence is not None and agent_cfg.STREAM_SENTENCES)
+                else None
+            )
+            reply_parts, tool_calls = await self._run_turn(
+                user_id, session_id, content, gate=gate
+            )
 
             # A turn that answers a catalogue question, promises a lookup, or
             # refuses without calling any tool is ungrounded. Re-run once with
@@ -988,12 +1111,32 @@ class OrderingAgent:
 
         logger.info("[AGENT] Reply length=%d tool_calls=%s latency_ms=%.0f", len(reply), tool_calls, latency_ms)
         retrieval = llm_metrics.retrieval_snapshot()
+
+        # Reconcile what was already spoken against the authoritative reply.
+        # The gate is designed so that no post-hoc guard can rewrite a released
+        # sentence; this check proves that held rather than assuming it. On a
+        # mismatch the caller is told nothing was streamed, so it speaks the
+        # authoritative reply in full — a repeated clause is recoverable, a
+        # silently wrong one is not.
+        streamed = gate.released_text if gate is not None else ""
+        if streamed and not _normalise_for_compare(reply).startswith(
+            _normalise_for_compare(streamed)
+        ):
+            logger.error(
+                "[AGENT][STREAM] Released text is not a prefix of the final reply — "
+                "discarding stream and replaying in full | session=%s "
+                "streamed=%r final=%r",
+                session_id, streamed[:160], reply[:160],
+            )
+            streamed = ""
+
         return {
             "reply": reply,
             "tool_calls": tool_calls,
             "llm_ms": llm["ms"],
             "llm_calls": llm["calls"],
             "retrieval_ms": retrieval["ms"],
+            "streamed": streamed,
         }
 
     async def _force_confirm(self, user_id: str, session_id: str) -> str:
@@ -1156,6 +1299,7 @@ class OrderingAgent:
         user_id: str,
         session_id: str,
         content,
+        gate: "_SentenceGate | None" = None,
     ) -> tuple[list[str], list[str]]:
         """Drive one ADK run and collect its text parts and tool invocations.
 
@@ -1163,6 +1307,9 @@ class OrderingAgent:
             user_id:    Customer identifier.
             session_id: ADK session identifier.
             content:    ``genai_types.Content`` to send as the new message.
+            gate:       Optional sentence gate. When supplied the run is made in
+                        SSE streaming mode and completed sentences are released
+                        early via the gate; the returned parts are unchanged.
 
         Returns:
             ``(reply_parts, tool_calls)`` — text fragments emitted by the model
@@ -1171,13 +1318,25 @@ class OrderingAgent:
         reply_parts: list[str] = []
         tool_calls: list[str] = []
 
+        run_kwargs = {}
+        if gate is not None:
+            from google.adk.agents.run_config import RunConfig, StreamingMode
+
+            run_kwargs["run_config"] = RunConfig(streaming_mode=StreamingMode.SSE)
+
         # Use run_async — run() is documented as "local testing only"
         # and blocks the event loop thread via queue.Queue().get().
         async for event in self._runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=content,
+            **run_kwargs,
         ):
+            # In SSE mode ADK emits incremental `partial` events followed by a
+            # final aggregated event. Only the aggregated text is accumulated,
+            # so reply_parts stays byte-identical to the non-streaming path and
+            # every downstream guard sees exactly what it saw before.
+            is_partial = bool(getattr(event, "partial", False))
             if hasattr(event, "content") and event.content:
                 for part in getattr(event.content, "parts", []):
                     # ADK surfaces tool invocations as function_call parts on
@@ -1187,7 +1346,11 @@ class OrderingAgent:
                         tool_calls.append(fn_call.name)
                         logger.info("[AGENT] Tool invoked: %s", fn_call.name)
                     if hasattr(part, "text") and part.text:
-                        reply_parts.append(part.text)
+                        if is_partial:
+                            if gate is not None:
+                                gate.feed(part.text, tool_calls)
+                        else:
+                            reply_parts.append(part.text)
 
         return reply_parts, tool_calls
 

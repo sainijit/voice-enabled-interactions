@@ -96,6 +96,27 @@ DEFAULT_AGENT_URL = os.getenv(
     "http://127.0.0.1:8020/api/v1/agent/chat",
 )
 
+# Consume the agent's streaming endpoint so complete sentences reach TTS as
+# they are generated instead of after the whole turn.
+#
+# Measured: the first sentence of a reply exists at ~700 ms while the full
+# reply takes 1.3-4.0 s, so time-to-first-audio drops from ~5.0 s to ~2.8 s.
+#
+# OFF by default, and it must stay paired with AGENT_STREAM_SENTENCES on
+# rag-service: the agent only releases sentences that provably cannot be
+# rewritten by a later guard, and this client still re-validates the
+# authoritative reply before speaking any remainder. Set to false to fall back
+# to the buffered endpoint without a rebuild.
+AGENT_STREAM_ENABLED = os.getenv(
+    "KIOSK_CORE_AGENT_STREAM_ENABLED", "false"
+).lower() in ("true", "1", "yes")
+
+# Derived from DEFAULT_AGENT_URL so both point at the same service.
+DEFAULT_AGENT_STREAM_URL = os.getenv(
+    "KIOSK_CORE_AGENT_STREAM_URL",
+    DEFAULT_AGENT_URL.rstrip("/") + "/stream",
+)
+
 # SQLite database file path (ordering domain).
 KIOSK_DB_PATH = os.getenv("KIOSK_CORE_DB_PATH", "./kiosk.db")
 
