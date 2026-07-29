@@ -168,10 +168,31 @@ services:
       - "8010:8010"
     devices:
       - /dev/dri:/dev/dri
+      # Intel NPU passthrough. Defaults to /dev/null so hosts without an NPU
+      # (and CI runners) start unchanged; set ACCEL_MOUNT_PATH=/dev/accel/accel0
+      # in .env to expose it. Mirrors the upstream edge-ai-libraries pattern.
+      - ${ACCEL_MOUNT_PATH:-/dev/null}:/dev/accel/accel0
     group_add:
       - video
       - "${RENDER_GID:-992}"
     environment:
+      # Required for Level Zero to enumerate the Intel NPU. Harmless when no
+      # NPU node is mapped — OpenVINO then reports CPU/GPU only.
+      ZE_ENABLE_ALT_DRIVERS: libze_intel_npu.so
+      # ASR placement. Measured on Core Ultra 7 356H across 25 real 16 kHz
+      # kiosk chunks (ov_genai whisper-base, language forced to en):
+      #   CPU 284 ms | GPU 57 ms | NPU 58 ms  (median)
+      # NPU gives GPU-class ASR latency while leaving the whole iGPU to the
+      # LLM, but only applies when ASR_PROVIDER=openvino.
+      AUDIO_ANALYZER__MODELS__ASR__DEVICE: ${ASR_DEVICE:-CPU}
+      # Default stays on the PyTorch "openai" provider: it is the only path
+      # exposing no_speech_prob/avg_logprob, which the hallucination filter
+      # needs. ov_genai is ~5x faster but transcribes pure silence as "you".
+      AUDIO_ANALYZER__MODELS__ASR__PROVIDER: ${ASR_PROVIDER:-openai}
+      # Whisper mis-detects language on short kiosk chunks and replies in
+      # Spanish; forcing en cut WER 11.0% -> 7.0% on every device. The language
+      # is a per-request parameter, so it is set by kiosk-core
+      # (KIOSK_CORE_ASR_LANGUAGE), not by audio-analyzer config.
       # Point HF cache under the same parent as ~/.cache/whisper so a single
       # ./.cache mount persists every model cache the service uses
       # (huggingface, openai-whisper, torch hub, etc.).
@@ -282,6 +303,16 @@ services:
       # with "[GPU] no supported devices found".
       SMART_KIOSK_RAG__MODELS__EMBEDDING__DEVICE: ${TARGET_DEVICE:-GPU}
       SMART_KIOSK_RAG__RETRIEVAL__RERANKER__DEVICE: ${TARGET_DEVICE:-GPU}
+      # Retrieval recall knobs. Defaults live in rag-service/config.yaml and
+      # are calibrated against the QuickBite KB; override per-deployment when
+      # the knowledge base changes materially, since the reranker's logit
+      # range is corpus-dependent and must be re-measured.
+      SMART_KIOSK_RAG__RETRIEVAL__RERANK_SCORE_THRESHOLD: ${RAG_RERANK_THRESHOLD:--7.0}
+      SMART_KIOSK_RAG__RETRIEVAL__FETCH_K: ${RAG_FETCH_K:-10}
+      # Context budget handed to the agent's reply call. This is the effective
+      # brake on spoken answer length: the model paraphrases whatever it is
+      # given, so 2000 chars of context produced a 20-second spoken reply.
+      RAG_MAX_CONTEXT_CHARS: ${RAG_MAX_CONTEXT_CHARS:-1800}
       # Bypass corporate proxy for all intra-cluster traffic so that
       # requests to ovms-llm, kiosk-core, etc. go directly on the
       # Docker bridge network instead of through the Intel proxy.
@@ -343,6 +374,11 @@ services:
       --tool_parser hermes3
       --target_device ${TARGET_DEVICE:-GPU}
       --cache_dir /tmp/ov_cache
+      --enable_prefix_caching ${OVMS_PREFIX_CACHING:-true}
+      --cache_size ${OVMS_KV_CACHE_GB:-4}
+      --max_num_seqs ${OVMS_MAX_NUM_SEQS:-4}
+      --max_num_batched_tokens ${OVMS_MAX_BATCHED_TOKENS:-4096}
+      --plugin_config '{"PERFORMANCE_HINT":"LATENCY"}'
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/v3/models"]
       interval: 20s
