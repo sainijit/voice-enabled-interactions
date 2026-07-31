@@ -9,7 +9,15 @@ from fastapi.responses import FileResponse
 
 from kiosk_core import config as cfg
 from kiosk_core.api.endpoints import router as api_router
-from kiosk_core.models import FileSessionStartRequest, SessionStartRequest, SessionStopResponse
+from kiosk_core.models import (
+    BrowserWakeWordChunkResponse,
+    BrowserWakeWordSessionResponse,
+    BrowserWakeWordStartRequest,
+    FileSessionStartRequest,
+    SessionStartRequest,
+    SessionStopResponse,
+    WakeWordSessionStartRequest,
+)
 from kiosk_core.pipeline_latency import pipeline_store
 from kiosk_core.service import SessionService
 
@@ -215,6 +223,54 @@ async def start_session(request: SessionStartRequest) -> dict[str, object]:
         return service.start_session(request)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/sessions/start-after-wakeword", response_model=None)
+async def start_session_after_wakeword(request: WakeWordSessionStartRequest) -> dict[str, object]:
+    await _clear_stale_cart_for_new_session(request.history)
+    try:
+        return await run_in_threadpool(service.start_session_after_wakeword, request)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=408, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Wake-word start failed: {exc}") from exc
+
+
+@app.post("/api/v1/wakeword/start", response_model=BrowserWakeWordSessionResponse)
+async def start_browser_wakeword_session(request: BrowserWakeWordStartRequest) -> BrowserWakeWordSessionResponse:
+    try:
+        return await run_in_threadpool(service.start_browser_wakeword_session, request)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/wakeword/{wakeword_session_id}/audio", response_model=BrowserWakeWordChunkResponse)
+async def push_browser_wakeword_audio(wakeword_session_id: str, request: Request) -> BrowserWakeWordChunkResponse:
+    wav_bytes = await request.body()
+    if not wav_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio body")
+    try:
+        return await run_in_threadpool(service.push_browser_wakeword_audio, wakeword_session_id, wav_bytes)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/wakeword/{wakeword_session_id}/stop", response_model=BrowserWakeWordSessionResponse)
+async def stop_browser_wakeword_session(wakeword_session_id: str) -> BrowserWakeWordSessionResponse:
+    try:
+        return await run_in_threadpool(service.stop_browser_wakeword_session, wakeword_session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/sessions/start-file")

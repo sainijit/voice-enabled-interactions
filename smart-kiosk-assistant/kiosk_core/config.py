@@ -33,6 +33,15 @@ DEFAULT_BLOCK_DURATION_SECONDS = float(os.getenv("KIOSK_CORE_BLOCK_DURATION_SECO
 DEFAULT_PREROLL_SECONDS = float(os.getenv("KIOSK_CORE_PREROLL_SECONDS", "0.3"))
 DEFAULT_HTTP_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_HTTP_TIMEOUT_SECONDS", "300.0"))
 
+# Wake-word activation (openwakeword)
+WAKEWORD_ENABLED = os.getenv("KIOSK_CORE_WAKEWORD_ENABLED", "false").lower() not in ("false", "0", "no")
+DEFAULT_WAKEWORD_MODEL = os.getenv("KIOSK_CORE_WAKEWORD_MODEL", "hey jarvis")
+DEFAULT_WAKEWORD_THRESHOLD = float(os.getenv("KIOSK_CORE_WAKEWORD_THRESHOLD", "0.5"))
+DEFAULT_WAKEWORD_VAD_THRESHOLD = float(os.getenv("KIOSK_CORE_WAKEWORD_VAD_THRESHOLD", "0.4"))
+DEFAULT_WAKEWORD_PATIENCE_FRAMES = int(os.getenv("KIOSK_CORE_WAKEWORD_PATIENCE_FRAMES", "2"))
+DEFAULT_WAKEWORD_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_WAKEWORD_TIMEOUT_SECONDS", "0"))
+DEFAULT_WAKEWORD_INFERENCE_FRAMEWORK = os.getenv("KIOSK_CORE_WAKEWORD_INFERENCE_FRAMEWORK", "onnx")
+
 # Speaker diarization — master switch and semantic fallback sensitivity.
 # Set KIOSK_CORE_DIARIZATION_ENABLED=false to revert to flat-text behavior
 # (no speaker filtering; all segments forwarded as-is).
