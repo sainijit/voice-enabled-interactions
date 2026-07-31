@@ -206,7 +206,7 @@ async def ingest_context_file(request: Request) -> BatchIngestResponse:
     (e.g. ``file`` or ``files``) so the endpoint is resilient to client changes.
     """
     form = await request.form()
-    uploads = [value for value in form.values() if isinstance(value, StarletteUploadFile)]
+    uploads = [value for key, value in form.multi_items() if isinstance(value, StarletteUploadFile)]
     if not uploads:
         raise HTTPException(
             status_code=422,
@@ -234,9 +234,15 @@ def context_stats():
 
 @router.delete("/api/v1/context")
 async def clear_context():
-    get_shared_pipeline().clear_context()
-    await _reset_agent_sessions()
-    return JSONResponse(content={"status": "cleared"}, status_code=200)
+    try:
+        get_shared_pipeline().clear_context()
+        await _reset_agent_sessions()
+        return JSONResponse(content={"status": "cleared"}, status_code=200)
+    except Exception as exc:
+        return JSONResponse(
+            content={"status": "failed", "detail": str(exc)},
+            status_code=500
+        )
 
 
 @router.post("/api/v1/query")

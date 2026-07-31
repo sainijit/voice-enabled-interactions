@@ -147,16 +147,17 @@ class RagPipeline:
         return self._ingestion.ingest_text(text, source=source, metadata=metadata)
 
     def clear_context(self) -> None:
-        client = getattr(self.vectorstore, "_client", None)
-        if client is None:
-            raise RuntimeError("Vector store client is not available")
+        collection = getattr(self.vectorstore, "_collection", None)
+        if collection is None:
+            logger.info("No collection to clear")
+            return
         try:
-            client.delete_collection(self.collection_name)
-        except Exception:  # noqa: BLE001
-            logger.info(
-                "Collection %s did not exist yet during clear_context", self.collection_name,
-            )
-        self.vectorstore = self._build_vectorstore()
+            all_ids = collection.get(include=[])
+            if all_ids["ids"]:
+                collection.delete(ids=all_ids["ids"])
+                logger.info("Deleted %d documents from collection", len(all_ids["ids"]))
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Failed to clear context: {exc}") from exc
 
     def get_stats(self) -> dict:
         collection = getattr(self.vectorstore, "_collection", None)
