@@ -268,7 +268,10 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]]:
 
 @mcp.tool()
 async def place_order(user_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Create a new draft order.
+    """Add items to the customer's cart (creates it if none is open).
+
+    Safe to call for follow-up items: if the customer already has an open
+    order, the items are added to it rather than starting a second one.
 
     Args:
         user_id: Customer identifier (use "anonymous" if unknown).
@@ -277,7 +280,7 @@ async def place_order(user_id: str, items: list[dict[str, Any]]) -> dict[str, An
             resolves it.
 
     Returns:
-        The created order (order_id, items, total, status="draft"), or an error
+        The order (order_id, items, total, status="draft"), or an error
         dict with ``available_products`` if a reference cannot be matched.
     """
     from kiosk_core.ordering.models import CreateOrderRequest, OrderItemIn

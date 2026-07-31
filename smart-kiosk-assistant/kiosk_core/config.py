@@ -80,6 +80,13 @@ DEFAULT_DIARIZATION_ENABLED = os.getenv("KIOSK_CORE_DIARIZATION_ENABLED", "true"
 # Minimum domain-keyword overlap ratio to accept a fallback segment when the
 # primary customer is silent for an entire chunk.
 DEFAULT_SEMANTIC_FALLBACK_THRESHOLD = float(os.getenv("KIOSK_CORE_SEMANTIC_FALLBACK_THRESHOLD", "0.10"))
+# When the audio-analyzer holds an enrolled reference voice it tags every
+# segment with is_primary. If it marks them all non-primary that is a positive
+# rejection and the chunk is dropped, so a bystander cannot inject orders.
+# Set KIOSK_CORE_SPEAKER_STRICT_DROP=false to fall back to the first-speaker /
+# semantic heuristics instead — an escape hatch for when voice enrollment is
+# mistuned and starts rejecting the real customer.
+DEFAULT_SPEAKER_STRICT_DROP = os.getenv("KIOSK_CORE_SPEAKER_STRICT_DROP", "true").lower() not in ("false", "0", "no")
 
 # ── Ordering & Agent feature ─────────────────────────────────────────────────
 # Set KIOSK_CORE_ORDERING_ENABLED=false to disable the ordering/agent feature

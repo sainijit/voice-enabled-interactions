@@ -733,6 +733,8 @@ class BaseAudioSession:
         Primary speaker is determined in order of precedence:
         1. Analyzer-provided ``is_primary`` flag on the segment — honoured
            directly when present, so the analyzer's own enrollment logic wins.
+           Its verdict is authoritative in *both* directions: if it marks every
+           segment non-primary, the chunk is dropped outright.
         2. First-speaker lock-on — the first speaker label seen in this session
            is treated as the customer.  Every subsequent segment from that label
            is kept; any other label is unconditionally dropped.
@@ -749,9 +751,32 @@ class BaseAudioSession:
         primary_speaker_id: str | None = getattr(self, "_primary_speaker_id", None)
 
         # ── Honor analyzer-provided is_primary when present ──────────────────
+        # The flag only appears once the analyzer holds an enrolled reference
+        # voice for this conversation (scoped by speaker_scope_id), so when it
+        # is present its verdict is authoritative and must be honoured in BOTH
+        # directions. In particular "no segment is primary" means the analyzer
+        # has positively matched this speech against the enrolled customer and
+        # rejected it — the chunk must be dropped, never fall through to the
+        # first-speaker rule below (which would lock on to the interloper,
+        # because _primary_speaker_id resets on every new audio session).
         if any("is_primary" in s for s in segments):
             primary_segments = [s for s in segments if s.get("is_primary")]
-            if primary_segments:
+            if not primary_segments:
+                if not config.DEFAULT_SPEAKER_STRICT_DROP:
+                    logger.warning(
+                        "[SPEAKER-FILTER] session=%s | analyzer rejected all %d segment(s) but "
+                        "strict drop is DISABLED — falling back to heuristics",
+                        self.session_id, len(segments),
+                    )
+                else:
+                    logger.info(
+                        "[SPEAKER-FILTER] session=%s | analyzer rejected all %d segment(s) as "
+                        "non-primary — chunk DROPPED | text=%r",
+                        self.session_id, len(segments),
+                        " ".join(s.get("text", "") for s in segments).strip()[:120],
+                    )
+                    return ""
+            else:
                 # Also update / initialise the lock-on label from the first
                 # primary segment so label-based filtering stays in sync.
                 label = primary_segments[0].get("speaker", "")

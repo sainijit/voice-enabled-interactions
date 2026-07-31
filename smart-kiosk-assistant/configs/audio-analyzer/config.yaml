@@ -81,8 +81,14 @@ models:
     # speech turn is treated as the "primary" speaker, and every subsequent
     # turn is relabelled by cosine similarity to that reference embedding.
     voice_enrollment_enabled: true
-    voice_match_threshold: 0.5     # cosine sim ≥ this → SPEAKER_00 (primary)
-    min_enrollment_duration: 1.0   # seconds; ignore very short turns for enrollment
+    # Measured same-speaker cosine spread with a 1.5s reference was 0.21-0.68
+    # (median ~0.46) — i.e. the old 0.5 threshold rejected more than half of the
+    # customer's own speech. Widening the enrollment/comparison windows below
+    # tightens that spread; keep this slightly under the old value while the
+    # longer windows bed in. Re-measure from the [DIARIZATION][MATCH] log lines
+    # before tightening it again.
+    voice_match_threshold: 0.45    # cosine sim ≥ this → SPEAKER_00 (primary)
+    min_enrollment_duration: 2.0   # seconds; ignore very short turns for enrollment
     # Enrollment is keyed on the conversation id sent by kiosk-core
     # (speaker_scope_id), so it survives across utterances. Evict idle
     # conversations so the cache cannot grow without bound.
@@ -90,11 +96,14 @@ models:
     # Minimum audio span used to classify a speaker. Embeddings computed on
     # much less than this are unstable, so words are grouped into windows of
     # at least this length before being compared to the enrolled voice.
-    min_window_seconds: 0.8
+    # At 0.8s the per-window scores for a single speaker swung by ±0.2 cosine,
+    # which is wider than the gap between the customer and a bystander.
+    min_window_seconds: 1.5
     # Span taken from the start of the first qualifying segment when enrolling
-    # the primary voice. Kept short so a bystander who starts talking partway
-    # through the opening utterance cannot contaminate the reference.
-    enrollment_window_seconds: 1.5
+    # the primary voice. This span always belongs to the customer (it is the
+    # opening of the first utterance), so a longer window buys a much more
+    # stable reference embedding without any real contamination risk.
+    enrollment_window_seconds: 4.0
 
 audio_preprocessing:
   chunk_duration_sec: 15
