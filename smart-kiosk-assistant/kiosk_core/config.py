@@ -19,6 +19,13 @@ DEFAULT_TTS_LANGUAGE = os.getenv("KIOSK_CORE_TTS_LANGUAGE", "English")
 DEFAULT_TTS_INSTRUCTIONS = os.getenv("KIOSK_CORE_TTS_INSTRUCTIONS")
 DEFAULT_SAMPLE_RATE = int(os.getenv("KIOSK_CORE_SAMPLE_RATE", "16000"))
 
+# Audio capture source override.
+# When HOST_MIC=true the backend captures audio directly from the host machine's
+# microphone; otherwise the browser captures audio and streams it to the backend.
+# This lets the same build work both locally (host mic) and against a
+# remote/headless kiosk-core (browser mic) without auto-detection surprises.
+HOST_MIC = os.getenv("HOST_MIC", "false").lower() not in ("false", "0", "no")
+
 # Metrics collector – base URL of the standalone metrics-collector container.
 # Within Docker the service is reachable as http://metrics-collector:9000.
 METRICS_COLLECTOR_URL = os.getenv(

@@ -259,6 +259,7 @@ class BrowserWakeWordSession:
                     return False, self._last_label, round(self._last_score, 4)
 
                 n_complete = self._pcm_buffer.size // self._frame_size
+                chunk_peak = 0.0
                 for i in range(n_complete):
                     start = i * self._frame_size
                     frame = self._pcm_buffer[start : start + self._frame_size]
@@ -266,6 +267,8 @@ class BrowserWakeWordSession:
                     label, score = self._listener._target_score(prediction)
                     self._last_label = label
                     self._last_score = float(score)
+                    if score > chunk_peak:
+                        chunk_peak = float(score)
 
                     if score >= self._listener.threshold:
                         self._consecutive_hits += 1
@@ -281,6 +284,18 @@ class BrowserWakeWordSession:
                             score,
                         )
                         break
+
+                # Diagnostic: surface near-miss peaks so the wake-word threshold
+                # can be tuned. Silence stays quiet (peak below the floor); any
+                # speech attempt prints the best score seen this chunk vs the
+                # configured threshold.
+                if not self._detected and chunk_peak >= 0.1:
+                    logger.info(
+                        "[WAKEWORD] Browser stream peak score=%.3f (threshold=%.2f, vad=%.2f) — no trigger",
+                        chunk_peak,
+                        self._listener.threshold,
+                        self._listener.vad_threshold,
+                    )
 
                 consumed = n_complete * self._frame_size
                 self._pcm_buffer = self._pcm_buffer[consumed:]

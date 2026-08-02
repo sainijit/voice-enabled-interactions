@@ -177,6 +177,16 @@ class SessionService:
             )
         return devices
 
+    def host_mic_available(self) -> bool:
+        """True when the machine running kiosk-core has at least one usable
+        audio input device. Used by the UI to decide whether to capture audio
+        directly on the host (preferred) or fall back to browser-mic streaming
+        (e.g. when kiosk-core runs on a remote/headless machine)."""
+        try:
+            return len(self.list_input_devices()) > 0
+        except Exception:
+            return False
+
     def start_stream_session(self, request: SessionStartRequest) -> dict[str, object]:
         with self._lock:
             if self._active_session_id is not None:

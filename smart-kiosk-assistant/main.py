@@ -164,6 +164,28 @@ def list_devices() -> dict[str, list[dict[str, str | int]]]:
     return {"devices": service.list_input_devices()}
 
 
+@app.get("/api/v1/capture-mode")
+def capture_mode() -> dict[str, object]:
+    """Report whether kiosk-core should capture audio directly from a host
+    microphone or defer to browser-mic streaming.
+
+    The capture source is controlled by the HOST_MIC env var: when HOST_MIC is
+    truthy the backend records from the host machine's microphone
+    (recommended='host'); otherwise it streams audio from the browser
+    (recommended='browser'). This lets the same build work both locally
+    (HOST_MIC=true) and against a remote/headless kiosk-core (HOST_MIC unset)."""
+    try:
+        devices = service.list_input_devices()
+    except Exception:  # noqa: BLE001
+        devices = []
+    host_available = len(devices) > 0
+    return {
+        "host_mic_available": host_available,
+        "recommended": "host" if cfg.HOST_MIC else "browser",
+        "host_devices": devices,
+    }
+
+
 @app.get("/api/v1/sessions")
 def list_sessions() -> dict[str, list[dict[str, object]]]:
     return {"sessions": service.list_sessions()}
