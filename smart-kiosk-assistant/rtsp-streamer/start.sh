@@ -116,8 +116,8 @@ if [ "$RTSP_SOURCE_MODE" = live ]; then
     exit 1
   fi
   if [ "$CAMERA_DEVICE" = "/dev/null" ]; then
-    log "ERROR CAMERA_DEVICE is '/dev/null'. Set a real V4L2 node when RTSP_SOURCE_MODE=live (for example /dev/video0)." >&2
-    camera_device_troubleshooting "$CAMERA_DEVICE"
+    log "ERROR CAMERA_DEVICE is '/dev/null', which is not a valid V4L2 camera device." >&2
+    log "Set CAMERA_DEVICE to a real V4L2 node (for example /dev/video0) in your .env file." >&2
     exit 1
   fi
   if [ ! -e "$CAMERA_DEVICE" ]; then
