@@ -237,7 +237,7 @@ services:
     restart: unless-stopped
 
   text-to-speech:
-    image: ${REGISTRY:-intel}/text-to-speech:2026.1.0
+    image: ${REGISTRY:-intel}/text-to-speech:2026.2.0-rc2
     container_name: text-to-speech
     user: "1000:1000"
     ports:
