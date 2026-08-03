@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from docx import Document as DocxDocument
@@ -161,7 +162,9 @@ def rag_performance():
 async def ingest_context(request: ContextRequest) -> IngestResponse:
     pipeline = get_shared_pipeline()
     _validate_token_budget(pipeline, request.text)
-    added = pipeline.ingest_text(request.text, source=request.source, metadata=request.metadata)
+    added = await run_in_threadpool(
+        pipeline.ingest_text, request.text, source=request.source, metadata=request.metadata
+    )
     await _reset_agent_sessions()
     return IngestResponse(chunks_added=added, source=request.source)
 
@@ -188,7 +191,7 @@ async def _ingest_single_file(pipeline, file: UploadFile) -> FileIngestResult:
             raise HTTPException(status_code=422, detail="No extractable text found in file")
 
         _validate_token_budget(pipeline, text)
-        added = pipeline.ingest_text(text, source=filename)
+        added = await run_in_threadpool(pipeline.ingest_text, text, source=filename)
         return FileIngestResult(source=filename, chunks_added=added, status="ok")
     except HTTPException as exc:
         return FileIngestResult(source=filename, status="failed", detail=str(exc.detail))
@@ -235,7 +238,7 @@ def context_stats():
 @router.delete("/api/v1/context")
 async def clear_context():
     try:
-        get_shared_pipeline().clear_context()
+        await run_in_threadpool(get_shared_pipeline().clear_context)
         await _reset_agent_sessions()
         return JSONResponse(content={"status": "cleared"}, status_code=200)
     except Exception as exc:

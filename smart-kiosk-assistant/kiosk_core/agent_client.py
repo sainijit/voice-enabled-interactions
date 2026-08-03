@@ -142,7 +142,7 @@ class AgentClient:
         self,
         payload: dict[str, object],
         session_id: str,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str | dict[str, object], None, None]:
         """Consume the agent's NDJSON stream, speaking safe sentences early.
 
         The agent releases only sentences that provably cannot be rewritten by
