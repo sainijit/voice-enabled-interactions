@@ -26,6 +26,13 @@ DEFAULT_ASR_LANGUAGE = os.getenv("KIOSK_CORE_ASR_LANGUAGE", "en") or None
 DEFAULT_TTS_INSTRUCTIONS = os.getenv("KIOSK_CORE_TTS_INSTRUCTIONS")
 DEFAULT_SAMPLE_RATE = int(os.getenv("KIOSK_CORE_SAMPLE_RATE", "16000"))
 
+# Audio capture source override.
+# When HOST_MIC=true the backend captures audio directly from the host machine's
+# microphone; otherwise the browser captures audio and streams it to the backend.
+# This lets the same build work both locally (host mic) and against a
+# remote/headless kiosk-core (browser mic) without auto-detection surprises.
+HOST_MIC = os.getenv("HOST_MIC", "false").lower() not in ("false", "0", "no")
+
 # ---------------------------------------------------------------------------
 # TTS segment silence trimming
 # ---------------------------------------------------------------------------
@@ -72,6 +79,15 @@ DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900")
 DEFAULT_BLOCK_DURATION_SECONDS = float(os.getenv("KIOSK_CORE_BLOCK_DURATION_SECONDS", "0.1"))
 DEFAULT_PREROLL_SECONDS = float(os.getenv("KIOSK_CORE_PREROLL_SECONDS", "0.3"))
 DEFAULT_HTTP_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_HTTP_TIMEOUT_SECONDS", "300.0"))
+
+# Wake-word activation (openwakeword)
+WAKEWORD_ENABLED = os.getenv("KIOSK_CORE_WAKEWORD_ENABLED", "false").lower() not in ("false", "0", "no")
+DEFAULT_WAKEWORD_MODEL = os.getenv("KIOSK_CORE_WAKEWORD_MODEL", "hey jarvis")
+DEFAULT_WAKEWORD_THRESHOLD = float(os.getenv("KIOSK_CORE_WAKEWORD_THRESHOLD", "0.5"))
+DEFAULT_WAKEWORD_VAD_THRESHOLD = float(os.getenv("KIOSK_CORE_WAKEWORD_VAD_THRESHOLD", "0.4"))
+DEFAULT_WAKEWORD_PATIENCE_FRAMES = int(os.getenv("KIOSK_CORE_WAKEWORD_PATIENCE_FRAMES", "2"))
+DEFAULT_WAKEWORD_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_WAKEWORD_TIMEOUT_SECONDS", "0"))
+DEFAULT_WAKEWORD_INFERENCE_FRAMEWORK = os.getenv("KIOSK_CORE_WAKEWORD_INFERENCE_FRAMEWORK", "onnx")
 
 # Speaker diarization — master switch and semantic fallback sensitivity.
 # Set KIOSK_CORE_DIARIZATION_ENABLED=false to revert to flat-text behavior

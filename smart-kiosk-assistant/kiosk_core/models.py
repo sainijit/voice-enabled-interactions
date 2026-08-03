@@ -40,6 +40,36 @@ class FileSessionStartRequest(SessionStartRequest):
     realtime_factor: float = Field(default=1.0, gt=0.0, le=100.0)
 
 
+class WakeWordSessionStartRequest(SessionStartRequest):
+    wakeword_model: str = Field(default=config.DEFAULT_WAKEWORD_MODEL)
+    wakeword_threshold: float = Field(default=config.DEFAULT_WAKEWORD_THRESHOLD, ge=0.0, le=1.0)
+    wakeword_vad_threshold: float = Field(default=config.DEFAULT_WAKEWORD_VAD_THRESHOLD, ge=0.0, le=1.0)
+    wakeword_patience_frames: int = Field(default=config.DEFAULT_WAKEWORD_PATIENCE_FRAMES, ge=1, le=20)
+    wakeword_timeout_seconds: float = Field(default=config.DEFAULT_WAKEWORD_TIMEOUT_SECONDS, ge=0.0, le=3600.0)
+    wakeword_inference_framework: str = Field(default=config.DEFAULT_WAKEWORD_INFERENCE_FRAMEWORK)
+
+
+class BrowserWakeWordStartRequest(BaseModel):
+    sample_rate: int = Field(default=config.DEFAULT_SAMPLE_RATE, ge=8000, le=48000)
+    wakeword_model: str = Field(default=config.DEFAULT_WAKEWORD_MODEL)
+    wakeword_threshold: float = Field(default=config.DEFAULT_WAKEWORD_THRESHOLD, ge=0.0, le=1.0)
+    wakeword_vad_threshold: float = Field(default=config.DEFAULT_WAKEWORD_VAD_THRESHOLD, ge=0.0, le=1.0)
+    wakeword_patience_frames: int = Field(default=config.DEFAULT_WAKEWORD_PATIENCE_FRAMES, ge=1, le=20)
+    wakeword_inference_framework: str = Field(default=config.DEFAULT_WAKEWORD_INFERENCE_FRAMEWORK)
+
+
+class BrowserWakeWordSessionResponse(BaseModel):
+    wakeword_session_id: str
+    status: str
+
+
+class BrowserWakeWordChunkResponse(BaseModel):
+    wakeword_session_id: str
+    detected: bool
+    score: float
+    detected_label: str | None = None
+
+
 class SessionStopResponse(BaseModel):
     session_id: str
     status: str
