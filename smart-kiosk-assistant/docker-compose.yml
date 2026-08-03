@@ -39,22 +39,20 @@ services:
       # Sample mode uses the existing MEDIA_FILES / MEDIA_FILE branches.
       # The bundled clips are mounted from ./Sample_data into /media.
       MEDIA_FILES:    ${MEDIA_FILES:-sample_1.mp4,sample_2.mp4}
-      # Live mode uses the same configurable device path for both the mount
-      # and the ffmpeg input. Sample mode ignores this value.
-      CAMERA_DEVICE:  ${CAMERA_DEVICE:-/dev/video0}
+      # Live mode reads from this V4L2 node. Sample mode ignores this value.
+      CAMERA_DEVICE:  ${CAMERA_DEVICE:-}
       STREAM_NAME:    ${STREAM_NAME:-queue}
       RTSP_PORT:      "8554"
       LOOP_COUNT:     "-1"      # -1 = infinite loop for a continuous feed
       BLANK_DURATION: "0"       # seconds of black frames between loops
       NO_PROXY: "localhost,127.0.0.1,rtsp-streamer,queue-management,kiosk-core"
       no_proxy: "localhost,127.0.0.1,rtsp-streamer,queue-management,kiosk-core"
-    # Device mapping is required for RTSP_SOURCE_MODE=live. Docker Compose does
-    # not support conditional device mappings, so this is always present. In
-    # sample mode, the device is not accessed by ffmpeg (sample files are used),
-    # so no permission errors occur. In live mode, this grants the container
-    # read access to the V4L2 camera device.
+    # Compose cannot conditionally include devices. RTSP_CAMERA_DEVICE is
+    # therefore resolved outside compose:
+    #   sample mode -> /dev/null (safe on systems without a camera)
+    #   live mode   -> CAMERA_DEVICE (validated by check-env/start.sh)
     devices:
-      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
+      - ${RTSP_CAMERA_DEVICE:-/dev/null}:${RTSP_CAMERA_DEVICE:-/dev/null}
     group_add:
       - video
     volumes:
