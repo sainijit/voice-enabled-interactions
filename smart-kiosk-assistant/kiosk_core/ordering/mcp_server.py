@@ -167,12 +167,19 @@ async def _resolve_items(
             # "there was an issue, please try again" and strand the customer in
             # a loop, since retrying the same missing item always fails.
             offer = ", ".join(f"{p.name} ({p.price:.0f})" for p in suggestions[:3])
+            error_msg = (
+                f"'{ref}' is not on the menu. Do not invent it and do not ask the "
+                f"customer to try again. Tell them it is unavailable and offer these "
+                f"real alternatives instead: {offer}."
+                if offer
+                else (
+                    f"'{ref}' is not on the menu and there are no similar items to "
+                    f"suggest. Do not invent a product — tell the customer it is "
+                    f"unavailable and ask what else they'd like."
+                )
+            )
             return None, {
-                "error": (
-                    f"'{ref}' is not on the menu. Do not invent it and do not ask the "
-                    f"customer to try again. Tell them it is unavailable and offer these "
-                    f"real alternatives instead: {offer}."
-                ),
+                "error": error_msg,
                 "available_products": [
                     {"product_id": p.product_id, "name": p.name, "price": p.price}
                     for p in suggestions
