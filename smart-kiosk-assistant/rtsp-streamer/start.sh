@@ -76,8 +76,10 @@ INPUT_FORMAT_ARGS=""
 
 camera_device_troubleshooting() {
   device_path=$1
+  # Optional second argument overrides the default reason line.
+  reason=${2:-"Camera device '$device_path' was not found or is not accessible."}
 
-  log "ERROR: Camera device '$device_path' was not found or is not accessible." >&2
+  log "ERROR: $reason" >&2
   log "" >&2
   log "To find available camera devices on your system, run:" >&2
   log "" >&2
@@ -116,8 +118,8 @@ if [ "$RTSP_SOURCE_MODE" = live ]; then
     exit 1
   fi
   if [ "$CAMERA_DEVICE" = "/dev/null" ]; then
-    log "ERROR CAMERA_DEVICE is '/dev/null', which is not a valid V4L2 camera device." >&2
-    log "Set CAMERA_DEVICE to a real V4L2 node (for example /dev/video0) in your .env file." >&2
+    camera_device_troubleshooting "$CAMERA_DEVICE" \
+      "CAMERA_DEVICE is '/dev/null', which is not a valid V4L2 camera device. Set it to a real V4L2 node in your .env file."
     exit 1
   fi
   if [ ! -e "$CAMERA_DEVICE" ]; then
