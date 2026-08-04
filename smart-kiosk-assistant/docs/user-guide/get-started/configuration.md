@@ -124,6 +124,23 @@ kiosk-core has no config file. All settings are controlled through environment v
 | `KIOSK_CORE_UI_TIMEOUT_SECONDS` | `120.0` | HTTP client timeout in the UI |
 | `KIOSK_CORE_UI_POLL_INTERVAL_SECONDS` | `0.35` | How often the UI polls for session state updates |
 
+### Kiosk UI runtime mode {#kiosk_ui_mode}
+
+The React kiosk UI (`kiosk-ui/`) ships as a single image that can serve
+either of two screens, selected at container start — no rebuild:
+
+| Variable | Default | Description |
+|---|---|---|
+| `KIOSK_UI_MODE` | `operator` | `operator` — chat transcript + performance dashboard (existing behaviour), served on port 7860. `customer` — single-view kiosk screen with a queue-aware menu, live cart, and a voice-only "Ask" button, intended for the physical kiosk touchscreen. |
+
+The value is written to `/usr/share/nginx/html/config.js` by
+`docker-entrypoint.sh` (installed as an nginx `docker-entrypoint.d`
+script) and read by the SPA before the React bundle loads. In
+`docker-compose.yml` the two screens are separate containers
+(`kiosk-ui` and `kiosk-ui-customer`) built from the *same* image/context,
+published on different host ports (`7860` and `7861` respectively) so
+they can be shown on two separate monitors during a demo.
+
 ## Compose Defaults
 
 When running with the top-level [docker-compose.yml](https://github.com/intel-retail/voice-enabled-interactions/blob/main/smart-kiosk-assistant/docker-compose.yml), the defaults are wired to the internal Compose network:

@@ -510,6 +510,10 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Operator/demo screen — chat transcript, performance dashboard, device &
+  # knowledge-base settings, QSR tab. Shown on the monitor facing staff/demo
+  # audience. KIOSK_UI_MODE is intentionally omitted here: the image defaults
+  # to 'operator' (see src/uiMode.ts) so this behaves exactly as before.
   kiosk-ui:
     build:
       context: ./kiosk-ui
@@ -528,6 +532,31 @@ services:
     depends_on:
       kiosk-core:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Customer-facing screen — single-view menu (queue-driven) + cart + voice
+  # "Ask" button, for the physical kiosk touchscreen. Reuses the exact same
+  # image/build as kiosk-ui; only KIOSK_UI_MODE and the published port differ,
+  # so the two screens can never drift out of sync with each other's backend
+  # wiring. No separate build context or Dockerfile.
+  kiosk-ui-customer:
+    image: ${REGISTRY:-intel}/kiosk-ui:${RELEASE_TAG:-latest}
+    container_name: kiosk-ui-customer
+    ports:
+      - "7861:7860"
+    environment:
+      KIOSK_UI_MODE:              customer
+      KIOSK_CORE_UI_BASE_URL:     http://kiosk-core:8012
+      KIOSK_CORE_UI_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
+      KIOSK_CORE_UI_RAG_URL:      http://rag-service:8020/api/v1/query
+      KIOSK_CORE_UI_TTS_URL:      http://text-to-speech:8011/v1/audio/speech
+    volumes:
+      - generated_audio:/app/generated_audio
+    depends_on:
+      kiosk-core:
+        condition: service_healthy
+      kiosk-ui:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
