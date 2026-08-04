@@ -1,97 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-import { fetchCurrentOrder, fetchOrder, fetchUpsell } from '../../api/orderingApi';
-import { tuning } from '../../constants';
-import type { Order, UpsellSuggestion } from '../../types';
+import { useOrderTracking } from '../../hooks/useOrderTracking';
+import { formatCurrency, formatOrderId } from '../../api/orderingApi';
 
 interface OrderPanelProps {
   active: boolean;
 }
 
-// Indian Rupees, dropping a trailing .0 for whole values (matches the agent's replies).
-const formatCurrency = (value: number | undefined): string => {
-  const rounded = Math.round((value ?? 0) * 100) / 100;
-  return `₹${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)}`;
-};
-
-// Matches the order id the agent speaks (e.g. "ORD-11"), no zero-padding.
-const formatOrderId = (orderId: number): string => `ORD-${orderId}`;
-
-// Poll quickly during an active ordering session; fall back to the same cadence
-// as the performance dashboard so we don't spam the backend when idle.
-const ACTIVE_POLL_MS = 2000;
-const IDLE_POLL_MS = tuning.perfRefreshMs; // 10 s
-
 export function OrderPanel({ active }: OrderPanelProps) {
-  const [order, setOrder] = useState<Order | null>(null);
-  const [suggestions, setSuggestions] = useState<UpsellSuggestion[]>([]);
-  const mountedRef = useRef(false);
-  // Remember the order currently on screen so we can keep showing the confirmed
-  // receipt after the draft query stops returning it.
-  const shownOrderRef = useRef<Order | null>(null);
+  const { order, suggestions: visibleSuggestions } = useOrderTracking(active);
 
-  const applyOrder = useCallback(async (next: Order | null) => {
-    if (!mountedRef.current) return;
-    shownOrderRef.current = next;
-    setOrder(next);
-
-    const productIds =
-      next && next.status === 'draft' ? next.items?.map((item) => item.product_id) ?? [] : [];
-    if (productIds.length > 0) {
-      const nextSuggestions = await fetchUpsell(productIds);
-      if (!mountedRef.current) return;
-      setSuggestions(nextSuggestions);
-    } else {
-      setSuggestions([]);
-    }
-  }, []);
-
-  const loadOrder = useCallback(async () => {
-    const draft = await fetchCurrentOrder(tuning.userId);
-    if (!mountedRef.current) return;
-
-    if (draft) {
-      // A live draft exists — always show it (this also replaces a stale receipt
-      // once the customer starts a brand-new order).
-      await applyOrder(draft);
-      return;
-    }
-
-    // No draft. If we were showing one, it was just confirmed — fetch the frozen
-    // confirmed order by id and keep it on screen as a receipt instead of blanking.
-    const shown = shownOrderRef.current;
-    if (shown && shown.status !== 'confirmed') {
-      const confirmed = await fetchOrder(shown.order_id);
-      if (!mountedRef.current) return;
-      if (confirmed) {
-        await applyOrder(confirmed);
-        return;
-      }
-    }
-    // Already showing a confirmed receipt (or nothing) — leave it untouched.
-    if (!shown) {
-      await applyOrder(null);
-    }
-  }, [applyOrder]);
-
-  // Single interval whose cadence adapts to the active state.
-  // Replaces the previous two-interval bug that caused overlapping polls.
-  useEffect(() => {
-    mountedRef.current = true;
-    void loadOrder();
-
-    const intervalMs = active ? ACTIVE_POLL_MS : IDLE_POLL_MS;
-    const intervalId = window.setInterval(() => {
-      void loadOrder();
-    }, intervalMs);
-
-    return () => {
-      mountedRef.current = false;
-      window.clearInterval(intervalId);
-    };
-  }, [active, loadOrder]);
-
-  const visibleSuggestions = useMemo(() => suggestions.slice(0, 3), [suggestions]);
   const items = order?.items ?? [];
   const isConfirmed = order?.status === 'confirmed';
 

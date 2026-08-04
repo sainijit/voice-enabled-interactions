@@ -32,7 +32,8 @@ All five services are started by the top-level [docker-compose.yml](./docker-com
 | `text-to-speech` | `8011` | Speech synthesis | [intel/text-to-speech](https://hub.docker.com/r/intel/text-to-speech) |
 | `rag-service` | `8020` | Retrieval, ingestion, answer generation | [rag-service/README.md](./rag-service/README.md) |
 | `kiosk-core` | `8012` | Session API and service orchestration | [main.py](./main.py) |
-| `kiosk-ui` | `7860` | Gradio browser interface | [gradio_app.py](./gradio_app.py) |
+| `kiosk-ui` | `7860` | Kiosk browser interface — operator screen | [kiosk-ui/](./kiosk-ui) |
+| `kiosk-ui-customer` | `7861` | Kiosk browser interface — customer screen (same image as `kiosk-ui`, `KIOSK_UI_MODE=customer`) | [kiosk-ui/](./kiosk-ui) |
 
 ## Quick Start
 
@@ -45,7 +46,11 @@ docker compose pull
 docker compose up -d
 ```
 
-Open [http://127.0.0.1:7860](http://127.0.0.1:7860) for the browser UI.
+Open [http://127.0.0.1:7860](http://127.0.0.1:7860) for the operator
+browser UI (chat + performance dashboard), and
+[http://127.0.0.1:7861](http://127.0.0.1:7861) for the customer-facing
+kiosk screen (queue-aware menu, cart, voice "Ask" button) — see
+[docs/user-guide/get-started/configuration.md](./docs/user-guide/get-started/configuration.md#kiosk_ui_mode).
 
 All five images (`audio-analyzer`, `text-to-speech`, `rag-service`,
 `kiosk-core`, `kiosk-ui`) are pulled from the `intel/` namespace at the

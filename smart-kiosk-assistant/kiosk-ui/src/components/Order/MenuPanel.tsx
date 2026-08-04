@@ -1,34 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchMenu } from '../../api/orderingApi';
+import { groupByCategory, formatPrice } from '../../menu/categories';
 import type { Product } from '../../types';
-
-/** Format a price in Indian Rupees, dropping trailing .0 for whole values. */
-const formatPrice = (value: number): string => {
-  const rounded = Math.round(value * 100) / 100;
-  return `₹${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)}`;
-};
-
-// Display order + icon for each catalogue category. Categories not listed here
-// still render (alphabetically, with a default icon) so the menu never hides items.
-const CATEGORY_META: { key: string; label: string; icon: string }[] = [
-  { key: 'burgers', label: 'Burgers', icon: '🍔' },
-  { key: 'pizza', label: 'Pizza', icon: '🍕' },
-  { key: 'wraps', label: 'Wraps', icon: '🌯' },
-  { key: 'sides', label: 'Sides', icon: '🍟' },
-  { key: 'beverages', label: 'Beverages', icon: '🥤' },
-  { key: 'desserts', label: 'Desserts', icon: '🍰' },
-];
-
-/** Categories shown during peak hours (fast-prep, low-queue impact). */
-const PEAK_CATEGORIES = new Set(['burgers', 'beverages', 'sides']);
-
-const categoryMeta = (key: string) =>
-  CATEGORY_META.find((c) => c.key === key) ?? {
-    key,
-    label: key.charAt(0).toUpperCase() + key.slice(1),
-    icon: '🍽',
-  };
 
 interface MenuPanelProps {
   /** When true, only fast-prep peak categories are shown. */
@@ -50,27 +24,10 @@ export function MenuPanel({ peakOnly = false }: MenuPanelProps) {
     };
   }, []);
 
-  // Group products by category, ordered per CATEGORY_META then any extras.
-  const grouped = useMemo(() => {
-    if (!products) return [];
-    const filtered = peakOnly
-      ? products.filter((p) => PEAK_CATEGORIES.has(p.category))
-      : products;
-    const byCat = new Map<string, Product[]>();
-    for (const p of filtered) {
-      const list = byCat.get(p.category) ?? [];
-      list.push(p);
-      byCat.set(p.category, list);
-    }
-    const ordered: string[] = [
-      ...CATEGORY_META.map((c) => c.key).filter((k) => byCat.has(k)),
-      ...[...byCat.keys()].filter((k) => !CATEGORY_META.some((c) => c.key === k)).sort(),
-    ];
-    return ordered.map((key) => ({
-      ...categoryMeta(key),
-      items: (byCat.get(key) ?? []).sort((a, b) => a.name.localeCompare(b.name)),
-    }));
-  }, [products, peakOnly]);
+  const grouped = useMemo(
+    () => (products ? groupByCategory(products, peakOnly) : []),
+    [products, peakOnly],
+  );
 
   if (products === null) {
     return <p className="px-1 py-3 text-sm text-kiosk-textlo">Loading menu…</p>;

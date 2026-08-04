@@ -31,7 +31,13 @@ docker compose up -d
 | `text-to-speech` | 8011 | SpeechT5 TTS synthesis |
 | `rag-service` | 8020 | RAG pipeline + ordering agent |
 | `kiosk-core` | 8012 | Session API + product ordering |
-| `kiosk-ui` | 7860 | React voice kiosk UI |
+| `kiosk-ui` | 7860 | React kiosk UI — **operator** screen (chat, performance dashboard) |
+| `kiosk-ui-customer` | 7861 | React kiosk UI — **customer** screen (queue-aware menu, cart, voice Ask) |
+
+Both `kiosk-ui` and `kiosk-ui-customer` are the exact same image/build;
+only the `KIOSK_UI_MODE` environment variable and published port differ
+(see [Configuration](./configuration.md#kiosk_ui_mode)). There is no
+separate Dockerfile or build context for the customer screen.
 
 Containers run as non-root; every image is built with UID/GID
 `1000:1000` and the named volumes are initialized with that ownership,
@@ -48,14 +54,20 @@ curl --noproxy '*' http://127.0.0.1:8020/health       # rag-service
 curl --noproxy '*' http://127.0.0.1:8012/health       # kiosk-core
 ```
 
-Open `http://127.0.0.1:7860` in a browser, click the microphone, and
-speak your question.
+Open `http://127.0.0.1:7860` for the **operator** screen (chat +
+performance dashboard) — click the microphone and speak your question.
+
+Open `http://127.0.0.1:7861` for the **customer** kiosk screen — a single
+view with the queue-aware menu, live cart, and a full-width **Ask**
+button. Intended for the physical kiosk touchscreen (tested at 1920×1080
+landscape) while the operator screen runs on a separate monitor.
 
 ## Logs
 
 ```bash
 docker compose logs -f kiosk-core
 docker compose logs -f kiosk-ui
+docker compose logs -f kiosk-ui-customer
 ```
 
 ## Restart / Stop

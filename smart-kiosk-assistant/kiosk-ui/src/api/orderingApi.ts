@@ -1,6 +1,15 @@
 import { endpoints } from '../constants';
 import type { Order, Product, UpsellSuggestion } from '../types';
 
+/** Format a value in Indian Rupees, dropping a trailing .0 for whole values (matches the agent's replies). */
+export const formatCurrency = (value: number | undefined): string => {
+  const rounded = Math.round((value ?? 0) * 100) / 100;
+  return `₹${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)}`;
+};
+
+/** Matches the order id the agent speaks (e.g. "ORD-11"), no zero-padding. */
+export const formatOrderId = (orderId: number): string => `ORD-${orderId}`;
+
 /** Fetch the full product catalogue (restaurant menu). */
 export async function fetchMenu(): Promise<Product[]> {
   try {

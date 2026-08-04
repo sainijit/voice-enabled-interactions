@@ -1,70 +1,25 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import MenuPanel from '../Order/MenuPanel';
 import OrderPanel from '../Order/OrderPanel';
+import {
+  QUEUE_COUNT_URL,
+  QUEUE_POLL_MS,
+  QUEUE_STATUS_ICON as STATUS_ICON,
+  QUEUE_STATUS_STYLE as STATUS_STYLE,
+  QUEUE_STREAM_URL,
+  useQueueCount,
+  type QueueInfo,
+} from '../../hooks/useQueue';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type SubTab = 'menu' | 'cart';
-type QueueStatus = 'LOW' | 'MEDIUM' | 'HIGH' | 'unknown';
-
-interface QueueInfo {
-  count: number;
-  status: QueueStatus;
-}
 
 interface QsrPanelProps {
   orderActive: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const QUEUE_STREAM_URL = '/queue-svc/stream';
-const QUEUE_COUNT_URL  = '/queue-svc/api/v1/queue/count';
-const QUEUE_POLL_MS    = 2_000;
-
-const STATUS_STYLE: Record<QueueStatus, string> = {
-  LOW:     'bg-green-50  border-green-200  text-green-800',
-  MEDIUM:  'bg-amber-50  border-amber-200  text-amber-800',
-  HIGH:    'bg-red-50    border-red-200    text-red-800',
-  unknown: 'bg-gray-50   border-gray-200   text-gray-500',
-};
-
-const STATUS_ICON: Record<QueueStatus, string> = {
-  LOW: '🟢', MEDIUM: '🟡', HIGH: '🔴', unknown: '⚪',
-};
-
-// ---------------------------------------------------------------------------
-// useQueueCount — polls the queue-service count endpoint every QUEUE_POLL_MS
-// ---------------------------------------------------------------------------
-
-function useQueueCount(
-  url: string,
-  intervalMs: number,
-  onData: (info: QueueInfo) => void,
-) {
-  useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-        if (!res.ok || cancelled) return;
-        const data = await res.json() as { count: number; status: string };
-        onData({ count: data.count ?? 0, status: (data.status as QueueStatus) ?? 'unknown' });
-      } catch {
-        // queue-service unavailable — banner stays hidden
-      }
-    };
-
-    void poll();
-    const id = window.setInterval(() => { void poll(); }, intervalMs);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, [url, intervalMs, onData]);
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +44,7 @@ export function QsrPanel({ orderActive }: QsrPanelProps) {
     setQueueInfo(info);
   }, []);
 
-  useQueueCount(QUEUE_COUNT_URL, QUEUE_POLL_MS, onQueueData);
+  useQueueCount(onQueueData, QUEUE_COUNT_URL, QUEUE_POLL_MS);
 
   const status  = queueInfo?.status ?? 'unknown';
   const isPeak  = status === 'MEDIUM' || status === 'HIGH';
