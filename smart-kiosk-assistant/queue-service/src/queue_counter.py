@@ -73,6 +73,7 @@ class QueueCounter:
         self._last_log_time = 0.0
         self._frame_w = 0
         self._frame_h = 0
+        self._frame_number = 0
 
         # Debug visualization (overlay drawn on top of gvawatermark output).
         debug = self._debug_config()
@@ -146,10 +147,12 @@ class QueueCounter:
         Returns ``True`` so the buffer continues downstream (gvapython
         contract).
         """
+        self._frame_number += 1
         now = time.monotonic()
         width, height = self._frame_size(frame)
+        regions = self._regions(frame)
 
-        for region in self._regions(frame):
+        for region in regions:
             track_id = self._object_id(region)
             if track_id == _UNTRACKED_ID:
                 continue
@@ -166,6 +169,23 @@ class QueueCounter:
                 timestamp=now,
                 inside=inside,
                 roi_status="Inside" if inside else "Outside",
+            )
+            logger.debug(
+                "frame=%d track_id=%d label=%r class_id=%r conf=%.3f "
+                "bbox=(%.3f,%.3f,%.3f,%.3f) centroid=(%.3f,%.3f) roi=%s",
+                self._frame_number, track_id,
+                self._safe_label(region), self._safe_class_id(region),
+                self._confidence(region),
+                bbox[0], bbox[1], bbox[2], bbox[3],
+                centroid[0], centroid[1],
+                self._tracks[track_id].roi_status,
+            )
+
+        if not regions:
+            logger.debug(
+                "frame=%d detections=0 queue_count=%d",
+                self._frame_number,
+                self._current_count(),
             )
 
         self._evict(now)
@@ -201,13 +221,66 @@ class QueueCounter:
         except Exception:  # noqa: BLE001
             return _UNTRACKED_ID
 
+    @staticmethod
+    def _safe_label(region) -> str | None:
+        """Safely read region.label(), return None if unavailable."""
+        try:
+            return region.label()
+        except Exception:  # noqa: BLE001
+            return None
+
+    @staticmethod
+    def _safe_class_id(region) -> int | None:
+        """Safely read region class_id, trying label_id() then class_id()."""
+        for attr in ("label_id", "class_id"):
+            method = getattr(region, attr, None)
+            if method is None:
+                continue
+            try:
+                return int(method())
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
     def _accept(self, region) -> bool:
+        """Accept a region whose class matches the configured label or class_id.
+
+        person-detection-retail-0013 and other OMZ models run without a
+        model-proc file emit regions with an *empty-string* label and a
+        numeric class_id of 0.  The original label-only check therefore
+        rejected every detection.  A class_id fallback (the same pattern used
+        by PersonFilter for YOLO) handles both cases without any config change.
+        """
         if self._class_label is None:
             return True
+
+        # Primary: non-empty string label (set when a model-proc file is used).
         try:
-            return region.label() == self._class_label
+            label = region.label()
+            if label and label == self._class_label:
+                return True
         except Exception:  # noqa: BLE001
-            return True
+            pass
+
+        # Fallback: numeric class_id (set by OMZ models without model-proc).
+        model_cfg = self._model_config()
+        model_class_id = model_cfg.get("class_id")
+        if model_class_id is None:
+            return False
+        try:
+            model_class_id = int(model_class_id)
+        except (TypeError, ValueError):
+            return False
+        for attr in ("label_id", "class_id"):
+            method = getattr(region, attr, None)
+            if method is None:
+                continue
+            try:
+                if int(method()) == model_class_id:
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
 
     @staticmethod
     def _normalized_bbox(region, width: int, height: int):
