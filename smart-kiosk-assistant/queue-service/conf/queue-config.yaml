@@ -13,23 +13,16 @@ source:
   rtsp_transport: "tcp"
 
 model:
-  # Detector under test. Switch between models by changing this section only --
-  # pipeline, tracker, ROI and queue counting stay identical (A/B test).
-  #   Intel OMZ: name person-detection-retail-0013, provider omz,
-  #              ir_path ./models/person-detection-retail-0013.xml, proc_path "",
-  #              class_label "" (person-only, no other classes emitted)
-  #   YOLO26n:   name yolo26n, provider local,
-  #              ir_path ./models/yolo26n.xml, proc_path ./models/yolo26n.json
-  #              (end-to-end NMS-free [1,300,6] output -> "yolo_v10" converter),
-  #              class_label "person" / class_id 0 (filters out
-  #              car/chair/bottle/etc. before gvatrack).
-  name: "yolo26n"               # yolo26n | person-detection-retail-0013
-  provider: "local"             # omz | local
-  ir_path: "./models/yolo26n.xml"
-  proc_path: "./models/yolo26n.json"   # yolo_v10 end-to-end converter + COCO labels
-  class_label: "person"         # only this class is tracked/counted; "" => all
-  class_id: 0                   # numeric class id kept when label is absent (COCO person=0)
-  device: "CPU"                 # inference device. CPU=always available; GPU requires /dev/dri mount
+  # OMZ detector used by queue-service.
+  # The pipeline, tracker, ROI handling, queue counting, RTSP flow, API, and
+  # Docker setup stay the same; only the detector IR changes.
+  name: "person-detection-retail-0013"
+  provider: "omz"
+  ir_path: "./models/person-detection-retail-0013.xml"
+  proc_path: ""
+  class_label: "person"         # person-only detector; label matches the emitted class
+  class_id: 0                     # person class id for label fallback
+  device: "NPU"                 # inference device. CPU=always available; GPU requires /dev/dri mount
   threshold: 0.5
   inference_interval: 1
 
