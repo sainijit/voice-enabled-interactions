@@ -7,7 +7,13 @@ function MenuCard({ item, categoryIcon }: { item: Product; categoryIcon: string 
   return (
     <div className="flex flex-col items-center gap-2 rounded-xl border border-gray-200 bg-white p-4 text-center shadow-sm transition-shadow hover:shadow-md">
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gray-50">
-        <CategoryImage category={item.category} fallbackEmoji={categoryIcon} size={40} />
+        <CategoryImage
+          category={item.category}
+          productId={item.product_id}
+          itemName={item.name}
+          fallbackEmoji={categoryIcon}
+          size={40}
+        />
       </div>
       <span className="text-sm font-semibold text-intel-dark leading-tight">{item.name}</span>
       <span className="text-sm font-bold text-intel-blue">{formatPrice(item.price)}</span>
