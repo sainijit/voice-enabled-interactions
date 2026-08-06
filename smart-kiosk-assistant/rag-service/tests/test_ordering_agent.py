@@ -23,7 +23,19 @@ def test_make_mcp_callable_invokes_mcp_tool(monkeypatch) -> None:
     """The generated ADK callable delegates to mcp_client.call_tool."""
     fake_call_tool = AsyncMock(return_value={"status": "success", "result": "updated"})
     monkeypatch.setattr(ordering_agent, "call_tool", fake_call_tool)
-    mcp_tool = MCPTool(name="update_order", server="core", description="Add items")
+    mcp_tool = MCPTool(
+        name="update_order",
+        server="core",
+        description="Add items",
+        input_schema={
+            "type": "object",
+            "required": ["order_id", "items"],
+            "properties": {
+                "order_id": {"type": "string"},
+                "items": {"type": "array"},
+            },
+        },
+    )
 
     fn = OrderingAgent._make_mcp_callable("update_order", mcp_tool)
     result = _run(fn(order_id="ORD-1", items=[{"product_id": "coke", "quantity": 1}]))
@@ -34,7 +46,8 @@ def test_make_mcp_callable_invokes_mcp_tool(monkeypatch) -> None:
         {"order_id": "ORD-1", "items": [{"product_id": "coke", "quantity": 1}]},
     )
     assert fn.__name__ == "update_order"
-    assert fn.__schema__["name"] == "update_order"
+    assert "order_id" in fn.__signature__.parameters
+    assert "items" in fn.__signature__.parameters
 
 
 @pytest.mark.parametrize(
@@ -96,5 +109,8 @@ class _FakeRunner:
             reply = "How can I help?"
 
         for tool_name in tools:
-            yield SimpleNamespace(tool_call=SimpleNamespace(name=tool_name), content=None)
+            yield SimpleNamespace(
+                partial=False,
+                content=SimpleNamespace(parts=[SimpleNamespace(function_call=SimpleNamespace(name=tool_name))]),
+            )
         yield SimpleNamespace(tool_call=None, content=SimpleNamespace(parts=[SimpleNamespace(text=reply)]))
