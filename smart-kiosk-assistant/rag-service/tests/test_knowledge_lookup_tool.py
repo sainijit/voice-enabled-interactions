@@ -17,7 +17,7 @@ def _run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
-def test_knowledge_lookup_returns_streamed_rag_context(monkeypatch) -> None:
+def test_knowledge_lookup_returns_retrieved_rag_context(monkeypatch) -> None:
     """knowledge_lookup formats retrieved context from the shared RAG pipeline."""
 
     monkeypatch.setattr(knowledge_lookup_tool, "_PIN_ROOT_SECTION", False)

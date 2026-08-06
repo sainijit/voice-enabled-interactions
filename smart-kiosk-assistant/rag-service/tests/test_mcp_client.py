@@ -129,7 +129,7 @@ def test_call_tool_times_out(monkeypatch, reset_mcp_state) -> None:
     }
     _install_fake_mcp(monkeypatch, state)
 
-    server = mcp_client.MCPServerConfig(name="core", url="http://mcp.local", timeout=0.001)
+    server = mcp_client.MCPServerConfig(name="core", url="http://mcp.local", timeout=0.01)
     mcp_client._servers["core"] = server
     mcp_client._tools["confirm_order"] = mcp_client.MCPTool(name="confirm_order", server="core")
 
