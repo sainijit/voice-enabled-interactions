@@ -380,15 +380,22 @@ services:
   # OVMS_TOOL_GUIDED constrains decoding to the tool JSON schema. It is the main
   # mitigation for small models emitting raw tool-result JSON instead of prose.
   #
-  # --draft_source_model enables speculative decoding: a small "draft" model
-  # (Qwen3-0.6B, same tokenizer family as the Qwen3-4B target) proposes several
-  # tokens per step and the 4B model verifies them in one batched pass. This is
-  # NOT a quality tradeoff — the 4B model is still the one whose tokens are
-  # served; a rejected draft token just falls back to normal 4B decoding for
-  # that step, so output is identical to plain 4B, only faster when the draft
-  # and target agree (short, template-like ordering replies agree often).
-  # Benchmarked in tests/benchmarks/results/replay-*-specdecode.json.
-  # To disable: blank OVMS_DRAFT_MODEL_NAME in .env and recreate ovms-llm.
+  # Speculative decoding (--draft_source_model, a Qwen3-0.6B draft model) was
+  # benchmarked and REJECTED — see
+  # tests/benchmarks/results/replay-qwen3-4b-specdecode.json for the (~4%,
+  # noise-level) latency result. Worse: it broke streamed tool-call argument
+  # delivery outright. With the draft model attached, OVMS's streaming
+  # response emits the tool call's arguments as a single truncated chunk
+  # (e.g. ``{"category":``) and immediately closes the stream with
+  # ``finish_reason: "tool_calls"``, instead of the correct multi-chunk
+  # incremental arguments that non-speculative streaming produces. This
+  # surfaced in production as every voice turn that should have called a tool
+  # (e.g. "I would like to explore different type of burgers") replying
+  # "Sorry, I encountered an error" — a JSONDecodeError parsing the truncated
+  # arguments. Confirmed via a raw curl to /v3/chat/completions with
+  # stream=true, comparing with and without --draft_source_model. Do not
+  # re-add this flag without first confirming OVMS has fixed streamed
+  # tool-call + speculative-decoding interaction upstream.
   ovms-llm:
     image: openvino/model_server:latest-gpu
     container_name: ovms-llm
@@ -412,7 +419,6 @@ services:
       --rest_port 8000
       --port 9000
       --source_model ${OVMS_MODEL_NAME:-OpenVINO/Qwen3-4B-int4-ov}
-      --draft_source_model ${OVMS_DRAFT_MODEL_NAME:-OpenVINO/Qwen3-0.6B-int4-ov}
       --model_repository_path /models
       --task text_generation
       --tool_parser ${OVMS_TOOL_PARSER:-hermes3}
