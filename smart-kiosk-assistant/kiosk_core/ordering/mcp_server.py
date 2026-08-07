@@ -336,7 +336,7 @@ async def list_categories() -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-async def list_products(category: str | None = None) -> list[dict[str, Any]]:
+async def list_products(category: str | None = None) -> list[dict[str, Any]] | dict[str, Any]:
     """List menu products in a category, or the category list when none is given.
 
     Args:
@@ -349,24 +349,67 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]]:
     Returns:
         With a category: products with product_id, name, category, and price.
         Without one: ``{category, item_count}`` entries to offer the customer.
+        With a category/item that matches nothing we carry at all (e.g.
+        "dosa", "sushi"): ``{category_not_found: True, message, categories}``
+        — see the comment below for why this is a distinct case.
     """
     requested = category
     category = _normalise_category(category)
 
     products = await _svc().list_products(category=category)
 
-    # A category the model invented (observed: "all", "menu", "food") filters
-    # everything out, and the agent then tells the customer "we currently do
-    # not have any items available" while holding a full catalogue. An empty
-    # result is never the right answer to a browse request, so fall back to
-    # the whole menu rather than reporting the restaurant as empty.
     if not products and category is not None:
-        logger.warning(
-            "[MCP-SERVER] list_products category=%r matched nothing — "
-            "falling back to full catalogue", requested,
-        )
-        products = await _svc().list_products(category=None)
-        category = None
+        # This string never matched a real category (aliases for "everything"
+        # like "all"/"menu"/"food" are already caught above). Two genuinely
+        # different situations produce this:
+        #   1. The model passed a descriptive filter rather than a category
+        #      name ("chicken", "veg", "spicy") for something that DOES exist
+        #      among our products — e.g. "chicken" should surface the chicken
+        #      burgers.
+        #   2. The customer asked about something we do not carry at all
+        #      ("dosa", "sushi", "biryani") — nothing in the catalogue is
+        #      related to it.
+        # These must not be handled the same way. Silently falling back to
+        # the FULL catalogue (the previous behaviour) fixed nothing for case 2:
+        # the model would cherry-pick unrelated items from the dump and
+        # present them as if they answered the question (observed: "Do you
+        # have dosa?" was answered with a list of sides). Instead, search the
+        # catalogue for products whose name actually contains the requested
+        # term. Case 1 then still finds its real matches; case 2 finds
+        # nothing and gets an honest "we don't carry that" signal instead of
+        # unrelated products.
+        all_products = await _svc().list_products(category=None)
+        tokens = [t for t in re.sub(r"[^a-z0-9 ]", " ", (requested or "").lower()).split() if t]
+        name_matches = [
+            p for p in all_products
+            if any(t in p.name.lower() for t in tokens)
+        ] if tokens else []
+
+        if name_matches:
+            logger.info(
+                "[MCP-SERVER] list_products category=%r matched no category but "
+                "%d product name(s) contain it", requested, len(name_matches),
+            )
+            products = name_matches
+            category = "_filtered"  # sentinel: already specific, skip the summary branch below
+        else:
+            category_names = sorted({p.category for p in all_products})
+            logger.warning(
+                "[MCP-SERVER] list_products category=%r matched nothing on the menu — "
+                "reporting as not carried (categories: %s)", requested, category_names,
+            )
+            return {
+                "category_not_found": True,
+                "requested": requested,
+                "message": (
+                    f"'{requested}' is not on the menu and nothing we carry is related "
+                    f"to it. Do not invent a product or offer unrelated items as if "
+                    f"they answered the question. Tell the customer we don't have "
+                    f"that, then name the categories we do serve: "
+                    f"{', '.join(category_names)}. Ask which they'd like to see."
+                ),
+                "categories": category_names,
+            }
 
     # An unfiltered call means "what do you serve?", never "read me the whole
     # catalogue". Returning 26 products made the model recite all of them:
@@ -664,6 +707,47 @@ async def remove_from_order(
         user_id, updated.order_id, removed_names, result["not_in_cart"], updated.total,
     )
     return result
+
+
+@mcp.tool()
+async def cancel_order(user_id: str = "anonymous") -> dict[str, Any]:
+    """Cancel the customer's entire open draft order in one step.
+
+    Use this ONLY for "cancel my (whole/entire/complete) order", "start over",
+    "clear my cart", "forget the whole order" — i.e. the customer wants to
+    discard everything, not just one item. For removing specific named items,
+    use ``remove_from_order`` instead.
+
+    This deletes the draft directly from the database — it does NOT require
+    (or use) any list of item names, so it cannot miss or hallucinate an item.
+
+    Args:
+        user_id: The customer whose draft order to cancel. Defaults to "anonymous".
+
+    Returns:
+        ``{"cancelled": True, "order_id": ..., "items_removed": [...]}`` on
+        success, or ``{"error": ...}`` if there was no open order to cancel.
+    """
+    order = await _svc().cancel_current_order(user_id)
+    if order is None:
+        logger.info("[MCP-SERVER] cancel_order user=%s has no draft order", user_id)
+        return {
+            "error": (
+                "There is no open order to cancel. Tell the customer their "
+                "cart is already empty."
+            )
+        }
+
+    items_removed = [item.product_name for item in order.items]
+    logger.info(
+        "[MCP-SERVER] cancel_order user=%s order_id=%d cancelled items=%s",
+        user_id, order.order_id, items_removed,
+    )
+    return {
+        "cancelled": True,
+        "order_id": order.order_id,
+        "items_removed": items_removed,
+    }
 
 
 @mcp.tool()

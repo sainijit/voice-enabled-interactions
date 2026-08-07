@@ -50,18 +50,24 @@ _ADDED_PATTERNS = (
     re.compile(r"\badded\s+(?:the|a|an)\b.{0,60}?\bto\s+your\s+order\b", re.IGNORECASE),
 )
 
-# Tool whose invocation legitimises an "I've removed X" claim. Only
-# invocation, not success, is checked here — this guard runs with just the
-# tool *names*, no results. rag-service's ``agentic/removal_guard.py`` is the
-# tool-result-aware guard that catches a call that ran but matched nothing.
-_REMOVAL_TOOLS = frozenset({"remove_from_order"})
+# Tool whose invocation legitimises an "I've removed X" / "cancelled your
+# order" claim. Only invocation, not success, is checked here — this guard
+# runs with just the tool *names*, no results. rag-service's
+# ``agentic/removal_guard.py`` is the tool-result-aware guard that catches a
+# call that ran but matched nothing (or found no open order to cancel).
+_REMOVAL_TOOLS = frozenset({"remove_from_order", "cancel_order"})
 
-# Claims that an item was taken out of the cart.
+# Claims that an item was taken out of the cart, or the whole order was
+# cancelled/cleared.
 _REMOVED_PATTERNS = (
     re.compile(r"\bI(?:'ve| have)\s+removed\b", re.IGNORECASE),
     re.compile(r"\b(?:has|have)\s+been\s+removed\b", re.IGNORECASE),
     re.compile(r"\bremoved\s+(?:the|a|an|\d+)\b.{0,60}?\bfrom\s+your\s+(?:order|cart)\b", re.IGNORECASE),
     re.compile(r"\btaken\s+(?:the|a|an|\d+)\b.{0,60}?\boff\s+your\s+(?:order|cart)\b", re.IGNORECASE),
+    re.compile(r"\bI(?:'ve| have)\s+cancel(?:l)?ed\s+(?:your|the)\s+(?:entire\s+|whole\s+|complete\s+)?order\b", re.IGNORECASE),
+    re.compile(r"\byour\s+order\s+(?:has\s+been\s+|is\s+now\s+)?cancel(?:l)?ed\b", re.IGNORECASE),
+    re.compile(r"\bI(?:'ve| have)\s+cleared\s+your\s+(?:order|cart)\b", re.IGNORECASE),
+    re.compile(r"\byour\s+(?:order|cart)\s+(?:has\s+been\s+|is\s+now\s+)?(?:cleared|emptied)\b", re.IGNORECASE),
 )
 
 # Claims that the order was placed/confirmed.

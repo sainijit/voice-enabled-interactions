@@ -41,8 +41,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Only this tool's result legitimises a "that's off your order now" claim.
-_REMOVAL_TOOLS = frozenset({"remove_from_order"})
+# Only these tools' results legitimise a "that's off your order now" claim.
+_REMOVAL_TOOLS = frozenset({"remove_from_order", "cancel_order"})
 
 # Claims that an item was taken out of the cart. Kept broad, in the same
 # spirit as ``menu_guard._ADDED_PATTERNS``: the model has seen a tool result by
@@ -55,6 +55,11 @@ _REMOVED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\btaken\s+(?:the|a|an|\d+)\b.{0,60}?\boff\s+your\s+(?:order|cart)\b", re.IGNORECASE),
     re.compile(r"\b(?:that(?:'s| is)|it(?:'s| is))\s+(?:now\s+)?(?:been\s+)?removed\b", re.IGNORECASE),
     re.compile(r"\bno\s+longer\s+in\s+your\s+(?:order|cart)\b", re.IGNORECASE),
+    # cancel_order-specific phrasing: whole-order cancellation, not a single item.
+    re.compile(r"\bI(?:'ve| have)\s+cancel(?:l)?ed\s+(?:your|the)\s+(?:entire\s+|whole\s+|complete\s+)?order\b", re.IGNORECASE),
+    re.compile(r"\byour\s+order\s+(?:has\s+been\s+|is\s+now\s+)?cancel(?:l)?ed\b", re.IGNORECASE),
+    re.compile(r"\bI(?:'ve| have)\s+cleared\s+your\s+(?:order|cart)\b", re.IGNORECASE),
+    re.compile(r"\byour\s+(?:order|cart)\s+(?:has\s+been\s+|is\s+now\s+)?(?:cleared|emptied)\b", re.IGNORECASE),
 )
 
 _REFUSAL_WITH_CART = (
@@ -82,12 +87,16 @@ class _TurnState:
         rejected_refs: References the tool could not match to a cart line.
         cart_items: Names of what is actually left in (or was in) the cart,
             for a grounded "here's what you have" refusal.
+        no_open_order: True when ``cancel_order`` was invoked but there was no
+            draft order to cancel — a distinct failure from "item not in
+            cart", since there is no cart at all to reconcile against.
     """
 
     succeeded: bool = False
     attempted: bool = False
     rejected_refs: list[str] = field(default_factory=list)
     cart_items: list[str] = field(default_factory=list)
+    no_open_order: bool = False
 
     @property
     def has_rejection(self) -> bool:
@@ -142,10 +151,11 @@ def _unwrap(raw: Any) -> dict[str, Any] | None:
 
 
 def record_tool_result(tool_name: str, raw: Any) -> None:
-    """Classify one ``remove_from_order`` result as success or rejection.
+    """Classify one removal-tool result as success or rejection.
 
     Args:
-        tool_name: Name of the MCP tool that was just invoked.
+        tool_name: Name of the MCP tool that was just invoked. One of
+            ``_REMOVAL_TOOLS``.
         raw: The raw value returned by ``mcp_client.call_tool``.
     """
     if tool_name not in _REMOVAL_TOOLS:
@@ -159,6 +169,22 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
             "[REMOVAL-GUARD] Could not decode result of %s — treating as unsuccessful",
             tool_name,
         )
+        return
+
+    if tool_name == "cancel_order":
+        # Distinct payload shape from remove_from_order: whole-order
+        # cancellation, not per-item, so there is no "not_in_cart" concept —
+        # either there was an open order to cancel or there was not.
+        if payload.get("cancelled"):
+            state.succeeded = True
+            for name in payload.get("items_removed") or []:
+                if name:
+                    state.cart_items.append(str(name))
+        else:
+            state.no_open_order = True
+            logger.warning(
+                "[REMOVAL-GUARD] cancel_order refused — no open order to cancel",
+            )
         return
 
     error = payload.get("error")
@@ -206,6 +232,11 @@ def _format_cart(cart_items: list[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+_REFUSAL_NO_OPEN_ORDER = (
+    "You don't have an open order to cancel right now. Would you like to start one?"
+)
+
+
 def build_refusal(state: _TurnState | None = None) -> str:
     """Compose the spoken refusal for a removal that never happened.
 
@@ -216,6 +247,8 @@ def build_refusal(state: _TurnState | None = None) -> str:
         A short, markup-free sentence naming only real cart items.
     """
     state = state if state is not None else _turn_state.get()
+    if state.no_open_order:
+        return _REFUSAL_NO_OPEN_ORDER
     item = next((ref for ref in state.rejected_refs if ref), "")
     if not item or not state.cart_items:
         return _REFUSAL_GENERIC

@@ -208,7 +208,7 @@ class OrderingService:
         return None
 
     async def suggest_products(
-        self, ref: str, n: int = 5, dietary: str | None = None
+        self, ref: str, n: int = 5, dietary: str | None = None, min_score: float = 0.5
     ) -> list[Product]:
         """Return the ``n`` catalogue products whose names are closest to ``ref``.
 
@@ -222,6 +222,16 @@ class OrderingService:
                 veg alternatives instead of a mix. If restricting would leave
                 nothing to suggest, falls back to the full catalogue rather
                 than returning an empty list.
+            min_score: Minimum ``difflib`` ratio a candidate must clear to be
+                offered as a "did you mean" alternative. A genuinely off-menu
+                request (e.g. "dosa", "biryani" at a burger/pizza kiosk) has no
+                real relationship to anything we sell — its best ratio match is
+                typically well below 0.5 (observed: "dosa" → 0.40, "biryani" →
+                0.33). Offering it anyway invited the agent to present an
+                unrelated item as if it answered the request. Below this floor
+                there is nothing genuinely similar, so return no suggestions
+                and let the caller fall back to an honest "we don't have
+                anything like that" instead of a fabricated-looking match.
         """
         async with get_db() as db:
             repo = SqliteProductRepository(db)
@@ -232,12 +242,13 @@ class OrderingService:
             if veg_only:
                 pool = veg_only
         nref = _normalize(ref)
-        ranked = sorted(
-            pool,
-            key=lambda p: difflib.SequenceMatcher(None, nref, _normalize(p.name)).ratio(),
-            reverse=True,
-        )
-        return ranked[:n]
+        scored = [
+            (p, difflib.SequenceMatcher(None, nref, _normalize(p.name)).ratio())
+            for p in pool
+        ]
+        scored = [(p, s) for p, s in scored if s >= min_score]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return [p for p, _ in scored[:n]]
 
     # ------------------------------------------------------------------
     # Orders
@@ -390,6 +401,40 @@ class OrderingService:
         if deleted:
             logger.info("[SERVICE] Cleared %d stale draft cart(s) for user=%s", deleted, user_id)
         return deleted
+
+    async def cancel_current_order(self, user_id: str) -> Order | None:
+        """Cancel (delete) the customer's entire open draft order, if any.
+
+        Distinct from ``remove_order_items``: that call removes one or more
+        named items, requiring the caller (the LLM) to enumerate every item
+        in the cart from its own memory of the conversation — "cancel my
+        whole order" was previously handled that way, which is fragile (a
+        forgotten or hallucinated item name produces a wrong result). This
+        deletes the draft in one deterministic step directly from the
+        database, with no dependency on the caller recalling cart contents.
+
+        Args:
+            user_id: The customer whose draft order to cancel.
+
+        Returns:
+            A snapshot of the order as it was immediately before cancellation
+            (so the caller can report what was cancelled), or ``None`` if the
+            customer had no open draft order.
+        """
+        order = await self.get_current_order(user_id)
+        if order is None:
+            return None
+
+        async with get_db() as db:
+            repo = SqliteOrderRepository(db)
+            deleted = await repo.delete_draft_orders(user_id)
+            await db.commit()
+
+        logger.info(
+            "[SERVICE] Cancelled order_id=%d for user=%s (%d draft(s) deleted)",
+            order.order_id, user_id, deleted,
+        )
+        return order
 
     async def confirm_order(self, order_id: int) -> Order:
         """Confirm a draft order → status becomes 'confirmed'."""
