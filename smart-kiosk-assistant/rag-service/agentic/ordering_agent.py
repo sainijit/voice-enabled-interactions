@@ -33,6 +33,7 @@ from agentic import item_intent_guard
 from agentic import llm_metrics
 from agentic import menu_guard
 from agentic import removal_guard
+from agentic import reply_templates
 from agentic.adk_runtime import create_adk_model, create_runner, create_session_service
 from agentic.mcp_client import MCPTool, bootstrap_mcp_tools, call_tool, get_all_tools
 from agentic.tools.knowledge_lookup_tool import knowledge_lookup
@@ -55,6 +56,41 @@ _dietary_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 # rationale as ``_dietary_ctx`` above.
 _utterance_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
     "utterance_ctx", default=""
+)
+
+class _ToolCallCounter:
+    """Mutable per-turn counter, shared across a turn's parallel tool calls.
+
+    ADK executes multiple tool calls from a single model response as sibling
+    ``asyncio.create_task`` coroutines (see
+    ``google.adk.flows.llm_flows.functions.handle_function_call_list_async``),
+    each of which snapshots the current ``contextvars`` bindings *at task
+    creation*. A plain ``int`` ContextVar's ``.set()`` from inside one such
+    task would therefore be invisible to its siblings — each would see
+    "calls_this_turn == 1" independently. Using a shared mutable object
+    (bound once by ``begin_turn`` before any tasks exist) sidesteps this: all
+    sibling tasks hold a reference to the *same* counter instance, exactly
+    the pattern ``menu_guard._TurnState`` already relies on.
+    """
+
+    __slots__ = ("count",)
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def increment(self) -> int:
+        self.count += 1
+        return self.count
+
+
+# How many MCP tools have been invoked so far this turn, read by ``_mcp_fn`` to
+# decide whether it's safe to skip the narration LLM call. Only the turn's
+# *first* tool call may be templated: if the model calls a second tool, the
+# customer's utterance needed more than one action, and a fixed template for
+# the first call alone would silently drop whatever the second call answers.
+# Reset at the top of every ``chat()`` turn, same rationale as ``_dietary_ctx``.
+_tool_call_count_ctx: contextvars.ContextVar[_ToolCallCounter] = contextvars.ContextVar(
+    "tool_call_count_ctx", default=None
 )
 
 # Qwen3 hybrid-reasoning models wrap chain-of-thought in explicit <think> tags.
@@ -776,6 +812,15 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                 ]
                 if upsell_displays:
                     compressed["upsell"] = upsell_displays
+                # Guard inputs must survive compression: dropping these makes
+                # the model report an empty menu or claim an item was added
+                # when the call actually needs the customer to choose.
+                for key in (
+                    "needs_choice", "choice_message", "category",
+                    "available_products", "unavailable_message",
+                ):
+                    if key in data:
+                        compressed[key] = data[key]
 
         elif tool_name == "remove_from_order":
             if isinstance(data, dict) and "error" not in data:
@@ -1255,9 +1300,16 @@ class OrderingAgent:
         a zero-parameter tool, causing the model to call every tool with empty
         arguments (e.g. ``list_products()`` instead of
         ``list_products(category="burgers")``).
-        """
 
-        async def _mcp_fn(**kwargs: Any) -> Any:
+        A ``tool_context: ToolContext`` parameter is also added to the
+        signature. ADK detects it by its type annotation (not by name) and
+        injects the running turn's ``ToolContext`` without exposing it to the
+        LLM as a callable argument — used below to skip the 2nd LLM call for
+        deterministic outcomes. See ``agentic/reply_templates.py``.
+        """
+        from google.adk.tools import ToolContext
+
+        async def _mcp_fn(tool_context: ToolContext | None = None, **kwargs: Any) -> Any:
             if tool_name in ("place_order", "update_order"):
                 # Overwrite rather than merge: this is the deterministically
                 # captured preference, always more trustworthy than anything
@@ -1284,6 +1336,35 @@ class OrderingAgent:
             # successful result.
             menu_guard.record_tool_result(tool_name, result)
             removal_guard.record_tool_result(tool_name, result)
+
+            # Skip the 2nd LLM call (pure narration) when this is the turn's
+            # only tool call and the outcome cleanly matches an authored
+            # template — see agentic/reply_templates.py for why templating
+            # is at least as accurate as the model's own paraphrase, never
+            # less. Any turn that calls a 2nd tool, or whose outcome doesn't
+            # cleanly match (partial success, unexpected shape), falls
+            # through unchanged to today's LLM-narrated path.
+            #
+            # ``tool_context`` is only absent when this function is invoked
+            # directly (e.g. unit tests bypassing ADK) — there's no
+            # ``actions.skip_summarization`` to set in that case, so the
+            # templating path is skipped entirely rather than guessed at.
+            counter = _tool_call_count_ctx.get()
+            calls_this_turn = counter.increment() if counter is not None else None
+            if (
+                tool_context is not None
+                and calls_this_turn == 1
+                and tool_name in reply_templates.SPEAKABLE_TOOLS
+            ):
+                spoken = reply_templates.speak(tool_name, result)
+                if spoken is not None:
+                    logger.info(
+                        "[AGENT→MCP] tool=%s templated reply, skipping narration call: %r",
+                        tool_name, spoken[:160],
+                    )
+                    tool_context.actions.skip_summarization = True
+                    return spoken
+
             result = _compress_tool_result(tool_name, result)
             logger.debug("[AGENT→MCP] tool=%s compressed_result=%s", tool_name, str(result)[:200])
             return result
@@ -1297,8 +1378,18 @@ class OrderingAgent:
         properties: dict[str, Any] = input_schema.get("properties", {}) or {}
         required = set(input_schema.get("required", []) or [])
 
-        params: list[inspect.Parameter] = []
-        annotations: dict[str, Any] = {}
+        # tool_context is detected by its ToolContext type annotation (not by
+        # name) and excluded from what ADK shows the LLM as a callable
+        # argument — see the class docstring above.
+        params: list[inspect.Parameter] = [
+            inspect.Parameter(
+                "tool_context",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=ToolContext,
+                default=None,
+            )
+        ]
+        annotations: dict[str, Any] = {"tool_context": ToolContext}
         for pname, pspec in properties.items():
             pytype = _infer_json_type(pspec or {})
             annotations[pname] = pytype
@@ -1429,6 +1520,7 @@ class OrderingAgent:
         # name-based guard reads as success. See agentic/menu_guard.py.
         menu_guard.begin_turn()
         removal_guard.begin_turn()
+        _tool_call_count_ctx.set(_ToolCallCounter())
 
         try:
             gate = (

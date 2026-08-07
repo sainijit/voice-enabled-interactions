@@ -84,7 +84,14 @@ def create_adk_model() -> "LiteLlm":
         top_p=agent_cfg.TOP_P,
         seed=agent_cfg.SEED,
         max_tokens=agent_cfg.MAX_TOKENS,
-        extra_body={"chat_template_kwargs": {"enable_thinking": agent_cfg.ENABLE_THINKING}},
+        extra_body={
+            "chat_template_kwargs": {"enable_thinking": agent_cfg.ENABLE_THINKING},
+            **(
+                {"num_assistant_tokens": agent_cfg.NUM_ASSISTANT_TOKENS}
+                if agent_cfg.NUM_ASSISTANT_TOKENS > 0
+                else {}
+            ),
+        },
     )
 
 

@@ -20,6 +20,7 @@ Tools exposed:
 # in the evaluation namespace on Python 3.11.
 
 import logging
+import re
 from typing import Any
 
 from fastmcp import FastMCP
@@ -140,7 +141,7 @@ async def _attach_upsell(order_result: dict[str, Any]) -> dict[str, Any]:
 async def _resolve_items(
     items: list[dict[str, Any]],
     dietary: str | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Resolve order item references to canonical product_ids.
 
     Each incoming item may carry the product reference under ``product_id``,
@@ -167,23 +168,99 @@ async def _resolve_items(
             never second-guessed.
 
     Returns:
-        ``(resolved, rejected)``. ``resolved`` holds {product_id, quantity}
-        entries using real catalogue ids. ``rejected`` holds
-        {reference, suggestions} for every reference not on the menu.
+        ``(resolved, rejected, ambiguous, resolved_display)``. ``resolved``
+        holds {product_id, quantity} entries using real catalogue ids, exactly
+        what ``OrderItemIn`` expects. ``rejected`` holds {reference,
+        suggestions} for every reference not on the menu. ``ambiguous`` holds
+        {reference, category, choices} for references that name a whole
+        category rather than a product. ``resolved_display`` parallels
+        ``resolved`` with the resolved product's real name attached, for
+        templating a customer-facing sentence without a second catalogue
+        lookup — kept as a separate list rather than an extra key on
+        ``resolved`` because ``resolved`` entries are unpacked directly into
+        ``OrderItemIn(**i)``, which rejects unknown fields.
     """
     resolved: list[dict[str, Any]] = []
+    resolved_display: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
+    ambiguous: list[dict[str, Any]] = []
     for it in items:
         ref = it.get("product_id") or it.get("name") or it.get("product") or ""
         qty = it.get("quantity", 1)
         product = await _svc().resolve_product(ref)
         if product is None:
+            category = await _resolve_category(ref)
+            if category is not None:
+                # A category is not a fabricated item — the customer named a
+                # real section of the menu without picking from it. Refusing it
+                # as "not on the menu" is both false and confusing ("we don't
+                # have pizza — we do have Margherita Pizza"). Ask which one.
+                choices = await _svc().list_products(category=category)
+                logger.info(
+                    "[MCP-SERVER] reference '%s' is category '%s' — asking customer to choose",
+                    ref, category,
+                )
+                ambiguous.append({"reference": ref, "category": category, "choices": choices})
+                continue
             suggestions = await _svc().suggest_products(ref, dietary=dietary)
             logger.warning("[MCP-SERVER] could not resolve product reference '%s'", ref)
             rejected.append({"reference": ref, "suggestions": suggestions})
         else:
             resolved.append({"product_id": product.product_id, "quantity": qty})
-    return resolved, rejected
+            resolved_display.append({"name": product.name, "quantity": qty})
+    return resolved, rejected, ambiguous, resolved_display
+
+
+async def _resolve_category(ref: str) -> str | None:
+    """Return the menu category ``ref`` names, if it names one rather than a product.
+
+    Args:
+        ref: A free-form product reference from the model, e.g. ``"a pizza"``.
+
+    Returns:
+        The canonical category name, or ``None`` when the reference does not
+        denote a whole category.
+    """
+    if not ref:
+        return None
+    normalised = re.sub(r"[^a-z0-9 ]", " ", ref.lower())
+    tokens = {t for t in normalised.split() if t not in {"a", "an", "the", "some", "one"}}
+    if not tokens:
+        return None
+    products = await _svc().list_products(category=None)
+    for category in {p.category for p in products}:
+        cat_tokens = set(category.lower().split())
+        # Match "pizza" against category "pizza", and tolerate a plural.
+        if tokens == cat_tokens or {t.rstrip("s") for t in tokens} == {
+            c.rstrip("s") for c in cat_tokens
+        }:
+            return category
+    return None
+
+
+def _ambiguous_payload(ambiguous: list[dict[str, Any]]) -> dict[str, Any]:
+    """Ask the customer to choose within a category they named.
+
+    Mirrors ``_rejection_payload``'s design: the real choices are spelled out
+    inside the sentence, not left only in a sibling array, because the model
+    reliably skips a bare array and falls back to a useless "please try again".
+    """
+    entry = ambiguous[0]
+    choices = entry["choices"][:4]
+    offer = ", ".join(f"{p.name} ({p.price:.0f})" for p in choices)
+    message = (
+        f"'{entry['reference']}' is a menu category, not a single item, so nothing "
+        f"was added yet. Do NOT say it is unavailable — we do sell it. Ask the "
+        f"customer which one they want and offer exactly these: {offer}."
+    )
+    return {
+        "needs_choice": True,
+        "category": entry["category"],
+        "choice_message": message,
+        "available_products": [
+            {"product_id": p.product_id, "name": p.name, "price": p.price} for p in choices
+        ],
+    }
 
 
 def _rejection_payload(rejected: list[dict[str, Any]]) -> dict[str, Any]:
@@ -339,8 +416,10 @@ async def place_order(
     """
     from kiosk_core.ordering.models import CreateOrderRequest, OrderItemIn
 
-    resolved, rejected = await _resolve_items(items, dietary=dietary)
+    resolved, rejected, ambiguous, resolved_display = await _resolve_items(items, dietary=dietary)
     if not resolved:
+        if ambiguous:
+            return _ambiguous_payload(ambiguous)
         return _nothing_resolved_error(rejected)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
@@ -348,6 +427,9 @@ async def place_order(
         order = await _svc().place_order(req)
         logger.info("[MCP-SERVER] place_order user=%s order_id=%d total=%.2f", user_id, order.order_id, order.total)
         result = await _attach_upsell(order.model_dump(mode="json"))
+        # Names of exactly what this call added, distinct from ``result["items"]``
+        # (the whole cart) — lets the caller announce only the new items.
+        result["just_added"] = resolved_display
         if rejected:
             # The valid items are in the cart; only the fabricated ones failed.
             logger.warning(
@@ -355,6 +437,8 @@ async def place_order(
                 user_id, len(resolved), [r["reference"] for r in rejected],
             )
             result.update(_rejection_payload(rejected))
+        if ambiguous:
+            result.update(_ambiguous_payload(ambiguous))
         return result
     except ValueError as exc:
         logger.warning("[MCP-SERVER] place_order user=%s rejected: %s", user_id, exc)
@@ -380,20 +464,27 @@ async def update_order(
     """
     from kiosk_core.ordering.models import OrderItemIn
 
-    resolved, rejected = await _resolve_items(items, dietary=dietary)
+    resolved, rejected, ambiguous, resolved_display = await _resolve_items(items, dietary=dietary)
     if not resolved:
+        if ambiguous:
+            return _ambiguous_payload(ambiguous)
         return _nothing_resolved_error(rejected)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
         order = await _svc().update_order_items(order_id, item_list)
         logger.info("[MCP-SERVER] update_order order_id=%d new_total=%.2f", order_id, order.total)
         result = await _attach_upsell(order.model_dump(mode="json"))
+        # Names of exactly what this call added, distinct from ``result["items"]``
+        # (the whole cart) — lets the caller announce only the new items.
+        result["just_added"] = resolved_display
         if rejected:
             logger.warning(
                 "[MCP-SERVER] update_order order_id=%d added %d item(s), refused %s",
                 order_id, len(resolved), [r["reference"] for r in rejected],
             )
             result.update(_rejection_payload(rejected))
+        if ambiguous:
+            result.update(_ambiguous_payload(ambiguous))
         return result
     except ValueError as exc:
         logger.warning("[MCP-SERVER] update_order order_id=%d rejected: %s", order_id, exc)

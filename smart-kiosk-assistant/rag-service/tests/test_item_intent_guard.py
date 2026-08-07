@@ -34,6 +34,48 @@ class TestExtractNamedItem:
     def test_no_add_phrase_returns_none(self):
         assert guard.extract_named_item("What are your opening hours?") is None
 
+    @pytest.mark.parametrize(
+        "utterance",
+        [
+            "Yes, I would like one of those.",
+            "I would like to try all of them.",
+            "I will have the same.",
+            "Add some of those",
+            "I'd like both of them",
+            "Order the usual",
+            "I want everything",
+        ],
+    )
+    def test_anaphoric_reference_returns_none(self, utterance):
+        """Anaphora must never override the model's context-resolved product.
+
+        Regression: these all matched the add/order pattern and were
+        substituted verbatim into the tool call, producing replies like
+        "Sorry, we don't have of those on the menu" and discarding a valid
+        multi-item order.
+        """
+        assert guard.extract_named_item(utterance) is None, utterance
+
+    @pytest.mark.parametrize(
+        "utterance,expected",
+        [
+            ("Add a margherita pizza.", "margherita pizza"),
+            ("I want a cold coffee.", "cold coffee"),
+            ("Add some fries.", "fries"),
+        ],
+    )
+    def test_concrete_items_still_extracted(self, utterance, expected):
+        assert guard.extract_named_item(utterance) == expected
+
+    def test_bare_category_still_extracted(self):
+        """A category is kept deliberately.
+
+        It prevents the stale reference (pending fries) from being ordered,
+        and mcp_server turns the unresolvable category into a "which pizza?"
+        question rather than an off-menu refusal.
+        """
+        assert guard.extract_named_item("Go ahead and add a pizza.") == "pizza"
+
 
 class TestMismatches:
     def test_disjoint_tokens_mismatch(self):

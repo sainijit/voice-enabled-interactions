@@ -370,6 +370,25 @@ services:
   # Why OpenVINO/Qwen3-4B-int4-ov + hermes3?
   #   Pre-converted INT4 (~2 GB) with native tool-calling support per
   #   https://docs.openvino.ai/2026/model-server/ovms_demos_continuous_batching_agent.html
+  #
+  # OVMS_TOOL_PARSER must match the model's chat template, not just the vendor:
+  #   hermes3 -> Qwen3.x / Qwen2.5      qwen3coder -> Qwen3.5+ (XML tool syntax)
+  #   gemma4  -> Gemma 4                phi4       -> Phi-4
+  # Setting it to `none` disables parsing; omitting the flag lets OVMS auto-detect
+  # from the chat template. A mismatched parser silently drops every tool call.
+  #
+  # OVMS_TOOL_GUIDED constrains decoding to the tool JSON schema. It is the main
+  # mitigation for small models emitting raw tool-result JSON instead of prose.
+  #
+  # --draft_source_model enables speculative decoding: a small "draft" model
+  # (Qwen3-0.6B, same tokenizer family as the Qwen3-4B target) proposes several
+  # tokens per step and the 4B model verifies them in one batched pass. This is
+  # NOT a quality tradeoff — the 4B model is still the one whose tokens are
+  # served; a rejected draft token just falls back to normal 4B decoding for
+  # that step, so output is identical to plain 4B, only faster when the draft
+  # and target agree (short, template-like ordering replies agree often).
+  # Benchmarked in tests/benchmarks/results/replay-*-specdecode.json.
+  # To disable: blank OVMS_DRAFT_MODEL_NAME in .env and recreate ovms-llm.
   ovms-llm:
     image: openvino/model_server:latest-gpu
     container_name: ovms-llm
@@ -393,9 +412,11 @@ services:
       --rest_port 8000
       --port 9000
       --source_model ${OVMS_MODEL_NAME:-OpenVINO/Qwen3-4B-int4-ov}
+      --draft_source_model ${OVMS_DRAFT_MODEL_NAME:-OpenVINO/Qwen3-0.6B-int4-ov}
       --model_repository_path /models
       --task text_generation
-      --tool_parser hermes3
+      --tool_parser ${OVMS_TOOL_PARSER:-hermes3}
+      --enable_tool_guided_generation ${OVMS_TOOL_GUIDED:-false}
       --target_device ${TARGET_DEVICE:-GPU}
       --cache_dir /tmp/ov_cache
       --enable_prefix_caching ${OVMS_PREFIX_CACHING:-true}
