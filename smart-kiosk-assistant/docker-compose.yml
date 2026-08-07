@@ -129,9 +129,20 @@ services:
     build:
       context: ./kiosk_core/metrics-collector
       dockerfile: Dockerfile
-    # Pinned independently of RELEASE_TAG: metrics-collector is excluded from
-    # this release cycle, so it stays on the last released image.
-    image: ${REGISTRY:-intel}/hl-ai-metrics-collector:2026.1.0
+    # Built from ./kiosk_core/metrics-collector rather than pulled.
+    #
+    # This service was previously pinned to the released
+    # hl-ai-metrics-collector:2026.1.0 image. That image predates the current
+    # source tree and does not serve /health at all, so the healthcheck below
+    # could never pass (observed FailingStreak: 1274). It also runs the older
+    # single-threaded http.server implementation, which serialised every
+    # request behind an unbounded qmassa JSON parse and made the dashboard's
+    # /metrics poll take 20-40 s -- long enough that the browser gave up and
+    # the performance charts stayed empty.
+    #
+    # The tag is suffixed to make clear this is a locally built artifact and
+    # to avoid shadowing the published 2026.1.0 image with different content.
+    image: ${REGISTRY:-intel}/hl-ai-metrics-collector:2026.1.0-local
     container_name: metrics-collector
     privileged: true
     pid: host
@@ -305,6 +316,10 @@ services:
       # flag alone falls back to the buffered /api/v1/agent/chat path.
       # Set AGENT_STREAM_SENTENCES=false to revert with a restart, no rebuild.
       AGENT_STREAM_SENTENCES: ${AGENT_STREAM_SENTENCES:-true}
+      # Caps generated tokens per LLM round-trip. Decode dominates agent
+      # latency, so this bounds the worst case (a turn that free-runs instead
+      # of calling a tool). Tunable from .env without a rebuild.
+      AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-192}
       # Embedding + reranker models are loaded in-process via OpenVINO at
       # startup (config.yaml pins device: GPU for both). Override with
       # TARGET_DEVICE=CPU (same variable used for the ovms-llm container) so
@@ -435,6 +450,12 @@ services:
       # Queue-service integration (dynamic peak-hour menu)
       KIOSK_CORE_QUEUE_SERVICE_ENABLED: "${KIOSK_CORE_QUEUE_SERVICE_ENABLED:-true}"
       KIOSK_CORE_QUEUE_SERVICE_URL:     http://queue-service:8090
+      # Conversation recording (offline analysis). Off by default; set to
+      # "true" to append every completed voice turn to
+      # ./conversations/<conversation_id>.jsonl on the host (bind-mounted
+      # below, so files are inspectable without entering the container).
+      KIOSK_CORE_CONVERSATION_LOGGING_ENABLED: "${KIOSK_CORE_CONVERSATION_LOGGING_ENABLED:-false}"
+      KIOSK_CORE_CONVERSATION_LOG_DIR:          /app/conversations
       # Bypass corporate proxy for intra-cluster traffic
       NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,queue-service,172.16.0.0/12,10.0.0.0/8"
       no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,queue-service,172.16.0.0/12,10.0.0.0/8"
@@ -442,6 +463,7 @@ services:
       - generated_audio:/app/generated_audio
       - kiosk_db:/app/data
       - ./configs/ordering:/app/configs/ordering:ro
+      - ./conversations:/app/conversations
     depends_on:
       audio-analyzer:
         condition: service_healthy

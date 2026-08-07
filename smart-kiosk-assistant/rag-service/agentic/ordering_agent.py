@@ -20,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import json
 import logging
@@ -28,12 +29,33 @@ import time
 from typing import Any
 
 from agentic import config as agent_cfg
+from agentic import item_intent_guard
 from agentic import llm_metrics
+from agentic import menu_guard
+from agentic import removal_guard
 from agentic.adk_runtime import create_adk_model, create_runner, create_session_service
 from agentic.mcp_client import MCPTool, bootstrap_mcp_tools, call_tool, get_all_tools
 from agentic.tools.knowledge_lookup_tool import knowledge_lookup
 
 logger = logging.getLogger(__name__)
+
+# Current turn's dietary preference (or None), read by ``_mcp_fn`` so
+# place_order/update_order calls get it without the LLM having to supply it
+# as a tool argument. A ContextVar (not an instance attribute) because
+# ``_mcp_fn`` is a bare async function shared by every concurrent session —
+# same rationale as menu_guard's ``_turn_state``, scoped per asyncio task.
+_dietary_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "dietary_ctx", default=None
+)
+
+# The current turn's raw customer utterance (untouched by the
+# ``[customer_name=...]``/``[dietary=...]`` tag prefixes), read by ``_mcp_fn``
+# so it can catch a stale item reference in a single-item place_order/
+# update_order call — see ``agentic/item_intent_guard.py``. Same ContextVar
+# rationale as ``_dietary_ctx`` above.
+_utterance_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "utterance_ctx", default=""
+)
 
 # Qwen3 hybrid-reasoning models wrap chain-of-thought in explicit <think> tags.
 # Match them precisely rather than guessing from paragraph structure.
@@ -143,6 +165,73 @@ _ORDER_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Tools that actually finalise an order. Only these make a "your order is
+# confirmed" sentence true.
+_CONFIRM_TOOLS = frozenset({"confirm_order", "confirm_active_order"})
+
+# A claim that the order is *finalised*, as opposed to merely added to. This is
+# narrower than _ORDER_CLAIM_RE: adding an item legitimately mentions the order,
+# but must never say it is confirmed.
+#
+# The gap between "order" and the confirmation verb is deliberately bounded but
+# non-trivial: a real reply says "Your order for 1 Classic Chicken Burger is
+# confirmed", not "Your order is confirmed" — the item description sits between
+# the noun and the verb. An earlier version of this regex required them to be
+# adjacent and consequently never matched real replies, silently letting every
+# "place_order ran, order is still draft" false-confirmation through. Caught by
+# replaying a real conversation and diffing the spoken reply against the actual
+# tool result (status stayed "draft" both times "confirmed" was said aloud).
+_CONFIRM_CLAIM_RE = re.compile(
+    r"order\b[^.!?]{0,80}?\b(?:is|has been|was)\b[^.!?]{0,15}?\b(?:now\s+)?"
+    r"(?:confirmed|placed|finalis(?:ed)?|finaliz(?:ed)?|complete)\b"
+    r"|confirmed your order"
+    r"|order (?:id|number|#)",
+    re.IGNORECASE,
+)
+
+# Substituted for a stripped confirmation claim on a turn that only added items:
+# the cart is real, it simply has not been confirmed yet.
+_UNCONFIRMED_TAIL = "Would you like to confirm your order?"
+
+
+def _strip_false_confirmation(reply: str, tool_calls: list[str]) -> tuple[str, bool]:
+    """Remove "your order is confirmed" claims that no confirm tool backs.
+
+    ``place_order`` and ``update_order`` leave the order in ``draft``. A reply
+    that nonetheless says the order is confirmed sends the customer away
+    believing the kitchen has their food, which is the single worst failure this
+    kiosk can produce. The existing unbacked-claim guard only triggers when *no*
+    order tool ran, so it cannot catch this case — ``place_order`` did run.
+
+    Only the offending sentences are dropped, not the whole reply: the item
+    names, prices, and upsell lines around them came from a real tool result and
+    are worth keeping.
+
+    Args:
+        reply: The assistant's drafted reply.
+        tool_calls: Tools invoked this turn, in call order.
+
+    Returns:
+        ``(reply, changed)`` — the cleaned reply and whether anything was cut.
+    """
+    if not reply or any(tool in _CONFIRM_TOOLS for tool in tool_calls):
+        return reply, False
+    if not _CONFIRM_CLAIM_RE.search(reply):
+        return reply, False
+
+    sentences = [s.strip() for s in _SENTENCE_END_RE.split(reply) if s.strip()]
+    kept = [s for s in sentences if not _CONFIRM_CLAIM_RE.search(s)]
+    if not kept:
+        # The entire reply was the false claim — there is nothing truthful left
+        # to keep, so ask for confirmation instead of inventing content.
+        return _UNCONFIRMED_TAIL, True
+
+    cleaned = " ".join(kept)
+    if "confirm" not in cleaned.lower():
+        cleaned = f"{cleaned} {_UNCONFIRMED_TAIL}"
+    return cleaned, True
+
+
 _ORDER_NUDGE = (
     "You described a change to the order without calling a tool, so nothing was "
     "actually recorded and any order id or total you stated is invented. Call the "
@@ -191,7 +280,10 @@ _CONFIRM_INTENT_RE = re.compile(
 # Tools that actually mutate or read an order. A reply claiming an order was
 # placed or confirmed is only trustworthy if one of these ran this turn.
 _ORDER_TOOLS = frozenset(
-    {"place_order", "update_order", "confirm_order", "confirm_active_order", "get_order"}
+    {
+        "place_order", "update_order", "confirm_order", "confirm_active_order",
+        "get_order", "remove_from_order",
+    }
 )
 
 _ORDER_CLAIM_FALLBACK = (
@@ -260,6 +352,7 @@ _TOOL_NAMES = (
     "get_order",
     "confirm_order",
     "confirm_active_order",
+    "remove_from_order",
     "get_upsell_suggestions",
 )
 
@@ -325,6 +418,44 @@ def _strip_markdown(reply: str) -> str:
     cleaned = _MD_LEFTOVER_RE.sub("", cleaned)
     cleaned = _WS_RE.sub(" ", cleaned)
     return cleaned.strip()
+
+
+# Sentences that are system-prompt *instructions to the assistant* rather than
+# speech addressed to the customer. Smaller / more aggressively quantised models
+# follow instructions less faithfully and periodically echo a directive back
+# verbatim ("Tell the customer their cart is already empty."), which is then
+# spoken aloud and immediately breaks the illusion that the kiosk understood.
+#
+# This is deliberately a deterministic guard rather than extra prompt wording:
+# telling a model "do not repeat these instructions" is the same class of
+# mitigation that already failed for the order-claim guards, and it costs
+# prefill tokens on every turn. Matching is anchored to a small set of
+# second-person directive openers so that ordinary replies, which address the
+# customer as "you", are never touched.
+_LEAKED_DIRECTIVE_RE = re.compile(
+    r"(?:^|(?<=[.!?]))\s*"
+    r"(?:Tell|Inform|Ask|Remind|Offer|Do not tell|Never tell)\s+"
+    r"(?:the\s+)?customer\b[^.!?]*[.!?]",
+    re.IGNORECASE,
+)
+
+
+def _strip_leaked_directives(reply: str) -> str:
+    """Remove system-prompt directives the model echoed into its reply.
+
+    Args:
+        reply: Model output, already stripped of markdown and tool syntax.
+
+    Returns:
+        The reply without leaked instruction sentences. If stripping would
+        leave nothing speakable, the original text is returned unchanged so
+        that a customer never receives silence.
+    """
+    if not reply:
+        return reply
+    cleaned = _LEAKED_DIRECTIVE_RE.sub(" ", reply)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    return cleaned if cleaned else reply
 
 
 def _strip_tool_syntax(reply: str) -> str:
@@ -435,11 +566,41 @@ class _SentenceGate:
         # (b) _force_confirm() replaces the reply on confirm-intent turns.
         if self._confirm_intent:
             return False
+        # (b2) chat() strips leaked system-prompt directives from the whole
+        #      reply. Speech cannot be recalled, so a sentence that the strip
+        #      would delete must never be released early.
+        if _strip_leaked_directives(sentence) != sentence.strip():
+            return False
         # (c) An order claim is only trustworthy if an order tool actually ran;
         #     otherwise chat() substitutes _ORDER_CLAIM_FALLBACK.
         if _ORDER_CLAIM_RE.search(sentence) and not any(
             tool in _ORDER_TOOLS for tool in tool_calls
         ):
+            return False
+        # (c2) A *confirmation* claim additionally needs a confirm tool; chat()
+        #      strips it otherwise, so it must never reach TTS first.
+        if _CONFIRM_CLAIM_RE.search(sentence) and not any(
+            tool in _CONFIRM_TOOLS for tool in tool_calls
+        ):
+            return False
+        # (c3) menu_guard.validate_reply() can still replace the *whole* reply
+        #      whenever this turn had an off-menu/ambiguous rejection and no
+        #      mutating tool succeeded — either because a sentence falsely
+        #      claims an addition, or because the reply never surfaces the
+        #      real alternatives the tool provided (see _mentions_alternative
+        #      in menu_guard.py). Since either condition can only be known
+        #      once the full reply is assembled, no sentence from a rejected
+        #      turn may be released early.
+        #      Tool results are already recorded by this point: ADK emits every
+        #      function_call part, and _mcp_fn awaits the call, before text streams.
+        _menu_state = menu_guard.current_state()
+        if _menu_state.has_rejection and not _menu_state.succeeded:
+            return False
+        # (c4) A removal claim is only true if remove_from_order actually took
+        #      something off the cart. chat() replaces the whole reply
+        #      otherwise (agentic/removal_guard.py), so it must never reach
+        #      TTS first.
+        if removal_guard.claims_removal(sentence) and not removal_guard.current_state().succeeded:
             return False
         # (d) Anything that would be stripped or substituted wholesale.
         if _ERROR_PAYLOAD_RE.search(sentence) or _TOOL_SYNTAX_RE.search(sentence):
@@ -492,6 +653,40 @@ _JSON_TO_PY: dict[str, type] = {
     "array": list,
     "object": dict,
 }
+
+
+def _infer_json_type(pspec: dict[str, Any]) -> type:
+    """Resolve a JSON-schema property spec to a Python type for ADK.
+
+    Most MCP tool parameters have a direct ``"type"`` key. An **optional**
+    parameter (e.g. ``items: list[dict] | None = None``) is instead emitted by
+    FastMCP as ``{"anyOf": [{"type": "array", ...}, {"type": "null"}],
+    "default": None}`` — no top-level ``"type"`` at all. Falling through to the
+    ``str`` default there was the actual cause of a reported "cannot remove
+    items" bug: ``remove_from_order``'s ``items`` parameter is optional, so ADK
+    was told it takes a *string*, the model dutifully passed a JSON-encoded or
+    comma-joined string instead of a real list, and kiosk-core's Pydantic
+    validation rejected it outright — while ``place_order``/``update_order``
+    (whose ``items`` is required, so no ``anyOf``) worked fine.
+
+    Args:
+        pspec: One property's JSON-schema spec from the tool's input schema.
+
+    Returns:
+        The best-matching Python type; the first non-null branch of an
+        ``anyOf`` wins, falling back to ``str`` only when nothing usable is
+        found.
+    """
+    direct_type = pspec.get("type")
+    if direct_type:
+        return _JSON_TO_PY.get(direct_type, str)
+
+    for branch in pspec.get("anyOf", None) or ():
+        branch_type = (branch or {}).get("type")
+        if branch_type and branch_type != "null":
+            return _JSON_TO_PY.get(branch_type, str)
+
+    return str
 
 # ---------------------------------------------------------------------------
 # Tool result compression
@@ -561,7 +756,7 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
             if isinstance(data, dict):
                 items = [
                     {
-                        "name": it.get("name"),
+                        "name": it.get("product_name") or it.get("name"),
                         "qty": it.get("quantity", 1),
                         "price": _price(it.get("price")),
                     }
@@ -581,6 +776,23 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                 ]
                 if upsell_displays:
                     compressed["upsell"] = upsell_displays
+
+        elif tool_name == "remove_from_order":
+            if isinstance(data, dict) and "error" not in data:
+                compressed = {
+                    "removed": data.get("removed", []),
+                    "not_in_cart": data.get("not_in_cart", []),
+                    "cart_empty": data.get("cart_empty", False),
+                    "total": _price(data.get("total")),
+                    "items": [
+                        {
+                            "name": it.get("product_name") or it.get("name"),
+                            "qty": it.get("quantity", 1),
+                            "price": _price(it.get("price")),
+                        }
+                        for it in data.get("items", [])
+                    ],
+                }
 
         elif tool_name == "confirm_order":
             if isinstance(data, dict):
@@ -608,6 +820,114 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Customer name extraction
+# ---------------------------------------------------------------------------
+
+# Words that follow "I'm"/"I am" far more often than a name does. Without this
+# guard "I'm hungry" would enrol the customer as "Hungry" and the kiosk would
+# greet them by it for the rest of the conversation.
+_NAME_STOPWORDS = frozenset({
+    "a", "an", "the", "not", "no", "yes", "ok", "okay", "fine", "good", "great",
+    "hungry", "thirsty", "sorry", "sure", "done", "ready", "here", "back",
+    "looking", "trying", "thinking", "wondering", "going", "getting", "having",
+    "just", "still", "already", "very", "so", "really", "quite", "too",
+    "vegetarian", "vegan", "allergic", "lactose", "gluten", "diabetic",
+    "waiting", "confused", "curious", "interested", "afraid", "glad", "happy",
+    "new", "old", "sick", "tired", "full", "good", "bad", "sure", "certain",
+    "from", "with", "for", "about", "in", "on", "at", "to", "of",
+    "ordering", "asking", "calling", "speaking", "buying", "paying",
+    "it", "that", "this", "there", "all", "done", "set", "next", "first",
+})
+
+_NAME_PATTERNS = (
+    re.compile(r"\bmy name(?:'s| is| would be)\s+([a-z][a-z'\-]{1,20})", re.I),
+    re.compile(r"\b(?:you can |please |just )?call me\s+([a-z][a-z'\-]{1,20})", re.I),
+    re.compile(r"\bi am\s+([a-z][a-z'\-]{1,20})\b", re.I),
+    re.compile(r"\bi'm\s+([a-z][a-z'\-]{1,20})\b", re.I),
+    re.compile(r"\bthis is\s+([a-z][a-z'\-]{1,20})\s+(?:here|speaking)\b", re.I),
+    re.compile(r"\bit'?s\s+([a-z][a-z'\-]{1,20})\s+(?:here|speaking)\b", re.I),
+)
+
+# "my name is …" and "call me …" are explicit enough to trust on their own;
+# the "I'm …" forms are ambiguous and need the stopword screen.
+_EXPLICIT_NAME_PATTERN_COUNT = 2
+
+
+def _extract_customer_name(message: str) -> str | None:
+    """Pull the customer's given name out of an utterance, if they stated one.
+
+    Deterministic extraction is used rather than asking the LLM to remember,
+    because a 4B model loses names across turns and cannot be relied on to
+    call a "remember this" tool at the right moment.
+
+    Args:
+        message: The customer's transcribed utterance.
+
+    Returns:
+        The name in title case, or None if the utterance does not state one.
+    """
+    if not message:
+        return None
+    for index, pattern in enumerate(_NAME_PATTERNS):
+        match = pattern.search(message)
+        if not match:
+            continue
+        candidate = match.group(1).strip(" '-")
+        if not candidate or not candidate.replace("'", "").replace("-", "").isalpha():
+            continue
+        if index >= _EXPLICIT_NAME_PATTERN_COUNT and candidate.lower() in _NAME_STOPWORDS:
+            continue
+        if len(candidate) < 2:
+            continue
+        return candidate[:1].upper() + candidate[1:].lower()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Dietary preference extraction
+# ---------------------------------------------------------------------------
+
+# Checked before the positive patterns: "I'm not vegetarian" / "I eat
+# non-veg" must clear a preference, not set "vegetarian" from the substring
+# match that would otherwise fire.
+_NON_VEG_PATTERN = re.compile(
+    r"\b(?:i(?:'m| am)\s+not\s+vegetarian|i(?:'m| am)\s+non[- ]?veg(?:etarian)?|"
+    r"i\s+eat\s+(?:meat|non[- ]?veg(?:etarian)?|chicken|fish))\b",
+    re.IGNORECASE,
+)
+
+_VEGAN_PATTERN = re.compile(r"\bi(?:'m| am)\s+(?:a\s+)?vegan\b", re.IGNORECASE)
+_VEGETARIAN_PATTERN = re.compile(
+    r"\bi(?:'m| am)\s+(?:a\s+)?vegetarian\b|\bno meat\s+(?:for me|please)?\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_dietary_pref(message: str) -> str | None:
+    """Pull a stated dietary preference out of an utterance, if present.
+
+    Deterministic extraction (same rationale as :func:`_extract_customer_name`):
+    a small model cannot be trusted to recall "I am vegetarian" several turns
+    later, so the preference is captured once here and re-injected on every
+    later turn instead of relying on conversation memory.
+
+    Returns:
+        ``"vegetarian"``, ``"vegan"``, ``"none"`` (explicit non-veg statement,
+        clears any earlier preference), or ``None`` if nothing was stated.
+    """
+    if not message:
+        return None
+    if _NON_VEG_PATTERN.search(message):
+        return "none"
+    if _VEGAN_PATTERN.search(message):
+        return "vegan"
+    if _VEGETARIAN_PATTERN.search(message):
+        return "vegetarian"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Agent instruction prompt
 # ---------------------------------------------------------------------------
 
@@ -627,6 +947,8 @@ unavailable from memory.
    is unusable spoken aloud. Narrow to one category first, then use Rule 4.
 1. ORDER ("I want X", "add X", "order X") — call place_order (or update_order if an
    order exists) passing the spoken name as product_id; do NOT call list_products first.
+   This rule fires on ORDER intent alone — a `[dietary=...]` tag on the message
+   (see below) is never a reason to answer a question instead of ordering.
    - On `error` with available_products, offer one of those (name + price) and
      ask if they want it — never retry a made-up id, never say "unavailable".
    - On success reply with the item NAME and PRICE taken from the tool result,
@@ -664,6 +986,45 @@ unavailable from memory.
    tool returned it (it is a plain number), then wish them well. Never invent,
    pad, or reformat an order id, and never state an order is confirmed before
    the tool has returned.
+6. REMOVE — "remove X", "take X off", "drop the X", "I don't want the X",
+   "cancel the X" — call remove_from_order with one entry per item the customer
+   named. Put ALL the items in ONE call: "remove the fries and the coke" is a
+   single call with two entries, never two calls. Pass the spoken name as
+   product_id and leave quantity out unless the customer removes only some of
+   several units ("remove one of the two burgers" → quantity 1).
+   - Report back using the tool result only. Say what `removed` lists, then the
+     new `total`. If `not_in_cart` is non-empty, say those items were not in the
+     order — never claim to have removed something that is not in `removed`.
+   - If `cart_empty` is true, say the cart is now empty and ask what they would
+     like instead. Do NOT call confirm_order on an empty cart.
+   - Never use update_order to remove something: it only adds.
+
+## The customer's name
+A turn may begin with a tag like `[customer_name=Jitendra]`. That is the name
+this customer gave you. Address them by it naturally — put it at the start of a
+greeting, an acknowledgement, or a farewell, e.g. "Thanks, Jitendra." Use it
+sparingly: at most once per reply, and never in every sentence.
+The name changes nothing else. It is NOT a signal that an order exists, was
+placed, or was confirmed — never let it pull a confirmation sentence into a
+reply. Keep obeying the rules above exactly: only say an order is confirmed
+after confirm_order returned successfully this turn.
+NEVER speak the tag itself, the brackets, or the words "customer_name" or
+"user_id" out loud — they are metadata, not part of the conversation. If no such
+tag is present you do not know their name, so never guess one and never reuse a
+name from earlier in your memory.
+
+## The customer's dietary preference
+A turn may begin (or include, alongside the name tag) a tag like
+`[dietary=vegetarian]` or `[dietary=vegan]` — the customer stated this earlier
+in the conversation. Use it to steer suggestions and phrasing (e.g. mention
+veg options first, don't recommend a chicken item unprompted), but it changes
+NOTHING about which rule above applies: "I'd like to order a burger" is still
+Rule 1 (call place_order) regardless of any dietary tag — never let it divert
+you into answering a question instead of ordering, and never call
+knowledge_lookup just because a dietary tag is present.
+You do not need to pass a `dietary` argument to any tool yourself — it is
+filled in automatically when relevant. Never speak the tag, brackets, or the
+word "dietary" out loud.
 
 ## Never answer from memory
 If a rule above says to call a tool, you MUST call it before replying. Do not
@@ -753,6 +1114,13 @@ class OrderingAgent:
         self._runner = None
         self._session_service = None
         self._bootstrapped = False
+        # Customer given name per conversation. Keyed on session_id, which the
+        # kiosk UI regenerates for every new conversation, so a name never
+        # survives into the next customer's session.
+        self._customer_names: dict[str, str] = {}
+        # Stated dietary preference ("vegetarian"/"vegan") per conversation,
+        # same lifecycle/rationale as _customer_names above.
+        self._dietary_prefs: dict[str, str] = {}
 
     async def bootstrap(self) -> None:
         """Initialise the ADK model, MCP tools, and runner.
@@ -890,8 +1258,32 @@ class OrderingAgent:
         """
 
         async def _mcp_fn(**kwargs: Any) -> Any:
+            if tool_name in ("place_order", "update_order"):
+                # Overwrite rather than merge: this is the deterministically
+                # captured preference, always more trustworthy than anything
+                # the model might guess and pass itself.
+                diet = _dietary_ctx.get()
+                if diet:
+                    kwargs["dietary"] = diet
+                # Catch a stale/pending item reference the model failed to
+                # update against what the customer just said this turn (e.g.
+                # a pending "French fries" confirmation still in the call
+                # after the customer said "add a pizza"). See
+                # agentic/item_intent_guard.py for the full rationale.
+                corrected = item_intent_guard.corrected_reference(
+                    tool_name, kwargs.get("items"), _utterance_ctx.get()
+                )
+                if corrected:
+                    kwargs["items"][0]["product_id"] = corrected
+                    kwargs["items"][0].pop("name", None)
+                    kwargs["items"][0].pop("product", None)
             logger.info("[AGENT→MCP] tool=%s args=%s", tool_name, kwargs)
             result = await call_tool(tool_name, kwargs)
+            # Record the outcome *before* compression: the menu guard needs the
+            # tool's own error payload, and compression is free to reshape a
+            # successful result.
+            menu_guard.record_tool_result(tool_name, result)
+            removal_guard.record_tool_result(tool_name, result)
             result = _compress_tool_result(tool_name, result)
             logger.debug("[AGENT→MCP] tool=%s compressed_result=%s", tool_name, str(result)[:200])
             return result
@@ -908,7 +1300,7 @@ class OrderingAgent:
         params: list[inspect.Parameter] = []
         annotations: dict[str, Any] = {}
         for pname, pspec in properties.items():
-            pytype = _JSON_TO_PY.get((pspec or {}).get("type", "string"), str)
+            pytype = _infer_json_type(pspec or {})
             annotations[pname] = pytype
             if pname in required:
                 params.append(
@@ -955,7 +1347,9 @@ class OrderingAgent:
             dict with keys:
               - ``reply``:     str — the agent's text response.
               - ``tool_calls``: list[str] — tools invoked this turn.
-              - ``llm_ms``:    float | None — cumulative genuine LLM time.
+              - ``llm_ms``:      float | None — cumulative genuine LLM time
+                (prefill + decode, i.e. the full round-trip).
+              - ``llm_ttft_ms``: float | None — cumulative prefill time only.
               - ``llm_calls``: int — number of LLM round-trips this turn.
         """
         if not self._bootstrapped:
@@ -980,6 +1374,45 @@ class OrderingAgent:
         if user_id != "anonymous":
             full_message = f"[user_id={user_id}] {message}"
 
+        # Remember a name the customer states, and re-inject it on every later
+        # turn: the model cannot be trusted to carry it through a long history,
+        # but it will happily use a name placed in the current turn.
+        spoken_name = _extract_customer_name(message)
+        if spoken_name:
+            if self._customer_names.get(session_id) != spoken_name:
+                logger.info(
+                    "[AGENT] Customer name captured session=%s name=%s", session_id, spoken_name
+                )
+            self._customer_names[session_id] = spoken_name
+        known_name = self._customer_names.get(session_id)
+        if known_name:
+            full_message = f"[customer_name={known_name}] {full_message}"
+
+        # Same rationale as the name above: remember a stated dietary
+        # preference deterministically and re-inject it every turn, rather
+        # than trusting the model to recall it from conversation history.
+        spoken_diet = _extract_dietary_pref(message)
+        if spoken_diet:
+            if spoken_diet == "none":
+                if self._dietary_prefs.pop(session_id, None) is not None:
+                    logger.info("[AGENT] Dietary preference cleared session=%s", session_id)
+            elif self._dietary_prefs.get(session_id) != spoken_diet:
+                logger.info(
+                    "[AGENT] Dietary preference captured session=%s diet=%s", session_id, spoken_diet
+                )
+                self._dietary_prefs[session_id] = spoken_diet
+        known_diet = self._dietary_prefs.get(session_id)
+        if known_diet:
+            full_message = f"[dietary={known_diet}] {full_message}"
+        # Read by _mcp_fn this turn so place_order/update_order get the
+        # preference without the LLM having to supply it as a tool argument.
+        dietary_token = _dietary_ctx.set(known_diet)
+        # Read by _mcp_fn this turn to catch a stale item reference against
+        # what the customer actually just said. The raw ``message`` (not the
+        # tag-prefixed ``full_message``) is used deliberately — the tags are
+        # not something the customer said and would only add noise here.
+        utterance_token = _utterance_ctx.set(message)
+
         content = genai_types.Content(
             role="user",
             parts=[genai_types.Part(text=full_message)],
@@ -991,6 +1424,11 @@ class OrderingAgent:
         )
         t_start = time.perf_counter()
         llm_metrics.reset()
+        # Tool *results* for this turn are tracked separately from tool names:
+        # an off-menu item makes place_order run and fail, which every
+        # name-based guard reads as success. See agentic/menu_guard.py.
+        menu_guard.begin_turn()
+        removal_guard.begin_turn()
 
         try:
             gate = (
@@ -1086,6 +1524,7 @@ class OrderingAgent:
                 "reply": "Sorry, I encountered an error. Please try again.",
                 "tool_calls": [],
                 "llm_ms": llm["ms"],
+                "llm_ttft_ms": llm["ttft_ms"],
                 "llm_calls": llm["calls"],
                 "retrieval_ms": llm_metrics.retrieval_snapshot()["ms"],
             }
@@ -1093,21 +1532,56 @@ class OrderingAgent:
         latency_ms = (time.perf_counter() - t_start) * 1000
         llm = llm_metrics.snapshot()
         logger.info(
-            "[AGENT←OVMS] Response received | session=%s latency_ms=%.0f llm_ms=%s llm_calls=%d "
-            "tool_calls=%s reply_chars=%d",
-            session_id, latency_ms, llm["ms"], llm["calls"], tool_calls, len("".join(reply_parts)),
+            "[AGENT←OVMS] Response received | session=%s latency_ms=%.0f llm_ms=%s "
+            "llm_ttft_ms=%s llm_calls=%d tool_calls=%s reply_chars=%d",
+            session_id, latency_ms, llm["ms"], llm["ttft_ms"], llm["calls"],
+            tool_calls, len("".join(reply_parts)),
         )
 
         reply = "".join(reply_parts).strip()
         reply = _strip_thinking(reply)
         reply = _strip_tool_syntax(reply)
         reply = _strip_markdown(reply)
+        reply = _strip_leaked_directives(reply)
         if _ERROR_PAYLOAD_RE.search(reply):
             logger.error(
                 "[AGENT] Raw tool error payload leaked into reply — substituting "
                 "fallback | session=%s raw=%r", session_id, reply[:160],
             )
             reply = _TOOL_SYNTAX_FALLBACK
+
+        # A draft cart is not a confirmed order. Strip any claim to the contrary
+        # that no confirm tool backs — see _strip_false_confirmation.
+        reply, stripped = _strip_false_confirmation(reply, tool_calls)
+        if stripped:
+            logger.error(
+                "[AGENT] Unbacked confirmation claim stripped — no confirm tool ran "
+                "| session=%s tool_calls=%s cleaned=%r",
+                session_id, tool_calls, reply[:160],
+            )
+
+        # An item the catalogue refused was never added, however confidently the
+        # model narrates otherwise. This is the only guard that reads tool
+        # results rather than tool names, so it is the only one that can catch it.
+        reply, refused = menu_guard.validate_reply(reply)
+        if refused:
+            logger.error(
+                "[AGENT] Off-menu addition claim replaced with grounded refusal "
+                "| session=%s tool_calls=%s reply=%r",
+                session_id, tool_calls, reply[:160],
+            )
+
+        # A "removed from your order" claim is only true if remove_from_order
+        # actually took something off the cart, not merely that it was called.
+        # A reference that never matched a cart line (or was never invoked at
+        # all) means the item is still there — see agentic/removal_guard.py.
+        reply, removal_refused = removal_guard.validate_reply(reply)
+        if removal_refused:
+            logger.error(
+                "[AGENT] Unbacked removal claim replaced with grounded refusal "
+                "| session=%s tool_calls=%s reply=%r",
+                session_id, tool_calls, reply[:160],
+            )
 
         logger.info("[AGENT] Reply length=%d tool_calls=%s latency_ms=%.0f", len(reply), tool_calls, latency_ms)
         retrieval = llm_metrics.retrieval_snapshot()
@@ -1134,6 +1608,7 @@ class OrderingAgent:
             "reply": reply,
             "tool_calls": tool_calls,
             "llm_ms": llm["ms"],
+            "llm_ttft_ms": llm["ttft_ms"],
             "llm_calls": llm["calls"],
             "retrieval_ms": retrieval["ms"],
             "streamed": streamed,
@@ -1371,7 +1846,20 @@ class OrderingAgent:
             return
         self._session_service = create_session_service()
         self._runner = create_runner(self._agent, self._session_service)
+        self._customer_names.clear()
+        self._dietary_prefs.clear()
         logger.info("[AGENT] Conversation sessions reset — knowledge base changed")
+
+    def forget_conversation(self, session_id: str) -> None:
+        """Drop any per-conversation memory held for ``session_id``.
+
+        Called when a conversation ends or the kiosk screen is reset, so the
+        next customer never inherits the previous customer's name.
+        """
+        if self._customer_names.pop(session_id, None) is not None:
+            logger.info("[AGENT] Cleared customer name for session=%s", session_id)
+        if self._dietary_prefs.pop(session_id, None) is not None:
+            logger.info("[AGENT] Cleared dietary preference for session=%s", session_id)
 
     async def _ensure_session(
         self,

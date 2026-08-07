@@ -314,6 +314,10 @@ async def start_file_session(
     tts_language: str | None = Form(cfg.DEFAULT_TTS_LANGUAGE),
     tts_instructions: str | None = Form(cfg.DEFAULT_TTS_INSTRUCTIONS),
     realtime_factor: float = Form(1.0),
+    # Persistent conversation id, matching the browser-stream path. Without
+    # this every file session became its own conversation, so replaying a
+    # multi-turn transcript lost cart state and history between turns.
+    conversation_id: str | None = Form(None),
 ) -> dict[str, object]:
     request = FileSessionStartRequest(
         device=device,
@@ -332,6 +336,7 @@ async def start_file_session(
         tts_language=tts_language,
         tts_instructions=tts_instructions,
         realtime_factor=realtime_factor,
+        conversation_id=conversation_id,
     )
     await _clear_stale_cart_for_new_session(request.history)
     try:

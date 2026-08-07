@@ -38,20 +38,22 @@ def create_adk_model() -> "LiteLlm":
 
         async def generate_content_async(self, llm_request, stream: bool = False):
             started = time.perf_counter()
+            ttft_ms: float | None = None
             recorded = False
             try:
                 async for response in super().generate_content_async(llm_request, stream):
-                    # Record once, when the first chunk arrives for a streamed
-                    # call, otherwise on the single non-streamed response.
-                    if not recorded:
-                        llm_metrics.record((time.perf_counter() - started) * 1000)
-                        recorded = True
+                    # First chunk = prefill done. Everything after it is decode,
+                    # which is the larger half of a generation-heavy turn, so the
+                    # round-trip is only closed out once the stream is exhausted.
+                    if ttft_ms is None:
+                        ttft_ms = (time.perf_counter() - started) * 1000
                     yield response
             finally:
                 if not recorded:
-                    # Call failed before producing output — still count the
-                    # time spent so the trace does not under-report.
-                    llm_metrics.record((time.perf_counter() - started) * 1000)
+                    llm_metrics.record(
+                        (time.perf_counter() - started) * 1000, ttft_ms
+                    )
+                    recorded = True
 
     # Do NOT use litellm_proxy — that routes to a separate LiteLLM proxy server.
     # Use the openai/ provider which calls the base_url directly over HTTP.

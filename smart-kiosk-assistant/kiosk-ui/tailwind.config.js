@@ -67,6 +67,18 @@ export default {
           '0%':   { strokeDashoffset: '200' },
           '100%': { strokeDashoffset: '0' },
         },
+        // Indeterminate progress sweep — replaces the rotating "processing"
+        // button on the customer kiosk. A left-to-right sweep reads as
+        // "work is moving forward"; a spinning button reads as "stuck".
+        'progress-sweep': {
+          '0%':   { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(400%)' },
+        },
+        // Sequential dots that convey "thinking" without rotation.
+        'thinking-dot': {
+          '0%, 80%, 100%': { opacity: '0.25', transform: 'translateY(0)' },
+          '40%':           { opacity: '1',    transform: 'translateY(-3px)' },
+        },
       },
       animation: {
         'stage-pulse':  'stage-pulse 1.8s ease-in-out infinite',
@@ -74,6 +86,8 @@ export default {
         'number-tick':  'number-tick 0.25s ease-out',
         'bar-rise':     'bar-rise 0.6s ease-out',
         'spin-slow':    'spin 2s linear infinite',
+        'progress-sweep': 'progress-sweep 1.4s ease-in-out infinite',
+        'thinking-dot':   'thinking-dot 1.2s ease-in-out infinite',
       },
     },
   },

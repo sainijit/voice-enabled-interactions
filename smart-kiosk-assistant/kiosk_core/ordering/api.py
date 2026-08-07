@@ -119,6 +119,22 @@ async def get_current_order(user_id: str, service: ServiceDep) -> Order:
     return order
 
 
+@router.delete(
+    "/users/{user_id}/orders/current",
+    summary="Clear the user's draft cart",
+)
+async def clear_current_order(user_id: str, service: ServiceDep) -> dict[str, int | str]:
+    """Discard every open draft order for a user.
+
+    Called by the kiosk UI when a new conversation begins (e.g. the customer
+    screen is reloaded), so a previous customer's abandoned cart never leaks
+    into the next session. Confirmed orders are untouched.
+    """
+    logger.info("[ORDERING-API] DELETE /users/%s/orders/current", user_id)
+    cleared = await service.clear_draft_carts(user_id)
+    return {"user_id": user_id, "cleared_orders": cleared}
+
+
 @router.patch("/orders/{order_id}/items", response_model=Order, summary="Update order items")
 async def update_order_items(
     order_id: int, request: UpdateOrderItemsRequest, service: ServiceDep

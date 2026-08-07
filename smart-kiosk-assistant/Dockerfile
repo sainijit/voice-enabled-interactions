@@ -31,7 +31,7 @@ RUN pip install --upgrade pip \
 
 COPY . .
 
-RUN mkdir -p /app/generated_audio /app/data \
+RUN mkdir -p /app/generated_audio /app/data /app/conversations \
     && chown -R ${APP_UID}:${APP_GID} /app
 
 USER appuser

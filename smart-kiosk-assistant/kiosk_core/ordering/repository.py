@@ -57,6 +57,10 @@ class AbstractOrderRepository(ABC):
         ...
 
     @abstractmethod
+    async def remove_item(self, order_id: int, product_id: str, quantity: int | None) -> int:
+        ...
+
+    @abstractmethod
     async def update_total(self, order_id: int) -> float:
         ...
 
@@ -212,6 +216,51 @@ class SqliteOrderRepository(AbstractOrderRepository):
                 (order_id, item.product_id, item.quantity, price),
             )
             logger.debug("[ORDER-REPO] Added product=%s to order=%d", item.product_id, order_id)
+
+    async def remove_item(self, order_id: int, product_id: str, quantity: int | None) -> int:
+        """Remove a product from an order, or decrement its quantity.
+
+        Args:
+            order_id: Target order.
+            product_id: Catalogue product id to remove.
+            quantity: Units to remove. ``None`` removes the whole line
+                regardless of quantity ("take the burger off"); an explicit
+                value decrements and only deletes the line when it reaches
+                zero ("remove one of the two burgers").
+
+        Returns:
+            Units actually removed; ``0`` when the product was not in the order.
+        """
+        cursor = await self._db.execute(
+            "SELECT id, quantity FROM order_items WHERE order_id = ? AND product_id = ?",
+            (order_id, product_id),
+        )
+        existing = await cursor.fetchone()
+        if existing is None:
+            logger.debug(
+                "[ORDER-REPO] product=%s not present in order=%d — nothing to remove",
+                product_id, order_id,
+            )
+            return 0
+
+        item_id, current_qty = existing[0], existing[1]
+        if quantity is None or quantity >= current_qty:
+            await self._db.execute("DELETE FROM order_items WHERE id = ?", (item_id,))
+            logger.info(
+                "[ORDER-REPO] Removed product=%s (x%d) from order=%d",
+                product_id, current_qty, order_id,
+            )
+            return current_qty
+
+        await self._db.execute(
+            "UPDATE order_items SET quantity = quantity - ? WHERE id = ?",
+            (quantity, item_id),
+        )
+        logger.info(
+            "[ORDER-REPO] Decremented product=%s by %d in order=%d",
+            product_id, quantity, order_id,
+        )
+        return quantity
 
     async def update_total(self, order_id: int) -> float:
         cursor = await self._db.execute(

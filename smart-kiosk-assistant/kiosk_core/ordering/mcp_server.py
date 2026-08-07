@@ -139,7 +139,8 @@ async def _attach_upsell(order_result: dict[str, Any]) -> dict[str, Any]:
 
 async def _resolve_items(
     items: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
+    dietary: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Resolve order item references to canonical product_ids.
 
     Each incoming item may carry the product reference under ``product_id``,
@@ -148,45 +149,87 @@ async def _resolve_items(
     the catalogue via OrderingService.resolve_product so a wrong-format id no
     longer fails the order.
 
+    Resolution is deliberately **per item**. An earlier version aborted the
+    whole call on the first unresolvable reference, which silently discarded
+    the items the customer really did ask for: a single fabricated id in a
+    multi-item request ("4 burgers, 3 fries, 1 cold coffee, 4 petty_fries")
+    dropped all four lines and left the cart empty, and the agent then had
+    nothing to confirm. Valid items must always reach the cart; only the
+    fabricated reference is refused.
+
+    Args:
+        dietary: ``"vegetarian"``/``"vegan"`` when the agent knows this
+            customer stated that preference this session. Only narrows the
+            "did you mean" suggestions offered for an *unresolved* reference
+            (e.g. plain "burger" matching several products) — it never blocks
+            an explicit, uniquely-resolved order for a specific item, so a
+            customer who is more specific than their earlier statement is
+            never second-guessed.
+
     Returns:
-        (resolved_items, None) on success, where resolved_items is a list of
-        {product_id, quantity} using real catalogue ids; or (None, error) where
-        error is a structured dict with the unresolved reference and a grounded
-        ``available_products`` list the agent can offer instead of guessing.
+        ``(resolved, rejected)``. ``resolved`` holds {product_id, quantity}
+        entries using real catalogue ids. ``rejected`` holds
+        {reference, suggestions} for every reference not on the menu.
     """
     resolved: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
     for it in items:
         ref = it.get("product_id") or it.get("name") or it.get("product") or ""
         qty = it.get("quantity", 1)
         product = await _svc().resolve_product(ref)
         if product is None:
-            suggestions = await _svc().suggest_products(ref)
+            suggestions = await _svc().suggest_products(ref, dietary=dietary)
             logger.warning("[MCP-SERVER] could not resolve product reference '%s'", ref)
-            # The suggestions are also spelled out inside the error sentence.
-            # A sibling array is too easy for the model to skip: it would say
-            # "there was an issue, please try again" and strand the customer in
-            # a loop, since retrying the same missing item always fails.
-            offer = ", ".join(f"{p.name} ({p.price:.0f})" for p in suggestions[:3])
-            error_msg = (
-                f"'{ref}' is not on the menu. Do not invent it and do not ask the "
-                f"customer to try again. Tell them it is unavailable and offer these "
-                f"real alternatives instead: {offer}."
-                if offer
-                else (
-                    f"'{ref}' is not on the menu and there are no similar items to "
-                    f"suggest. Do not invent a product — tell the customer it is "
-                    f"unavailable and ask what else they'd like."
-                )
-            )
-            return None, {
-                "error": error_msg,
-                "available_products": [
-                    {"product_id": p.product_id, "name": p.name, "price": p.price}
-                    for p in suggestions
-                ],
-            }
-        resolved.append({"product_id": product.product_id, "quantity": qty})
-    return resolved, None
+            rejected.append({"reference": ref, "suggestions": suggestions})
+        else:
+            resolved.append({"product_id": product.product_id, "quantity": qty})
+    return resolved, rejected
+
+
+def _rejection_payload(rejected: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe unavailable references for the agent, with grounded alternatives.
+
+    The alternatives are spelled out inside the sentence itself rather than
+    left only in a sibling array: a bare array is too easy for the model to
+    skip, after which it says "there was an issue, please try again" and
+    strands the customer in a loop, since retrying the same missing item
+    always fails.
+    """
+    refs = ", ".join(f"'{r['reference']}'" for r in rejected)
+    # De-duplicate suggestions across all rejected references, preserving order.
+    unique: dict[str, Any] = {}
+    for r in rejected:
+        for p in r["suggestions"]:
+            unique.setdefault(p.product_id, p)
+    offer = ", ".join(f"{p.name} ({p.price:.0f})" for p in list(unique.values())[:3])
+    plural = "are" if len(rejected) > 1 else "is"
+    message = (
+        f"{refs} {plural} not on the menu. Do not invent them and do not ask the "
+        f"customer to try again. Tell them those {plural} unavailable and offer "
+        f"these real alternatives instead: {offer}."
+        if offer
+        else (
+            f"{refs} {plural} not on the menu and there are no similar items to "
+            f"suggest. Do not invent a product — tell the customer they are "
+            f"unavailable and ask what else they'd like."
+        )
+    )
+    return {
+        "unavailable_items": [r["reference"] for r in rejected],
+        "unavailable_message": message,
+        "available_products": [
+            {"product_id": p.product_id, "name": p.name, "price": p.price}
+            for p in unique.values()
+        ],
+    }
+
+
+def _nothing_resolved_error(rejected: list[dict[str, Any]]) -> dict[str, Any]:
+    """Error payload for a call where no reference at all could be resolved."""
+    if not rejected:
+        return {"error": "No items were supplied."}
+    payload = _rejection_payload(rejected)
+    return {"error": payload["unavailable_message"], **payload}
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +317,9 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-async def place_order(user_id: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+async def place_order(
+    user_id: str, items: list[dict[str, Any]], dietary: str | None = None
+) -> dict[str, Any]:
     """Add items to the customer's cart (creates it if none is open).
 
     Safe to call for follow-up items: if the customer already has an open
@@ -285,6 +330,8 @@ async def place_order(user_id: str, items: list[dict[str, Any]]) -> dict[str, An
         items: List of {product_id, quantity}. product_id may be a catalogue id
             OR a plain product name (e.g. "Classic Chicken Burger") — the server
             resolves it.
+        dietary: Leave unset — the caller fills this in automatically from
+            anything the customer has already said about diet this session.
 
     Returns:
         The order (order_id, items, total, status="draft"), or an error
@@ -292,28 +339,40 @@ async def place_order(user_id: str, items: list[dict[str, Any]]) -> dict[str, An
     """
     from kiosk_core.ordering.models import CreateOrderRequest, OrderItemIn
 
-    resolved, err = await _resolve_items(items)
-    if err is not None:
-        return err
+    resolved, rejected = await _resolve_items(items, dietary=dietary)
+    if not resolved:
+        return _nothing_resolved_error(rejected)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
         req = CreateOrderRequest(user_id=user_id, items=item_list)
         order = await _svc().place_order(req)
         logger.info("[MCP-SERVER] place_order user=%s order_id=%d total=%.2f", user_id, order.order_id, order.total)
-        return await _attach_upsell(order.model_dump(mode="json"))
+        result = await _attach_upsell(order.model_dump(mode="json"))
+        if rejected:
+            # The valid items are in the cart; only the fabricated ones failed.
+            logger.warning(
+                "[MCP-SERVER] place_order user=%s added %d item(s), refused %s",
+                user_id, len(resolved), [r["reference"] for r in rejected],
+            )
+            result.update(_rejection_payload(rejected))
+        return result
     except ValueError as exc:
         logger.warning("[MCP-SERVER] place_order user=%s rejected: %s", user_id, exc)
         return {"error": str(exc)}
 
 
 @mcp.tool()
-async def update_order(order_id: int, items: list[dict[str, Any]]) -> dict[str, Any]:
+async def update_order(
+    order_id: int, items: list[dict[str, Any]], dietary: str | None = None
+) -> dict[str, Any]:
     """Add or increment items on an existing draft order.
 
     Args:
         order_id: The order to update.
         items: List of {product_id, quantity} to add. product_id may be a
             catalogue id OR a plain product name — the server resolves it.
+        dietary: Leave unset — the caller fills this in automatically from
+            anything the customer has already said about diet this session.
 
     Returns:
         Updated order with recalculated total, or an error dict with
@@ -321,14 +380,21 @@ async def update_order(order_id: int, items: list[dict[str, Any]]) -> dict[str, 
     """
     from kiosk_core.ordering.models import OrderItemIn
 
-    resolved, err = await _resolve_items(items)
-    if err is not None:
-        return err
+    resolved, rejected = await _resolve_items(items, dietary=dietary)
+    if not resolved:
+        return _nothing_resolved_error(rejected)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
         order = await _svc().update_order_items(order_id, item_list)
         logger.info("[MCP-SERVER] update_order order_id=%d new_total=%.2f", order_id, order.total)
-        return await _attach_upsell(order.model_dump(mode="json"))
+        result = await _attach_upsell(order.model_dump(mode="json"))
+        if rejected:
+            logger.warning(
+                "[MCP-SERVER] update_order order_id=%d added %d item(s), refused %s",
+                order_id, len(resolved), [r["reference"] for r in rejected],
+            )
+            result.update(_rejection_payload(rejected))
+        return result
     except ValueError as exc:
         logger.warning("[MCP-SERVER] update_order order_id=%d rejected: %s", order_id, exc)
         return {"error": str(exc)}
@@ -370,6 +436,20 @@ async def confirm_active_order(user_id: str = "anonymous") -> dict[str, Any]:
     if order is None:
         logger.warning("[MCP-SERVER] confirm_active_order user=%s has no draft order", user_id)
         return {"error": "No open order to confirm."}
+    # An order row can exist with every line removed. Confirming it would tell
+    # the customer "your order is confirmed" over an empty cart, which is
+    # exactly what happened when a batch add was refused wholesale.
+    if not order.items:
+        logger.warning(
+            "[MCP-SERVER] confirm_active_order user=%s order_id=%d is empty — refusing",
+            user_id, order.order_id,
+        )
+        return {
+            "error": (
+                "The cart is empty, so there is nothing to confirm. Do not tell the "
+                "customer their order is confirmed. Ask them what they would like to order."
+            )
+        }
     try:
         confirmed = await _svc().confirm_order(order.order_id)
         logger.info(
@@ -380,6 +460,119 @@ async def confirm_active_order(user_id: str = "anonymous") -> dict[str, Any]:
     except ValueError as exc:
         logger.warning("[MCP-SERVER] confirm_active_order user=%s rejected: %s", user_id, exc)
         return {"error": str(exc)}
+
+
+@mcp.tool()
+async def remove_from_order(
+    user_id: str = "anonymous",
+    items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Remove one or more items from the customer's current cart.
+
+    Use this whenever the customer asks to take something off their order —
+    "remove the aloo tikki burger", "drop the fries and the coke", "I don't
+    want the pepsi anymore", "cancel the two burgers". Several items can be
+    removed in a single call: pass one entry per item.
+
+    Args:
+        user_id: The customer whose cart to modify. Defaults to "anonymous".
+        items: List of {product_id, quantity}. product_id may be a catalogue id
+            OR the plain spoken product name (e.g. "Aloo Tikki Burger") — the
+            server resolves it, preferring items actually in the cart. Omit
+            quantity (or pass 0) to remove the item entirely; pass a number
+            only when the customer wants to remove some but not all units.
+
+    Returns:
+        The updated order with its recalculated total. ``removed`` lists what
+        was taken off and ``not_in_cart`` lists any requested item that was not
+        there. When the cart ends up empty, ``cart_empty`` is true.
+    """
+    from kiosk_core.ordering.models import RemoveOrderItem
+
+    if not items:
+        return {"error": "No items specified to remove. Ask the customer which item to take off."}
+
+    order = await _svc().get_current_order(user_id)
+    if order is None:
+        logger.warning("[MCP-SERVER] remove_from_order user=%s has no draft order", user_id)
+        return {
+            "error": (
+                "There is no open order, so nothing can be removed. Tell the "
+                "customer their cart is already empty."
+            )
+        }
+
+    # Resolve each reference against the cart first: the customer is naming
+    # something they already ordered, so a cart line is a far better match than
+    # a catalogue-wide fuzzy hit (which could resolve "burger" to an item they
+    # never ordered and then report it as "not in your cart").
+    cart_ids = {item.product_id for item in order.items}
+    resolved: list[RemoveOrderItem] = []
+    unresolved: list[str] = []
+    for it in items:
+        ref = it.get("product_id") or it.get("name") or it.get("product") or ""
+        raw_qty = it.get("quantity")
+        try:
+            qty = int(raw_qty) if raw_qty is not None else None
+        except (TypeError, ValueError):
+            qty = None
+        # 0 / negative are the model's other ways of saying "all of it".
+        if qty is not None and qty < 1:
+            qty = None
+        product = await _svc().resolve_product(ref)
+        if product is not None and product.product_id in cart_ids:
+            resolved.append(RemoveOrderItem(product_id=product.product_id, quantity=qty))
+            continue
+        # Not in the cart under that resolution — try to match a cart line by
+        # name directly before declaring it absent.
+        match = await _svc().resolve_cart_item(ref, list(cart_ids))
+        if match is not None:
+            resolved.append(RemoveOrderItem(product_id=match, quantity=qty))
+        else:
+            unresolved.append(ref)
+
+    if not resolved:
+        in_cart = ", ".join(item.product_name for item in order.items) or "nothing"
+        return {
+            "error": (
+                f"None of those items are in the cart. The cart currently contains: "
+                f"{in_cart}. Tell the customer what is actually in their order and "
+                f"ask which of those to remove. Do not claim you removed anything."
+            ),
+            "cart_items": [
+                {"product_id": item.product_id, "name": item.product_name, "quantity": item.quantity}
+                for item in order.items
+            ],
+        }
+
+    try:
+        updated, not_found = await _svc().remove_order_items(order.order_id, resolved)
+    except ValueError as exc:
+        logger.warning("[MCP-SERVER] remove_from_order user=%s rejected: %s", user_id, exc)
+        return {"error": str(exc)}
+
+    removed_names: list[str] = []
+    remaining_ids = {item.product_id for item in updated.items}
+    for item in resolved:
+        if item.product_id in not_found:
+            continue
+        name = next(
+            (o.product_name for o in order.items if o.product_id == item.product_id),
+            item.product_id,
+        )
+        removed_names.append(name)
+
+    result = updated.model_dump(mode="json")
+    result["removed"] = removed_names
+    result["not_in_cart"] = unresolved + [
+        next((o.product_name for o in order.items if o.product_id == pid), pid) for pid in not_found
+    ]
+    result["cart_empty"] = len(remaining_ids) == 0
+    logger.info(
+        "[MCP-SERVER] remove_from_order user=%s order_id=%d removed=%s not_in_cart=%s new_total=%.2f",
+        user_id, updated.order_id, removed_names, result["not_in_cart"], updated.total,
+    )
+    return result
 
 
 @mcp.tool()

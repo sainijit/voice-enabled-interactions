@@ -15,7 +15,7 @@ from uuid import uuid4
 import numpy as np
 import sounddevice as sd
 
-from kiosk_core import config
+from kiosk_core import config, conversation_recorder
 from kiosk_core.agent_client import AgentClient
 from kiosk_core.analyzer_client import AnalyzerClient
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest
@@ -106,6 +106,12 @@ class BaseAudioSession:
         # Segments from any different label are unconditionally dropped — the
         # semantic fallback is only used before the primary is established.
         self._primary_speaker_id: str | None = None
+        # Number of chunks in this turn that carried real transcribed speech
+        # which the speaker filter then rejected. Distinguishes "nobody said
+        # anything" from "somebody spoke and we discarded all of it", so
+        # _finalize_run can ask the customer to repeat instead of replying with
+        # a generic greeting that hides the rejection.
+        self._rejected_speech_chunks: int = 0
         # Analyzer's own session_id — passed on every chunk so per-session
         # state (e.g. pyannote enrolled speaker embedding) persists across
         # the many chunked HTTP requests made in this kiosk session.
@@ -281,7 +287,19 @@ class BaseAudioSession:
                     self.error = str(exc)
                 logger.exception("RAG query failed for session %s", self.session_id)
         elif final_status == "completed":
-            self._synthesize_response("How can I help you?")
+            # An empty transcript has two very different causes. If speech was
+            # captured but the speaker filter rejected every segment, telling
+            # the customer "How can I help you?" hides the fact that they were
+            # ignored and gives them no reason to retry.
+            if self._rejected_speech_chunks:
+                logger.info(
+                    "Session %s: %d chunk(s) of speech were rejected by the speaker "
+                    "filter — asking the customer to repeat instead of greeting",
+                    self.session_id, self._rejected_speech_chunks,
+                )
+                self._synthesize_response(config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT)
+            else:
+                self._synthesize_response(config.DEFAULT_NO_SPEECH_PROMPT)
 
         with self._lock:
             if final_status == "completed" and self.end_reason == "stopped_by_api":
@@ -289,6 +307,18 @@ class BaseAudioSession:
             self.status = final_status
             self.completed_at = datetime.now(UTC)
             self.end_reason = end_reason
+
+        # Record the completed turn for offline analysis. Controlled entirely
+        # by config.CONVERSATION_LOGGING_ENABLED -- a no-op (no file I/O) when
+        # the flag is off, and never raises when it's on (see
+        # conversation_recorder.record_turn).
+        conversation_recorder.record_turn(
+            conversation_id=self.agent_session_id,
+            turn_id=self.session_id,
+            user_text=transcript,
+            assistant_text="".join(str(part) for part in self.response_parts),
+            end_reason=end_reason,
+        )
 
         logger.info(
             "Session %s ended with reason=%s transcript=%s",
@@ -341,6 +371,7 @@ class BaseAudioSession:
         _first_token_seen = False
         _tool_calls: list[str] = []
         _llm_ms: float | None = None
+        _llm_ttft_ms: float | None = None
         _llm_calls: int = 0
         _retrieval_ms: float | None = None
         # t_agent_start set here — generator body (HTTP call) runs on first iteration
@@ -353,6 +384,7 @@ class BaseAudioSession:
                 if isinstance(token, dict) and "_tool_calls" in token:
                     _tool_calls = token["_tool_calls"]
                     _llm_ms = token.get("_llm_ms")
+                    _llm_ttft_ms = token.get("_llm_ttft_ms")
                     _llm_calls = token.get("_llm_calls", 0)
                     _retrieval_ms = token.get("_retrieval_ms")
                     continue
@@ -392,7 +424,9 @@ class BaseAudioSession:
             print(flush=True)
 
         # ── Record pipeline turn trace ──────────────────────────────────────
-        self._record_turn_trace(_tool_calls, _llm_ms, _llm_calls, _retrieval_ms)
+        self._record_turn_trace(
+            _tool_calls, _llm_ms, _llm_calls, _retrieval_ms, _llm_ttft_ms
+        )
 
     def _record_turn_trace(
         self,
@@ -400,6 +434,7 @@ class BaseAudioSession:
         llm_ms: float | None = None,
         llm_calls: int = 0,
         retrieval_ms: float | None = None,
+        llm_ttft_ms: float | None = None,
     ) -> None:
         """Build and persist a TurnTrace for the completed voice turn."""
         t0 = self._t_turn_start
@@ -454,7 +489,12 @@ class BaseAudioSession:
                     invoked=retrieval_invoked,
                     ms=retrieval_ms,
                 ),
-                llm=LlmSpan(ms=llm_ms, calls=llm_calls, device="GPU"),
+                llm=LlmSpan(
+                    ms=llm_ms,
+                    ttft_ms=llm_ttft_ms,
+                    calls=llm_calls,
+                    device="GPU",
+                ),
             ),
             tts=TtsSpan(
                 ms=tts_ms,
@@ -727,6 +767,30 @@ class BaseAudioSession:
         finally:
             Path(temp_path).unlink(missing_ok=True)
 
+    def _note_rejected_speech(self, segments: list[dict], reason: str) -> None:
+        """Record that transcribed speech was discarded by the speaker filter.
+
+        Only counts chunks that actually carried words. A chunk of pure
+        silence yields empty segment text and must stay classified as "no
+        speech", otherwise every silent moment would trigger the "please
+        repeat" prompt.
+
+        Args:
+            segments: The diarized segments that were rejected.
+            reason: Short tag naming which filter rule rejected them.
+        """
+        spoken = " ".join(s.get("text", "") for s in segments).strip()
+        if not spoken:
+            return
+        # Mirrors the defensive getattr used for _primary_speaker_id: the
+        # filter is exercised directly by unit tests against bare instances.
+        self._rejected_speech_chunks = getattr(self, "_rejected_speech_chunks", 0) + 1
+        logger.info(
+            "[SPEAKER-FILTER] session=%s | rejected speech recorded (%s) "
+            "| rejected_chunks=%d | text=%r",
+            self.session_id, reason, self._rejected_speech_chunks, spoken[:120],
+        )
+
     def _filter_target_speaker(self, segments: list[dict]) -> str:
         """Filter diarized segments to keep only the primary customer's speech.
 
@@ -775,6 +839,7 @@ class BaseAudioSession:
                         self.session_id, len(segments),
                         " ".join(s.get("text", "") for s in segments).strip()[:120],
                     )
+                    self._note_rejected_speech(segments, "analyzer_non_primary")
                     return ""
             else:
                 # Also update / initialise the lock-on label from the first
@@ -872,6 +937,11 @@ class BaseAudioSession:
                     )
 
         final_text = " ".join(seg.get("text", "") for seg in kept_segments).strip()
+        if not final_text:
+            # Covers both remaining rejection routes: a known primary was
+            # silent while somebody else spoke, and the semantic fallback
+            # finding no domain match before a primary was established.
+            self._note_rejected_speech(discarded_segments, "no_primary_segment_kept")
         logger.info(
             "[SPEAKER-FILTER] session=%s | RESULT: kept=%d dropped=%d | final_text=%r",
             self.session_id,

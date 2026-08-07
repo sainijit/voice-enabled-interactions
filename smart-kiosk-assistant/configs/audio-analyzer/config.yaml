@@ -7,7 +7,8 @@ app:
 models:
   asr:
     provider: openai # openai | openvino | whispercpp
-    name: whisper-base  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
+    name: whisper-small  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
+                        # TEMP: benchmarking small vs base for noisy-demo accuracy — see todo whisper-small-benchmark
     device: CPU # CPU recommended; CPU only for whispercpp, CPU or GPU for openvino provider
     weight_format: null # OpenVINO: int8 | fp16 | null. whispercpp: null | q5 | q5_0 | q5_1 | q8 | q8_0 | int5 | int8
     temperature: 0.0
@@ -25,15 +26,22 @@ models:
     # whispercpp derives the same values from per-token plog and ptsum.
     # openvino genai pipelines do not expose these fields; filtering is skipped.
     #
-    # Values below are tuned for live microphone input (noisy environment).
+    # Values below were re-tuned alongside audio_preprocessing.denoise being
+    # enabled. With denoising active, background noise is far less likely to be
+    # mistaken for speech, so these thresholds were relaxed from the previous
+    # "live noisy microphone" preset toward openai-whisper's own defaults
+    # (no_speech_threshold=0.6, logprob_threshold=-1.0) — but not all the way,
+    # since some live-mic margin is still warranted at a kiosk. This reduces
+    # false-positive drops of short/quiet real speech; the stricter values
+    # were discarding legitimate short utterances ("yes", "two") as silence.
     # Lower no_speech_threshold → stricter: flags more segments as potential noise.
     # Higher logprob_threshold  → stricter: drops low-confidence transcriptions.
     # Higher min_duration_sec / min_words → harder for noise bursts to earn the
     #   "definitely speech, keep" safety net in _is_silent_segment().
-    no_speech_threshold: 0.3
-    logprob_threshold: -0.3
-    min_duration_sec: 0.5
-    min_words: 2
+    no_speech_threshold: 0.5
+    logprob_threshold: -0.6
+    min_duration_sec: 0.3
+    min_words: 1
 
     # openai-whisper transcribe() native param: skip generation over silent
     # regions longer than this many seconds.  Directly targets the
@@ -49,7 +57,9 @@ models:
 
     # Decoder controls — beam_size/best_of apply to openai and whispercpp.
     # threads is whisper.cpp specific.
-    beam_size: 1
+    # beam_size=3 enables real beam search (1 = greedy, i.e. a no-op), trading
+    # a little latency for better decoding on ambiguous audio.
+    beam_size: 3
     best_of: 1
     # Word-level timings. Required by diarization: when Whisper merges two
     # speakers into one segment, per-word times are the only way to split that
@@ -57,6 +67,23 @@ models:
     # Supported by the openai and whispercpp providers.
     word_timestamps: true
     threads: 0
+
+    # openai-whisper's own robustness mechanism: retry decoding at increasing
+    # temperature when the compression_ratio/logprob checks judge the previous
+    # attempt low-confidence, instead of committing to a single greedy decode.
+    # See components/asr/openai/whisper.py in edge-ai-libraries.
+    temperature_fallback: true
+    # Caps the retry ladder above (default openai-whisper ladder is 6 steps:
+    # 0.0, 0.2, 0.4, 0.6, 0.8, 1.0). Observed on real kiosk audio: a genuinely
+    # short/choppy utterance ran the full ladder and cost ~17.5s for a single
+    # turn (vs ~2.5s steady-state) while still producing a wrong transcript —
+    # the later, higher-temperature attempts sample more randomly and are not
+    # more likely to recover the right words on audio that's short/ambiguous
+    # by nature, they just cost more time. 2 = one retry beyond the first
+    # greedy attempt, bounding the worst case to roughly 2x normal latency.
+    # Raise back toward 6 only if you have evidence later retries actually
+    # fix transcripts for this kiosk's audio, not just cost more time.
+    temperature_fallback_max_retries: 2
 
   diarization: # Only applicable when models.asr.diarization is set to True
     provider: "huggingface"
@@ -104,15 +131,66 @@ models:
     # opening of the first utterance), so a longer window buys a much more
     # stable reference embedding without any real contamination risk.
     enrollment_window_seconds: 4.0
+    # ── Self-healing enrollment ─────────────────────────────────────────────
+    # The reference is cached for the whole conversation, so a weak enrollment
+    # (e.g. taken from a short opening utterance that fell well below
+    # enrollment_window_seconds) would otherwise reject the customer's own
+    # speech for the full TTL — every turn dropped, agent stuck on its generic
+    # greeting. After this many consecutive fully-rejected chunks the reference
+    # is judged unreliable, discarded, and re-derived from current audio.
+    # Keep low: at a kiosk the customer is nearly always the one speaking, so a
+    # genuine all-rejected streak is rare. 0 disables recovery.
+    max_consecutive_rejections: 2
+    # Exponential-moving-average weight folded into the reference on a
+    # confident match, so a reference enrolled from a couple of seconds tracks
+    # the speaker's drifting level/distance instead of staying frozen.
+    # 0 disables adaptation.
+    enrollment_adapt_rate: 0.15
+    # Required margin above voice_match_threshold before an observation is
+    # trusted for adaptation, so a borderline impostor cannot drag the
+    # reference away from the enrolled customer.
+    enrollment_adapt_margin: 0.10
 
 audio_preprocessing:
   chunk_duration_sec: 15
   silence_threshold: -35  # in dB
   silence_duration: 0.3   # minimum silence length in seconds
-  search_window_sec: 1    # how far to look for silence if no silence exactly at chunk boundary
+  # How far to look for a real silence gap when none falls exactly at the ideal
+  # chunk boundary. Widened 1s -> 2s so a hard cut (which can land mid-word,
+  # costing the ASR that word) is less likely when speech runs continuously
+  # through the 15s mark.
+  search_window_sec: 2
   chunk_output_path: chunks/
-  denoise: false          # set true for noisy mic/field audio (applies ffmpeg arnndn RNNoise filter)
-  denoise_model: ""       # path to .rnnn model file; leave empty to use ffmpeg built-in arnndn
+  denoise: true           # ffmpeg denoise applied before chunking/ASR. Reduces
+                          # room/background noise, which both improves ASR
+                          # accuracy directly and makes the silencedetect-based
+                          # chunk boundary above more reliable, because the
+                          # noise floor no longer masks real pauses.
+  # path to a .rnnn RNNoise model for the arnndn filter. ffmpeg's arnndn has
+  # NO built-in default model and fails to initialise without one, and no
+  # .rnnn model ships with the image — so when this is empty the denoise
+  # stage falls back to `afftdn` (ffmpeg's model-free FFT denoiser).
+  #
+  # Set to a real .rnnn file to opt into RNNoise, which is generally better
+  # than afftdn on speech because it was trained specifically to separate
+  # voice from noise rather than just flattening the spectrum.
+  #
+  # Using "leavened-quisling" from https://github.com/GregorR/rnnoise-models
+  # (public domain / no-copyright tools+models repo, MIT-licensed rnnoise-nu
+  # project) — trained for "voice in a noisy recording environment", which
+  # matches a kiosk mic picking up ambient demo-floor/crowd noise better than
+  # the other models in that repo tuned for quieter room tone (fans/AC).
+  # Mounted at models/rnnoise/leavened-quisling.rnnn in the models volume.
+  denoise_model: "models/rnnoise/leavened-quisling.rnnn"
+
+  # Per-chunk loudness normalization, applied after denoise and before ASR.
+  # dynaudnorm (not loudnorm/EBU R128) because each 15s chunk is processed
+  # independently with no shared analysis pass: dynaudnorm is single-pass and
+  # frame-local, designed for exactly this streaming case, whereas loudnorm's
+  # accurate mode needs a two-pass measurement over the whole file and would
+  # cause loudness jumps between independently-normalized chunks.
+  normalize: true
+  normalize_filter: dynaudnorm
 
 audio_util:
   max_size_mb: 200

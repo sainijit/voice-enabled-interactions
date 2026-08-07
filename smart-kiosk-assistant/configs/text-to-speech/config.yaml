@@ -19,6 +19,16 @@ models:
     # Inference device. Permitted values: CPU | GPU
     #   SpeechT5: CPU or GPU
     #   Qwen:     CPU or GPU
+    #
+    # Tried GPU to free CPU headroom for a bigger Whisper model during
+    # noisy-demo tuning — reverted immediately. Measured with dtype=int8 on
+    # this GPU: first call 281s(!), steady-state 8.7-8.8s per synthesis, vs
+    # 0.92-0.95s on CPU. The existing comment below ("GPU fp16 works great
+    # post-warmup") only covers fp16 — int8 on this iGPU is catastrophically
+    # slow (likely falling back to software/emulated int8 ops or fighting
+    # ovms-llm for GPU bandwidth), not the "int4 produces noise" issue that
+    # was already flagged. Do not move TTS to GPU with int8; if GPU is
+    # revisited, it must be re-benchmarked with dtype=fp16 first.
     device: CPU
     # Model precision. Permitted values: int8 | int4 | fp16 | fp32
     # NOTE: int4 on iGPU produces noise; GPU fp16 works great post-warmup

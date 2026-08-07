@@ -7,14 +7,18 @@ Reads metric files written by background OS-level collectors.
 import csv
 import glob
 import json
+import logging
 import math
 import os
 import platform
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -40,10 +44,41 @@ GPU_ENGINES = tuple(
     if e.strip()
 )
 
-# The qmassa JSON grows without bound (~100 MB after an hour) and is rewritten
-# continuously, so it must not be re-parsed on every poll.  Cache the derived
-# series and only re-read when the file actually changes.
-_GPU_CACHE: Dict[str, Any] = {"key": None, "series": []}
+# The qmassa JSON is rewritten in full on every qmassa update (~1.5 s), so the
+# derived series must be cached rather than recomputed per poll.
+#
+# The original cache keyed on (path, mtime, size) alone, which looked correct
+# but never hit in practice: qmassa rewrites the file continuously, so mtime
+# and size change between every single poll. The result was a full json.load()
+# of an ever-growing document on every request. Measured in production that
+# reached 2.4 GB (596 MB/hour, unbounded), which pinned the container at 112%
+# CPU / 4.2 GiB RSS and made every endpoint -- including ones that never touch
+# qmassa -- take 20-40 s behind it.
+#
+# Two independent guards now bound that cost, because the file is written by an
+# external tool this service does not control:
+#
+#   _GPU_MIN_REPARSE_SECONDS -- a wall-clock floor between parses. This is the
+#       guard that actually works, since it does not depend on the file
+#       appearing unchanged.
+#   _GPU_MAX_JSON_BYTES      -- a hard ceiling. Refusing to parse an absurdly
+#       large document is what prevents an OOM: json.load() needs roughly 6-8x
+#       the file size in RAM, so a multi-GB file can take the whole host down.
+#
+# collect_gpu.sh now recycles the file on a bounded window, so the ceiling
+# should never be reached; it is kept as a backstop for the case where that
+# script is not the one running (e.g. an older base image).
+_GPU_CACHE: Dict[str, Any] = {"key": None, "series": [], "parsed_at": 0.0}
+
+_GPU_MIN_REPARSE_SECONDS = float(os.getenv("METRICS_GPU_MIN_REPARSE_SECONDS", "5"))
+_GPU_MAX_JSON_BYTES = int(
+    float(os.getenv("METRICS_GPU_MAX_JSON_MB", "256")) * 1024 * 1024
+)
+
+# Only the newest points are ever plotted; keeping a bounded rolling window
+# means the series survives a qmassa restart (when the file is recreated empty)
+# instead of collapsing to whatever the fresh file contains.
+_GPU_MAX_POINTS = int(os.getenv("METRICS_GPU_MAX_POINTS", "300"))
 
 
 # ---------------------------------------------------------------------------
@@ -285,17 +320,44 @@ def build_gpu_series() -> List[List]:
     if _GPU_CACHE["key"] == cache_key:
         return _GPU_CACHE["series"]
 
+    # Wall-clock throttle. The (mtime, size) check above is nearly useless on
+    # its own because qmassa rewrites the file every ~1.5 s; this is the guard
+    # that actually bounds how often the document is parsed.
+    now_ts = time.monotonic()
+    if (now_ts - _GPU_CACHE["parsed_at"]) < _GPU_MIN_REPARSE_SECONDS:
+        return _GPU_CACHE["series"]
+
+    # Hard ceiling: never json.load() a document large enough to OOM the host.
+    # Serving a slightly stale series is always preferable to killing the box.
+    if stat.st_size > _GPU_MAX_JSON_BYTES:
+        _GPU_CACHE["parsed_at"] = now_ts
+        logger.warning(
+            "qmassa JSON %s is %.1f MB, above the %.1f MB parse ceiling; "
+            "serving the last good GPU series. Is collect_gpu.sh recycling it?",
+            latest_path,
+            stat.st_size / 1024 / 1024,
+            _GPU_MAX_JSON_BYTES / 1024 / 1024,
+        )
+        return _GPU_CACHE["series"]
+
     try:
         with open(latest_path) as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         # qmassa was mid-write. Serve the previous good series rather than
         # dropping the chart to "Waiting for data…".
+        _GPU_CACHE["parsed_at"] = now_ts
         return _GPU_CACHE["series"]
 
     states = data.get("states") or []
     if not isinstance(states, list) or not states:
+        _GPU_CACHE["parsed_at"] = now_ts
         return _GPU_CACHE["series"]
+
+    # Only the tail is ever plotted, so discard the rest before the per-state
+    # work below instead of building thousands of points to throw them away.
+    if len(states) > _GPU_MAX_POINTS:
+        states = states[-_GPU_MAX_POINTS:]
 
     ms_interval = 1500
     try:
@@ -341,6 +403,7 @@ def build_gpu_series() -> List[List]:
             continue
 
     if not samples:
+        _GPU_CACHE["parsed_at"] = now_ts
         return _GPU_CACHE["series"]
 
     now   = datetime.now()
@@ -351,8 +414,9 @@ def build_gpu_series() -> List[List]:
     ]
 
     _GPU_CACHE["key"] = cache_key
-    _GPU_CACHE["series"] = series
-    return series
+    _GPU_CACHE["series"] = series[-_GPU_MAX_POINTS:]
+    _GPU_CACHE["parsed_at"] = now_ts
+    return _GPU_CACHE["series"]
 
 
 def build_power_series() -> List[List]:

@@ -11,36 +11,224 @@ source:
   # Override at runtime: QUEUE_SERVICE__SOURCE__RTSP_URL=rtsp://rtsp-streamer:8554/<name>
   rtsp_url: "rtsp://rtsp-streamer:8554/queue"
   rtsp_transport: "tcp"
+  # rtspsrc jitter-buffer size in milliseconds. GStreamer defaults to 2000 ms,
+  # which adds a fixed two-second delay to the live feed. The source is a
+  # container-local RTSP server, so only a few frames of de-jitter are needed.
+  # Do not set this to 0: with no buffer at all, RTP packets that arrive even
+  # slightly out of order are discarded, which breaks reassembly of fragmented
+  # H.264 NAL units and makes the server drop the connection.
+  #
+  # With drop_on_latency disabled (see below) this value is a *buffer depth*,
+  # not a fixed added delay -- packets are forwarded as soon as they are in
+  # order, so the steady-state latency on a local link stays a few frames. The
+  # depth only has to be large enough to absorb the burst x264 emits on each
+  # IDR (one per second at keyint=30) without the buffer running dry.
+  # 250 ms was tuned back when late packets were being discarded; with the drop
+  # removed there is no reason to keep it that tight, and 700 ms is still far
+  # inside the 2-3 s end-to-end budget.
+  latency_ms: 700
+  # MUST stay false on a TCP transport.
+  #
+  # drop-on-latency makes rtpjitterbuffer *discard RTP packets* that miss the
+  # latency deadline. TCP cannot lose packets in transit, but it does stall
+  # (head-of-line blocking) whenever the encoder bursts a large IDR or the
+  # downstream pipeline backpressures the receive thread. Enabling this turned
+  # those harmless stalls into real, permanent NAL-unit loss: vah264dec then
+  # conceals the missing slices by copying macroblocks from the reference
+  # frame, which renders as blocky patches showing content from a *different*
+  # part/time of the picture, horizontal bands (x264 emits 16 slices per
+  # frame, so one lost slice = one band) and smearing that propagates through
+  # every P-frame until the next IDR.
+  #
+  # In other words: this setting placed the drop point in the *compressed*
+  # domain, where dropping one packet corrupts a whole GOP. Frames are now
+  # dropped in the *decoded* domain instead, by the leaky queues in the
+  # pipeline (see pipeline.py `_insert_queues`), where dropping a frame merely
+  # skips it and is visually invisible.
+  drop_on_latency: false
 
 model:
-  # OMZ detector used by queue-service.
+  # Detector used by queue-service.
   # The pipeline, tracker, ROI handling, queue counting, RTSP flow, API, and
-  # Docker setup stay the same; only the detector IR changes.
-  name: "person-detection-retail-0013"
-  provider: "omz"
-  ir_path: "./models/person-detection-retail-0013.xml"
+  # Docker setup stay the same; only the detector and its post-processing
+  # change.
+  #
+  # WHY YOLO26 REPLACED person-detection-retail-0013
+  # ------------------------------------------------
+  # retail-0013 could not separate people from server-room clutter on this
+  # camera. Measured on a single captured frame containing exactly ONE seated
+  # person:
+  #
+  #   retail-0013  threshold=0.1 -> 4 boxes   (racks/boxes counted as people)
+  #   retail-0013  threshold=0.3 -> 2 boxes   (still wrong)
+  #   retail-0013  threshold=0.5 -> 0 boxes   (loses the real person entirely)
+  #   YOLO26       threshold=0.5 -> 1 box     person @ 0.89, nothing else
+  #
+  # There is no threshold at which retail-0013 is correct: the real person
+  # scored ~0.33, the same range as the furniture. That is a model separability
+  # failure, not a tuning problem, and it is why the live queue count reported
+  # 2-3 with one person present. YOLO26 separates by a wide margin (0.86-0.89
+  # for the person vs 0.34 for the strongest false positive).
+  name: "yolo26n"
+  # The IR is committed under ./models, so nothing is downloaded at startup.
+  provider: "local"
+  ir_path: "./models/yolo26n.xml"
+  # Unused on the `decoder` path -- YoloDecoder does the post-processing, so
+  # no model-proc JSON is consulted. Left blank deliberately.
   proc_path: ""
-  class_label: "person"         # person-only detector; label matches the emitted class
-  class_id: 0                     # person class id for label fallback
+  # Detection post-processing mode:
+  #   gvadetect -> stock DLStreamer converter from proc_path (retail-0013,
+  #                and any YOLO whose converter is actually supported)
+  #   decoder   -> gvainference + src/yolo_decoder.py
+  #
+  # YOLO26 REQUIRES `decoder`. DLStreamer 2026.1.0 and 2026.2.0-rc1 only ship
+  # YOLO converters up to `yolo_v8`. Setting converter `yolo_v10`/`yolo_v11`
+  # in the model-proc is accepted WITHOUT ANY ERROR but decodes to zero
+  # detections, which presents exactly like an empty camera. Do not "simplify"
+  # this back to gvadetect without first confirming detections actually appear.
+  postproc: "decoder"
+  class_label: "person"           # region label attached by YoloDecoder
+  class_id: 0                     # COCO person class id
+  input_size: 640                 # YOLO26 square input; used for letterbox inversion
   device: "NPU"                 # inference device. CPU=always available; GPU requires /dev/dri mount
-  threshold: 0.5
+  # Keep decoded frames in GPU (VA) memory through gvadetect/gvatrack/
+  # gvawatermark instead of downloading them to system RAM for the CPU to
+  # colour-convert. decodebin already autoplugs vah264dec, which produces VA
+  # surfaces, so the old `videoconvert` was paying for a download + CPU convert
+  # on every single frame -- DLStreamer logged an explicit warning about it:
+  #   "System memory is being used for inference on device 'NPU'."
+  # Measured on this box, identical 22 s run of
+  # detect -> gvatrack -> gvawatermark -> BGRx:
+  #   videoconvert : 13.70 s user + 3.68 s sys = 17.37 s CPU
+  #   vapostproc   :  4.23 s user + 1.87 s sys =  6.09 s CPU   (~65% less)
+  # Accuracy is unchanged -- same model, device and threshold; this is purely
+  # a memory-transport change. The frame is still downloaded once at the end,
+  # because queue_counter.py draws its overlay with OpenCV and needs
+  # system-memory BGRx.
+  #   auto  -> enable when a /dev/dri render node exists and device != CPU
+  #   true  -> force on (still refuses if no render node, to avoid a crash loop)
+  #   false -> keep the original system-memory path
+  va_memory: "auto"
+  # YOLO26 separates people from clutter by a wide confidence margin, so this
+  # is now a real filter rather than the "pass everything down" setting that
+  # retail-0013 required.
+  #
+  # It is deliberately BELOW tracker.high_thresh: detections in
+  # [threshold, high_thresh) are still useful to BYTE's second association
+  # stage, which uses them to *sustain* an existing track through blur or
+  # partial occlusion without ever minting a new identity. Raising this to
+  # high_thresh would bring back the track-id churn described under `tracker:`.
+  threshold: 0.35
   inference_interval: 1
 
 tracker:
-  # DLStreamer gvatrack tracking algorithm.
+  # DLStreamer gvatrack tracking algorithm. Its persistent object id is no
+  # longer used for identity (short-term-imageless has no appearance model
+  # and was the direct cause of the id churn below) -- queue_counter.py now
+  # runs its own tracker (src/tracker.py) on the raw per-frame detections.
+  # The element is left in the pipeline unmodified; only its id is ignored.
   tracking_type: "short-term-imageless"
+  # BYTE two-stage association thresholds. Detections >= high_thresh can
+  # both confirm existing tracks and spawn new ones. Detections in
+  # [low_thresh, high_thresh) can only sustain an existing track -- a
+  # single blurry/marginal frame must never mint a new identity.
+  #
+  # Retuned for YOLO26. With retail-0013 a genuine person scored ~0.33, i.e.
+  # BELOW this high_thresh, so real people were effectively only ever
+  # sustained, never spawned, and the values were compensating for a detector
+  # that could not separate signal from clutter. YOLO26 scores people at
+  # 0.86-0.89, comfortably above 0.6, so the two bands now mean what they say.
+  high_thresh: 0.6
+  # Must not be lower than model.threshold -- the detector never emits boxes
+  # below that, so a smaller value here would simply be dead configuration.
+  low_thresh: 0.35
+  # Minimum IoU between a track's predicted position and a candidate
+  # detection for the (Hungarian) assignment to accept the pair. This
+  # replaces the old post-hoc `duplicate_iou_threshold` dedup pass: because
+  # assignment is now a single global one-to-one solve, two detections can
+  # never both be matched to the same track, so duplicates are prevented at
+  # association time instead of merged afterwards.
+  iou_threshold: 0.3
+  # A track must accumulate this many *matched* frames (high or low score)
+  # before it counts as a real person. Replaces `min_track_frames`; same
+  # rationale -- discards the 1-2 frame ghost tracks that previously each
+  # over-counted a single customer.
+  min_hits: 3
+  # How long (seconds) a track keeps coasting on its Kalman prediction after
+  # its last matched detection, before eviction. Same rationale as the old
+  # `dwell_timeout_seconds`: bridges brief occlusion without inflating the
+  # count indefinitely. Converted to frames using `assumed_fps` below.
+  dwell_timeout_seconds: 0.7
+  # Used only to convert `dwell_timeout_seconds` into a frame count; the
+  # tracker itself has no wall-clock timer. Set to the pipeline's actual
+  # sustained FPS (see debug.fps_logging to measure it on your hardware).
+  assumed_fps: 15
+  # Furniture/fixture filter: the detector (person-detection-retail-0013)
+  # occasionally scores a fixed object with high confidence -- an office
+  # chair's mesh backrest, a fold in a hanging plastic strip curtain -- and
+  # the tracker confirms it exactly like a real customer, since nothing
+  # about its shape or confidence looks different. The one thing that
+  # reliably distinguishes them is that a real customer eventually moves and
+  # a chair/curtain never does, however long it is framed.
+  # A track is only classified as furniture once its centroid has stayed
+  # within `stationary_drift_max` (normalized 0..1 units, ~2% of frame) of
+  # a single anchor point for the *entire* `stationary_seconds` -- any
+  # motion past that drift replants the anchor and restarts the clock, so a
+  # customer standing still while waiting is never affected.
+  # 900s (15 min) was the original "far beyond any realistic QSR queue wait"
+  # value, but it also means a chair that gets moved into frame sits there
+  # counted as a customer for up to 15 minutes before being reclassified.
+  # 45s still comfortably exceeds how long a genuinely queueing customer
+  # stands within `stationary_drift_max` of one spot (people shift weight,
+  # check their phone, glance around) while reclassifying misdetected
+  # furniture far faster. Tune upward if real customers are ever seen
+  # flickering to "Static" during a slow queue.
+  # Set to 0 to disable this filter entirely.
+  stationary_seconds: 45
+  stationary_drift_max: 0.02
 
 roi:
-  # Normalized polygon points (0.0-1.0). Default covers the full frame.
+  # Normalized polygon points (0.0-1.0).
+  # The previous 0.30-0.70 band covered only the middle 40% of the frame and
+  # silently excluded real customers: in a 45s live capture the two strongest,
+  # longest-lived tracks (conf 0.72 over 323 frames, and conf 0.64 over 419
+  # frames) both sat at x<0.30 and were never counted. The band now spans
+  # nearly the full frame so anyone visible at the counter is counted; the
+  # small margin keeps partial bodies clipped at the very edge out of the count.
   point_mode: "centroid"        # foot | centroid
   polygon:
-    - [0.30, 0.00]
-    - [0.70, 0.00]
-    - [0.70, 1.00]
-    - [0.30, 1.00]
+    - [0.20, 0.00]
+    - [0.80, 0.00]
+    - [0.80, 1.00]
+    - [0.20, 1.00]
+  # Manual furniture/fixture exclude zones -- normalized polygons (same
+  # coordinate space as `polygon` above). A confirmed track whose point falls
+  # inside any of these is never counted (neither "inside" nor "nearby"),
+  # regardless of confidence or how long it has been tracked. Use this ONLY
+  # for a genuinely fixed, permanent camera installation where a known
+  # false-positive object's on-screen position never changes -- these
+  # coordinates are pixel-position-specific, so they do NOT travel with the
+  # rig to a new venue/camera angle and would silently exclude a real
+  # customer who happens to stand in the same normalized region there.
+  # Left empty by default; `tracker.stationary_seconds` below is the
+  # camera-angle-agnostic mechanism and should be preferred whenever the
+  # install location changes between deployments (e.g. demo rigs).
+  # Example:
+  #   exclude_zones:
+  #     - [[0.30, 0.40], [0.55, 0.40], [0.55, 0.85], [0.30, 0.85]]
+  exclude_zones: []
 
 counter:
-  dwell_timeout_seconds: 2.0
+  # Phase 1: track lifecycle (min_hits/dwell) and duplicate prevention moved
+  # to `tracker:` above, since they are now properties of the tracker itself
+  # rather than a post-hoc pass over its output. The moving-average
+  # smoothing window and hysteresis margin that used to live here are
+  # removed outright: they existed to paper over an unstable, biased raw
+  # count (`E[published] ~= N*p`, recall-biased, never corrected by
+  # averaging). With BYTE + NSA-Kalman + Hungarian assignment giving a
+  # correct per-frame track lifecycle, the raw per-frame count is already
+  # stable enough to publish directly -- smoothing it further would only
+  # re-introduce the ~1.5s of latency it used to cost for no accuracy gain.
   log_mode: "on_change"         # on_change | interval
   log_interval_seconds: 5.0
   # Queue Status thresholds: count <= medium_max => LOW, <= high_max => MEDIUM,
@@ -62,7 +250,35 @@ api:
   enabled: true
   port: 8090
   host: "0.0.0.0"
-  jpeg_quality: 80              # JPEG encoding quality for MJPEG stream (1-100)
+  # JPEG encoding quality for the MJPEG stream (1-100). 65 was chosen while
+  # chasing feed latency and is low enough to show visible blocking on faces
+  # and text. The camera upgrade left bandwidth headroom, so quality is raised
+  # back to a visually clean level.
+  jpeg_quality: 78
+  # Downscale frames to this height before JPEG encoding, preserving aspect
+  # ratio (0 = send at native resolution). Detection, tracking and the overlay
+  # still run on the full-resolution frame; only the browser stream shrinks.
+  # 1080p @ 30 fps is ~45 Mbps of MJPEG, which visibly lags the live feed.
+  # Measured on this camera: resolution drives the bitrate far more than the
+  # quality setting, so 810p @ q78 is both sharper than the old 720p @ q65 and
+  # still ~35 Mbps, leaving clear headroom under the ~45 Mbps that lagged.
+  #
+  stream_max_height: 810
+  # NOTE: do NOT try to move this resize into the GStreamer pipeline by
+  # pinning a width/height on the BGRx capsfilter. A scaling vapostproc drops
+  # the detection metadata (GstVideoRegionOfInterestMeta) that gvadetect
+  # attaches, so queue counting silently breaks -- and it breaks invisibly,
+  # because gvawatermark has already drawn its boxes into the pixels upstream,
+  # so the stream still LOOKS correct while the count sits at 0 forever.
+  # Verified live: 516 consecutive frames logged "detections=0" while the
+  # MJPEG stream showed bounding boxes. See _convert_to_bgrx() in pipeline.py.
+  # Cap the browser stream frame rate (0 = uncapped). The pipeline runs at
+  # 30 fps, which measured ~34 Mbps of MJPEG — fine on localhost but it
+  # stutters over any real network, which reads as "fragmented" video.
+  # Detection, tracking and the overlay still run on every frame; only the
+  # browser tile is throttled. 15 fps halves the bandwidth and is well above
+  # what queue monitoring needs.
+  stream_max_fps: 15
 
 logging:
   level: "INFO"

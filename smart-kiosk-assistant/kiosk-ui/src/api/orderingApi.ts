@@ -46,6 +46,26 @@ export async function fetchCurrentOrder(userId: string): Promise<Order | null> {
   }
 }
 
+/**
+ * Discard the user's open draft cart.
+ *
+ * Called once when the customer screen mounts so a new conversation always
+ * starts from an empty cart: the cart lives server-side in SQLite, so without
+ * this a page refresh would resurface the previous customer's abandoned items.
+ * Returns true when the backend acknowledged the reset.
+ */
+export async function clearCurrentOrder(userId: string): Promise<boolean> {
+  try {
+    const res = await fetch(endpoints.currentOrder(userId), {
+      method: 'DELETE',
+      signal: AbortSignal.timeout(4000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Fetch rule-based upsell suggestions for a cart's product IDs. */
 export async function fetchUpsell(productIds: string[]): Promise<UpsellSuggestion[]> {
   if (productIds.length === 0) return [];

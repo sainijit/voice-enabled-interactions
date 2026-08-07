@@ -1,5 +1,9 @@
 /**
- * PerformanceDashboard — always-visible right-side panel (35% of layout).
+ * PerformanceDashboard — always-visible right-side panel.
+ *
+ * Width is operator-adjustable at runtime: App.tsx places this in a grid
+ * column sized by a draggable divider (see hooks/useResizablePanel), so this
+ * component must stay fully fluid — never pin a width here.
  *
  * Tab 1 — PERFORMANCE (default):
  *   ┌─ AI Inference Pipeline ─────────────────────┐

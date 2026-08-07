@@ -37,6 +37,48 @@ def test_make_mcp_callable_invokes_mcp_tool(monkeypatch) -> None:
     assert fn.__schema__["name"] == "update_order"
 
 
+def test_make_mcp_callable_infers_list_type_for_optional_anyof_items(monkeypatch) -> None:
+    """Regression test for a real bug: an optional ``items`` parameter (as on
+    ``remove_from_order``) is emitted by FastMCP as ``anyOf: [array, null]``
+    with no top-level ``"type"``. The naive lookup fell through to ``str``,
+    ADK told the model ``items`` was a string, and the model then sent a
+    JSON-encoded or comma-joined string that kiosk-core's Pydantic validation
+    rejected outright — silently breaking every multi-item removal.
+    """
+    fake_call_tool = AsyncMock(return_value={"status": "success", "result": "removed"})
+    monkeypatch.setattr(ordering_agent, "call_tool", fake_call_tool)
+    mcp_tool = MCPTool(
+        name="remove_from_order",
+        server="core",
+        description="Remove items",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string", "default": "anonymous"},
+                "items": {
+                    "anyOf": [
+                        {"type": "array", "items": {"type": "object"}},
+                        {"type": "null"},
+                    ],
+                    "default": None,
+                },
+            },
+            "required": [],
+        },
+    )
+
+    fn = OrderingAgent._make_mcp_callable("remove_from_order", mcp_tool)
+
+    assert fn.__annotations__["items"] is list
+    assert fn.__annotations__["user_id"] is str
+
+    _run(fn(user_id="anonymous", items=[{"product_id": "coke", "quantity": 1}]))
+    fake_call_tool.assert_awaited_once_with(
+        "remove_from_order",
+        {"user_id": "anonymous", "items": [{"product_id": "coke", "quantity": 1}]},
+    )
+
+
 @pytest.mark.parametrize(
     ("message", "expected_tools"),
     [

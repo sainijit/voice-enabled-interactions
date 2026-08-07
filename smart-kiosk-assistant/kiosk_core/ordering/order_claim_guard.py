@@ -50,9 +50,36 @@ _ADDED_PATTERNS = (
     re.compile(r"\badded\s+(?:the|a|an)\b.{0,60}?\bto\s+your\s+order\b", re.IGNORECASE),
 )
 
+# Tool whose invocation legitimises an "I've removed X" claim. Only
+# invocation, not success, is checked here — this guard runs with just the
+# tool *names*, no results. rag-service's ``agentic/removal_guard.py`` is the
+# tool-result-aware guard that catches a call that ran but matched nothing.
+_REMOVAL_TOOLS = frozenset({"remove_from_order"})
+
+# Claims that an item was taken out of the cart.
+_REMOVED_PATTERNS = (
+    re.compile(r"\bI(?:'ve| have)\s+removed\b", re.IGNORECASE),
+    re.compile(r"\b(?:has|have)\s+been\s+removed\b", re.IGNORECASE),
+    re.compile(r"\bremoved\s+(?:the|a|an|\d+)\b.{0,60}?\bfrom\s+your\s+(?:order|cart)\b", re.IGNORECASE),
+    re.compile(r"\btaken\s+(?:the|a|an|\d+)\b.{0,60}?\boff\s+your\s+(?:order|cart)\b", re.IGNORECASE),
+)
+
 # Claims that the order was placed/confirmed.
+#
+# The gap between "order" and the confirmation verb must tolerate an
+# intervening item description: a real reply says "Your order for 1 Classic
+# Chicken Burger is confirmed", not "Your order is confirmed" — the item name
+# sits between the noun and the verb. Requiring them adjacent (the previous
+# pattern) never matched real replies, so this backstop guard silently never
+# fired. Found by replaying a real conversation and diffing the spoken reply
+# against the actual tool result, which showed the order still in "draft"
+# both times the reply said "confirmed".
 _CONFIRMED_PATTERNS = (
-    re.compile(r"\byour\s+order\s+(?:is|has\s+been)\s+(?:confirmed|placed)\b", re.IGNORECASE),
+    re.compile(
+        r"\border\b[^.!?]{0,80}?\b(?:is|has\s+been|was)\b[^.!?]{0,15}?"
+        r"\b(?:now\s+)?(?:confirmed|placed)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\border\s+(?:is|has\s+been)\s+successfully\s+(?:placed|confirmed)\b", re.IGNORECASE),
     re.compile(r"\bOrder\s+ID\s+is\b", re.IGNORECASE),
 )
@@ -64,6 +91,11 @@ _PLACEHOLDER_ORDER_ID = re.compile(r"\bORD-X+\b", re.IGNORECASE)
 
 _ADDED_REPLACEMENT = (
     "Sorry — I wasn't able to add that to your order just now. "
+    "Could you tell me the item name again?"
+)
+
+_REMOVED_REPLACEMENT = (
+    "Sorry — I wasn't able to remove that from your order just now. "
     "Could you tell me the item name again?"
 )
 
@@ -98,6 +130,7 @@ def validate_reply(reply: str, tool_calls: list[str] | None) -> tuple[str, bool]
 
     claims_confirmed = _matches_any(reply, _CONFIRMED_PATTERNS)
     claims_added = _matches_any(reply, _ADDED_PATTERNS)
+    claims_removed = _matches_any(reply, _REMOVED_PATTERNS)
 
     # A confirmation claim is the most damaging: the customer walks away
     # believing food is coming. Check it first and replace the whole reply,
@@ -117,6 +150,14 @@ def validate_reply(reply: str, tool_calls: list[str] | None) -> tuple[str, bool]
             sorted(invoked), reply[:160],
         )
         return _ADDED_REPLACEMENT, True
+
+    if claims_removed and not (invoked & _REMOVAL_TOOLS):
+        logger.error(
+            "[ORDER-GUARD] Reply claimed an item was removed but remove_from_order was "
+            "not invoked this turn (tools=%s). Replacing reply: %r",
+            sorted(invoked), reply[:160],
+        )
+        return _REMOVED_REPLACEMENT, True
 
     # Strip the prompt's placeholder order id even on a legitimate confirmation.
     if _PLACEHOLDER_ORDER_ID.search(reply):

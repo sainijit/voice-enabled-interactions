@@ -30,6 +30,23 @@ class OrderItemIn(BaseModel):
     quantity: int = Field(default=1, ge=1)
 
 
+class RemoveOrderItem(BaseModel):
+    """A cart line the customer wants taken off their order.
+
+    Distinct from :class:`OrderItemIn` because removal has an extra state that
+    addition does not: "remove all of it". ``OrderItemIn.quantity`` is
+    constrained to ``>= 1``, so it cannot express that.
+
+    Attributes:
+        product_id: Resolved catalogue product id to remove.
+        quantity: Units to remove, or ``None`` to remove the entire line
+            regardless of how many units it holds.
+    """
+
+    product_id: str
+    quantity: int | None = Field(default=None, ge=1)
+
+
 class OrderItem(BaseModel):
     id: int
     order_id: int
