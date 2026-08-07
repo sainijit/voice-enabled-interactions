@@ -41,6 +41,14 @@ Scope is deliberately narrow to avoid false corrections:
 
 The module performs no I/O and makes no LLM round-trip, so it can be unit
 tested as pure functions over text.
+* The named phrase must not be *anaphoric*. This is the constraint whose
+  absence made the first version of this guard actively harmful. "Yes, one of
+  those" and "I'd like to try all of them" both match the add/order pattern,
+  but they point at products established earlier in the conversation, which
+  the model had already resolved correctly. Substituting the literal words
+  produced replies like "Sorry, we don't have of those on the menu" and threw
+  away a valid four-item order. When the customer is vague, the model's
+  context-resolved reference wins.
 """
 
 from __future__ import annotations
@@ -99,6 +107,50 @@ def _tokens(text: str) -> set[str]:
     return {w for w in words if w not in _STOPWORDS}
 
 
+# Anaphora and collective quantifiers. These point at something established
+# earlier in the conversation rather than naming a product, so the model's own
+# reference — which was resolved from that context — must win. Matched against
+# the whole extracted phrase, so "one of those" is rejected while a real
+# product containing a listed word (e.g. "Cold Coffee") is unaffected.
+_ANAPHORIC_RE = re.compile(
+    r"""^\s*(?:
+        (?:try\s+|have\s+|take\s+)?
+        (?:all|both|each|any|either|one|some|two|three|\d+)?\s*
+        (?:of\s+)?
+        (?:them|those|these|it|that|this|the\s+(?:same|other|first|second|last|one))
+        (?:\s+one)?
+        |everything|anything|something|the\s+usual|same\s+again|same|usual
+    )\s*$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+def _is_concrete_item(phrase: str) -> bool:
+    """Return True when ``phrase`` could plausibly identify a real product.
+
+    Anaphora ("one of those", "all of them") points at something established
+    earlier in the conversation, which the model already resolved into a
+    concrete product. Substituting the literal words destroys that resolution
+    and guarantees a spurious off-menu refusal, so those are rejected.
+
+    A bare *category* ("pizza") is deliberately **not** rejected: it is exactly
+    the original motivating bug ("go ahead and add a pizza" while fries are
+    pending), where letting the stale reference through would silently add the
+    wrong item. The category is allowed to flow into the tool call, where
+    ``mcp_server._resolve_items`` turns it into a "which pizza?" disambiguation
+    rather than an off-menu refusal.
+
+    Args:
+        phrase: The item phrase extracted from the customer's utterance.
+
+    Returns:
+        True when the phrase names something specific enough to act on,
+        False for anaphora and collective quantifiers.
+    """
+    if _ANAPHORIC_RE.match(phrase):
+        return False
+    return bool(_tokens(phrase))
+
+
 def extract_named_item(utterance: str) -> str | None:
     """Return the item the customer explicitly named this turn, if any.
 
@@ -108,8 +160,9 @@ def extract_named_item(utterance: str) -> str | None:
 
     Returns:
         The captured item phrase (untrimmed of internal words), or ``None``
-        when the utterance is a bare confirmation or does not match an
-        explicit "add/order X" pattern at all.
+        when the utterance is a bare confirmation, does not match an explicit
+        "add/order X" pattern, or names something too vague to identify a
+        product (anaphora or a bare category).
     """
     if not utterance or _CONFIRMATION_ONLY_RE.match(utterance):
         return None
@@ -118,6 +171,9 @@ def extract_named_item(utterance: str) -> str | None:
         return None
     item = match.group("item").strip()
     if not item or not _tokens(item):
+        return None
+    if not _is_concrete_item(item):
+        # Vague reference: the model's context-resolved product wins.
         return None
     return item
 
