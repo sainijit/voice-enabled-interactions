@@ -18,14 +18,6 @@ Environment variables:
     AGENT_RETRY_ON_MISSING_TOOL_CALL
                        Retry a turn once when the model promises a lookup but
                        calls no tool (default: true)
-    AGENT_NUM_ASSISTANT_TOKENS
-                       Speculative-decoding draft length forwarded to OVMS —
-                       how many tokens the draft model proposes per cycle
-                       before the target model verifies them in one batched
-                       pass (default: 5, OVMS's documented sweet spot). Only
-                       has an effect when ovms-llm is started with
-                       --draft_source_model. Set to 0 to disable per-request
-                       without touching the OVMS deployment.
 """
 
 from __future__ import annotations
@@ -76,11 +68,6 @@ MAX_TOKENS: int = int(os.getenv("AGENT_MAX_TOKENS", "320"))
 RETRY_ON_MISSING_TOOL_CALL: bool = os.getenv(
     "AGENT_RETRY_ON_MISSING_TOOL_CALL", "true"
 ).lower() in ("true", "1", "yes")
-
-# Speculative decoding draft length. Forwarded to OVMS only when > 0; ignored
-# server-side if ovms-llm was not started with --draft_source_model, so this
-# is safe to leave on even when the deployment doesn't have a draft model.
-NUM_ASSISTANT_TOKENS: int = int(os.getenv("AGENT_NUM_ASSISTANT_TOKENS", "5"))
 
 # Emit complete sentences to the caller as the model produces them, instead of
 # withholding the reply until the whole turn is post-processed.
