@@ -6,6 +6,10 @@
 
 PyYAML==6.0.2
 numpy==1.26.4
+# Hungarian (linear_sum_assignment) for the BYTE/Kalman tracker's global
+# one-to-one association -- see src/tracker.py. Prevents duplicate tracks
+# at assignment time instead of merging them after the fact.
+scipy==1.13.1
 opencv-python-headless
 fastapi==0.115.5
 uvicorn[standard]==0.32.1

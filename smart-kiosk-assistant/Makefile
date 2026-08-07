@@ -8,7 +8,7 @@
 .PHONY: help init-env setup-dirs setup-models download-sample-video check-env show-config \
 		build up down restart status logs \
 		logs-ovms logs-rag logs-core logs-ui logs-audio logs-tts logs-metrics \
-		test clean dev-build
+		test clean clean-metrics dev-build
 
 # =============================================================================
 # Load .env (silent if missing — check-env will warn)
@@ -168,7 +168,7 @@ init-env: ## Create .env from .env.example (backs up existing .env)
 
 setup-dirs: ## Create required runtime directories
 	@echo "$(BLUE)Creating required directories...$(NC)"
-	@mkdir -p models storage
+	@mkdir -p models storage conversations metrics
 	@echo "$(GREEN)✓ Directories ready$(NC)"
 
 setup-models: ## Download the OVMS LLM model (Qwen3-4B) via setup_models.sh
@@ -360,7 +360,7 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 # Up / Down
 # =============================================================================
 
-up: check-env setup-dirs ## Start all services
+up: check-env setup-dirs clean-metrics ## Start all services
 	@echo "$(BLUE)Starting Smart Kiosk Assistant...$(NC)"
 	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) up -d
 	@echo ""
@@ -377,6 +377,7 @@ up: check-env setup-dirs ## Start all services
 down: ## Stop all services
 	@echo "$(BLUE)Stopping Smart Kiosk Assistant...$(NC)"
 	$(COMPOSE_BASE) $(_IDENTITY_PROFILE) down
+	@$(MAKE) --no-print-directory clean-metrics
 	@echo "$(GREEN)✓ All services stopped$(NC)"
 
 restart: down up ## Stop then restart all services
@@ -481,5 +482,35 @@ dev-build: ## Rebuild and restart a single service: make dev-build SVC=rag-servi
 clean: ## Stop containers and remove named volumes
 	@echo "$(BLUE)Stopping services and removing volumes...$(NC)"
 	$(COMPOSE_BASE) down -v
+	@$(MAKE) --no-print-directory clean-metrics
 	@echo "$(GREEN)✓ Containers stopped and volumes removed$(NC)"
 	@echo "  Note: models/ directory is preserved. Delete it manually to free ~4 GB."
+
+clean-metrics: ## Delete collected OS metrics dumps (metrics/)
+	@# The OS-level collectors write into ./metrics (bind-mounted to
+	@# /tmp/results). qmassa in particular accumulates a single JSON that grows
+	@# without bound -- measured at ~596 MB/hour, 2.4 GB after four hours -- and
+	@# nothing removed it between runs, so it accrued across the machine's whole
+	@# lifetime rather than a single session.
+	@#
+	@# Docker creates the bind-mount directory root-owned, so a plain host-side
+	@# `rm` gets EACCES. Deleting a file needs write permission on its *parent*
+	@# directory, not on the file, so the fallback empties the directory from
+	@# inside a root container and the host then recreates it owned by the
+	@# invoking user -- which is what stops the permission problem recurring.
+	@if [ -d metrics ]; then \
+		sz=$$(du -sh metrics 2>/dev/null | cut -f1); \
+		if ! rm -rf metrics 2>/dev/null; then \
+			echo "  metrics/ is root-owned; clearing it via a container..."; \
+			$(COMPOSE_BASE) run --rm --no-deps --user root --entrypoint sh \
+				metrics-collector -c 'rm -rf /tmp/results/* /tmp/results/.[!.]*' \
+				>/dev/null 2>&1 || true; \
+			rm -rf metrics 2>/dev/null || true; \
+		fi; \
+		if [ -d metrics ]; then \
+			echo "$(YELLOW)⚠ Could not fully remove metrics/ (needs root: sudo rm -rf metrics)$(NC)"; \
+		else \
+			echo "$(GREEN)✓ Cleared metrics/ (freed $$sz)$(NC)"; \
+		fi; \
+	fi
+	@mkdir -p metrics

@@ -3,12 +3,10 @@ import { useCallback, useState } from 'react';
 import MenuPanel from '../Order/MenuPanel';
 import OrderPanel from '../Order/OrderPanel';
 import {
-  QUEUE_COUNT_URL,
-  QUEUE_POLL_MS,
   QUEUE_STATUS_ICON as STATUS_ICON,
   QUEUE_STATUS_STYLE as STATUS_STYLE,
   QUEUE_STREAM_URL,
-  useQueueCount,
+  useQueueStream,
   type QueueInfo,
 } from '../../hooks/useQueue';
 
@@ -44,7 +42,7 @@ export function QsrPanel({ orderActive }: QsrPanelProps) {
     setQueueInfo(info);
   }, []);
 
-  useQueueCount(onQueueData, QUEUE_COUNT_URL, QUEUE_POLL_MS);
+  useQueueStream(onQueueData);
 
   const status  = queueInfo?.status ?? 'unknown';
   const isPeak  = status === 'MEDIUM' || status === 'HIGH';

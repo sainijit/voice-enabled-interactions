@@ -7,6 +7,10 @@ __pycache__/
 # Generated TTS audio output — runtime artefacts
 generated_audio/
 
+# Recorded conversation transcripts (offline analysis; opt-in via
+# KIOSK_CORE_CONVERSATION_LOGGING_ENABLED) — runtime artefacts, not source.
+conversations/
+
 # Hugging Face model cache
 .cache/
 

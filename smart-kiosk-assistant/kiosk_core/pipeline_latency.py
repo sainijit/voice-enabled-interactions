@@ -32,6 +32,7 @@ class RetrievalSpan:
 @dataclass
 class LlmSpan:
     ms: float | None = None        # total cumulative LLM time this turn
+    ttft_ms: float | None = None   # cumulative prefill; ms - ttft_ms = decode
     calls: int = 0
     device: str = "GPU"
 

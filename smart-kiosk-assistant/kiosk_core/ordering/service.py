@@ -17,6 +17,7 @@ from kiosk_core.ordering.models import (
     Order,
     OrderItemIn,
     Product,
+    RemoveOrderItem,
     UpsellRequest,
     UpsellSuggestion,
 )
@@ -39,6 +40,18 @@ def _normalize(text: str) -> str:
     burger") against catalogue product ids and names.
     """
     return _NON_ALNUM.sub(" ", (text or "").lower()).strip()
+
+
+def _is_veg(product_id: str) -> bool:
+    """True if ``product_id`` follows the catalogue's ``-VEG-`` naming convention.
+
+    ``products.yaml`` has no dedicated dietary field; every id instead embeds
+    ``VEG`` or ``NV`` (e.g. ``BURGER-VEG-001`` / ``BURGER-NV-001``). This reads
+    that existing convention rather than adding a schema migration, since the
+    only current need is filtering "did you mean" suggestions for a customer
+    who has stated a vegetarian/vegan preference.
+    """
+    return "-VEG-" in (product_id or "").upper()
 
 
 class OrderingService:
@@ -125,18 +138,91 @@ class OrderingService:
 
         return None
 
-    async def suggest_products(self, ref: str, n: int = 5) -> list[Product]:
+    async def resolve_cart_item(self, ref: str, cart_product_ids: list[str]) -> str | None:
+        """Resolve a spoken reference against the products already in a cart.
+
+        ``resolve_product`` searches the whole catalogue, which is wrong for
+        removals: a customer saying "remove the burger" means the burger they
+        ordered, and a catalogue-wide match could land on a different burger
+        that was never in the cart. This restricts the same matching strategy
+        to the cart's own products, so a removal only ever targets something
+        the customer actually has.
+
+        Args:
+            ref: Free-form product reference from the customer's utterance.
+            cart_product_ids: Product ids currently in the cart.
+
+        Returns:
+            The matching cart ``product_id``, or None if no confident match.
+        """
+        if not ref or not cart_product_ids:
+            return None
+
+        async with get_db() as db:
+            repo = SqliteProductRepository(db)
+            products = [p for p in await repo.list_all() if p.product_id in set(cart_product_ids)]
+        if not products:
+            return None
+
+        nref = _normalize(ref)
+        if not nref:
+            return None
+
+        for p in products:
+            if _normalize(p.product_id) == nref or _normalize(p.name) == nref:
+                return p.product_id
+
+        contains = [p for p in products if nref in _normalize(p.name)]
+        if len(contains) == 1:
+            return contains[0].product_id
+
+        name_map = {_normalize(p.name): p for p in products}
+        close = difflib.get_close_matches(nref, list(name_map), n=1, cutoff=0.6)
+        if close:
+            return name_map[close[0]].product_id
+
+        qtokens = set(nref.split())
+        # Either direction is a hit: "burger" ⊂ "Aloo Tikki Burger" and
+        # "aloo tikki burger deluxe" ⊃ "Aloo Tikki Burger".
+        token_hits = [
+            p for p in products
+            if qtokens and (
+                qtokens.issubset(set(_normalize(p.name).split()))
+                or set(_normalize(p.name).split()).issubset(qtokens)
+            )
+        ]
+        if len(token_hits) == 1:
+            return token_hits[0].product_id
+
+        return None
+
+    async def suggest_products(
+        self, ref: str, n: int = 5, dietary: str | None = None
+    ) -> list[Product]:
         """Return the ``n`` catalogue products whose names are closest to ``ref``.
 
         Used to build a grounded "did you mean" list when resolve_product fails,
         so the agent can offer real options instead of inventing items.
+
+        Args:
+            dietary: ``"vegetarian"`` or ``"vegan"`` restricts the ranked pool
+                to veg items first, so an ambiguous reference from a customer
+                who has stated a veg preference (e.g. "burger") offers only
+                veg alternatives instead of a mix. If restricting would leave
+                nothing to suggest, falls back to the full catalogue rather
+                than returning an empty list.
         """
         async with get_db() as db:
             repo = SqliteProductRepository(db)
             products = await repo.list_all()
+        pool = products
+        if dietary in ("vegetarian", "vegan"):
+            veg_only = [p for p in products if _is_veg(p.product_id)]
+            if veg_only:
+                pool = veg_only
         nref = _normalize(ref)
         ranked = sorted(
-            products,
+            pool,
             key=lambda p: difflib.SequenceMatcher(None, nref, _normalize(p.name)).ratio(),
             reverse=True,
         )
@@ -229,6 +315,54 @@ class OrderingService:
         logger.info("[SERVICE] Updated order_id=%d new_total=%.2f", order_id, total)
         updated = await self.get_order(order_id)
         return updated  # type: ignore[return-value]
+
+    async def remove_order_items(
+        self, order_id: int, items: list[RemoveOrderItem]
+    ) -> tuple[Order, list[str]]:
+        """Remove items from a draft order.
+
+        Args:
+            order_id: Target draft order.
+            items: Products to remove. A ``quantity`` of ``None`` means
+                "remove the whole line" rather than decrement.
+
+        Returns:
+            ``(updated_order, not_found)`` where ``not_found`` lists the
+            product ids that were not in the cart. A partially-satisfiable
+            request still succeeds for the items that were present — the
+            caller reports the remainder to the customer.
+
+        Raises:
+            ValueError: If the order does not exist or is no longer a draft.
+        """
+        not_found: list[str] = []
+        async with get_db() as db:
+            order_repo = SqliteOrderRepository(db)
+
+            order = await order_repo.get(order_id)
+            if order is None:
+                raise ValueError(f"Order not found: {order_id}")
+            if order.status != "draft":
+                raise ValueError(
+                    f"Order {order_id} is already {order.status} and cannot be modified"
+                )
+
+            for item_in in items:
+                removed = await order_repo.remove_item(
+                    order_id, item_in.product_id, item_in.quantity
+                )
+                if removed == 0:
+                    not_found.append(item_in.product_id)
+
+            total = await order_repo.update_total(order_id)
+            await db.commit()
+
+        logger.info(
+            "[SERVICE] Removed %d item(s) from order_id=%d new_total=%.2f not_found=%s",
+            len(items) - len(not_found), order_id, total, not_found,
+        )
+        updated = await self.get_order(order_id)
+        return updated, not_found  # type: ignore[return-value]
 
     async def clear_draft_carts(self, user_id: str) -> int:
         """Delete any stale (never-confirmed) draft orders for a user.

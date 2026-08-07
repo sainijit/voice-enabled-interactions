@@ -101,6 +101,7 @@ class AgentClient:
         reply = data.get("reply", "")
         tool_calls = data.get("tool_calls", [])
         llm_ms = data.get("llm_ms")
+        llm_ttft_ms = data.get("llm_ttft_ms")
         llm_calls = data.get("llm_calls", 0)
         retrieval_ms = data.get("retrieval_ms")
 
@@ -134,6 +135,7 @@ class AgentClient:
         yield {
             "_tool_calls": tool_calls,
             "_llm_ms": llm_ms,
+            "_llm_ttft_ms": llm_ttft_ms,
             "_llm_calls": llm_calls,
             "_retrieval_ms": retrieval_ms,
         }
@@ -222,6 +224,7 @@ class AgentClient:
         yield {
             "_tool_calls": tool_calls,
             "_llm_ms": final.get("llm_ms"),
+            "_llm_ttft_ms": final.get("llm_ttft_ms"),
             "_llm_calls": final.get("llm_calls", 0),
             "_retrieval_ms": final.get("retrieval_ms"),
         }

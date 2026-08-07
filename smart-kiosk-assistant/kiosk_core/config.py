@@ -104,6 +104,24 @@ DEFAULT_SEMANTIC_FALLBACK_THRESHOLD = float(os.getenv("KIOSK_CORE_SEMANTIC_FALLB
 # mistuned and starts rejecting the real customer.
 DEFAULT_SPEAKER_STRICT_DROP = os.getenv("KIOSK_CORE_SPEAKER_STRICT_DROP", "true").lower() not in ("false", "0", "no")
 
+# Spoken replies used when a turn produces no usable transcript. The two cases
+# are NOT interchangeable and must never share a message:
+#   * NO_SPEECH   — the microphone captured nothing (true silence). Prompting
+#                   the customer to order is the right response.
+#   * UNRECOGNIZED— speech WAS captured but every segment was rejected by the
+#                   speaker filter (analyzer marked it non-primary, or it came
+#                   from a bystander). Replying with the generic greeting here
+#                   is actively misleading: the customer spoke, was ignored,
+#                   and is given no hint that they need to retry.
+DEFAULT_NO_SPEECH_PROMPT = os.getenv(
+    "KIOSK_CORE_NO_SPEECH_PROMPT",
+    "How can I help you?",
+)
+DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT = os.getenv(
+    "KIOSK_CORE_UNRECOGNIZED_SPEAKER_PROMPT",
+    "Sorry, I couldn't clearly recognise your voice. Could you please repeat that?",
+)
+
 # ── Ordering & Agent feature ─────────────────────────────────────────────────
 # Set KIOSK_CORE_ORDERING_ENABLED=false to disable the ordering/agent feature
 # and keep the legacy RAG-only Q&A flow.
@@ -185,4 +203,23 @@ QUEUE_SERVICE_ENABLED = os.getenv("KIOSK_CORE_QUEUE_SERVICE_ENABLED", "true").lo
 QUEUE_SERVICE_URL = os.getenv(
     "KIOSK_CORE_QUEUE_SERVICE_URL",
     "http://127.0.0.1:8090",
+)
+
+# ---------------------------------------------------------------------------
+# Conversation recording (offline analysis)
+# ---------------------------------------------------------------------------
+# Single master switch: when false (default), kiosk_core.conversation_recorder
+# does no file I/O at all -- every call is a no-op. When true, every completed
+# voice turn (user transcript + assistant reply) is appended as one JSON line
+# to <CONVERSATION_LOG_DIR>/<conversation_id>.jsonl, so each full multi-turn
+# conversation lives in its own file for later analysis.
+CONVERSATION_LOGGING_ENABLED = os.getenv(
+    "KIOSK_CORE_CONVERSATION_LOGGING_ENABLED", "false"
+).lower() not in ("false", "0", "no")
+
+# Directory conversation transcripts are written to. Relative paths resolve
+# against the kiosk-core project root (same convention as KIOSK_DB_PATH).
+CONVERSATION_LOG_DIR = os.getenv(
+    "KIOSK_CORE_CONVERSATION_LOG_DIR",
+    "./conversations",
 )

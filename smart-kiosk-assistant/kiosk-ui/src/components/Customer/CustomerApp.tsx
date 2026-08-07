@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import useMicDevices from '../../hooks/useMicDevices';
 import { useVoiceSession } from '../../hooks/useVoiceSession';
-import { useQueueCount, type QueueInfo } from '../../hooks/useQueue';
-import { fetchMenu } from '../../api/orderingApi';
+import { useQueueStream, type QueueInfo } from '../../hooks/useQueue';
+import { fetchMenu, clearCurrentOrder } from '../../api/orderingApi';
 import { groupByCategory } from '../../menu/categories';
+import { tuning } from '../../constants';
 import type { Product } from '../../types';
 
+import Header from '../Header/Header';
 import { QueueBar } from './QueueBar';
 import { CategoryRail } from './CategoryRail';
 import { MenuGrid } from './MenuGrid';
@@ -37,9 +39,26 @@ export function CustomerApp() {
   const [queueInfo, setQueueInfo] = useState<QueueInfo | null>(null);
   const [showFullMenu, setShowFullMenu] = useState(false);
   const onQueueData = useCallback((info: QueueInfo) => setQueueInfo(info), []);
-  useQueueCount(onQueueData);
+  useQueueStream(onQueueData);
 
   const [products, setProducts] = useState<Product[] | null>(null);
+
+  // A page load == a new customer / new conversation. The cart is server-side
+  // (SQLite), so it survives a refresh unless we explicitly discard it; without
+  // this the next customer would inherit the previous one's abandoned items.
+  // The cart panel is held back until the reset resolves so a stale cart is
+  // never rendered, even for one poll cycle.
+  const [cartReady, setCartReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void clearCurrentOrder(tuning.userId).finally(() => {
+      if (!cancelled) setCartReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void fetchMenu().then((data) => {
@@ -97,6 +116,7 @@ export function CustomerApp() {
 
   return (
     <div className="flex h-full flex-col bg-gray-50">
+      <Header />
       <QueueBar
         queueInfo={queueInfo}
         isPeak={isPeak}
@@ -117,7 +137,7 @@ export function CustomerApp() {
 
         {/* Cart: docked right column on landscape, full-width collapsible-height panel below on narrow screens */}
         <div className="h-64 shrink-0 border-t border-gray-200 lg:h-auto lg:w-80 lg:border-l lg:border-t-0 xl:w-96">
-          <CartPanel active={cartActive} />
+          {cartReady && <CartPanel active={cartActive} />}
         </div>
       </main>
 

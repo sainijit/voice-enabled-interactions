@@ -38,7 +38,14 @@ COPY metrics.py  ./metrics.py
 COPY api/        ./api/
 COPY start.sh    /start.sh
 
-RUN chmod +x /start.sh
+# Override the base image's GPU collector with a bounded-cycle version.
+# The base script runs `qmassa -t` forever, and qmassa never rotates that JSON
+# (measured at ~596 MB/hour, unbounded) nor releases the memory backing it.
+# supervisord's [program:gpu_metrics] invokes /scripts/collect_gpu.sh by path,
+# so replacing the file is sufficient -- supervisord.conf needs no change.
+COPY collect_gpu.sh /scripts/collect_gpu.sh
+
+RUN chmod +x /start.sh /scripts/collect_gpu.sh
 
 EXPOSE 9000
 

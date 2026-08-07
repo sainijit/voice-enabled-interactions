@@ -11,6 +11,7 @@ POST /api/v1/agent/chat
     reply          str        — agent's text response
     tool_calls     list[str]  — tools invoked during this turn
     llm_ms         float|None — cumulative genuine LLM time for the turn
+    llm_ttft_ms    float|None — cumulative prefill/time-to-first-token
     llm_calls      int        — number of LLM round-trips for the turn
     retrieval_ms   float|None — knowledge-base retrieval time for the turn
 """
@@ -50,7 +51,17 @@ class AgentChatResponse(BaseModel):
     tool_calls: list[str] = Field(default_factory=list)
     llm_ms: float | None = Field(
         default=None,
-        description="Cumulative LLM round-trip time for this turn, in milliseconds",
+        description=(
+            "Cumulative LLM round-trip time for this turn, in milliseconds. "
+            "Covers prefill AND decode — the full stream, not just first token."
+        ),
+    )
+    llm_ttft_ms: float | None = Field(
+        default=None,
+        description=(
+            "Cumulative time-to-first-token for this turn, in milliseconds. "
+            "llm_ms - llm_ttft_ms is the decode (token generation) cost."
+        ),
     )
     llm_calls: int = Field(
         default=0,
@@ -110,6 +121,7 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
         reply=result["reply"],
         tool_calls=result.get("tool_calls", []),
         llm_ms=result.get("llm_ms"),
+        llm_ttft_ms=result.get("llm_ttft_ms"),
         llm_calls=result.get("llm_calls", 0),
         retrieval_ms=result.get("retrieval_ms"),
     )
