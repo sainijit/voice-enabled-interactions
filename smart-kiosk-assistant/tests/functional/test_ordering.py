@@ -231,6 +231,51 @@ class TestOrderingUpsell:
 
 
 @pytest.mark.tier1
+class TestOrderingProductResolution:
+    """``OrderingService.resolve_product`` fuzzy-matching coverage.
+
+    Regression coverage for a real bug: "spicy chicken burger" resolved to
+    "Classic Chicken Burger" instead of "Spicy Chicken Crunch Burger",
+    because a plain difflib ratio scored "Classic Chicken Burger" (0.857)
+    marginally higher than the correct match (0.851), losing the customer's
+    distinguishing word "spicy" entirely. The fix checks for a unique,
+    all-query-tokens-present match before falling back to the ratio.
+    """
+
+    @pytest.mark.tier1
+    def test_distinguishing_token_wins_over_marginally_closer_ratio_match(
+        self,
+        ordering_app: TestClient,
+    ):
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        import asyncio  # noqa: PLC0415
+
+        product = asyncio.run(service.resolve_product("spicy chicken burger"))
+        assert product is not None
+        assert product.name == "Spicy Chicken Crunch Burger"
+
+    @pytest.mark.tier1
+    def test_generic_reference_still_resolves_via_ratio_fallback(
+        self,
+        ordering_app: TestClient,
+    ):
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        import asyncio  # noqa: PLC0415
+
+        # No exact token-subset match exists for a misheard/partial name —
+        # must still fall back to the difflib ratio step.
+        product = asyncio.run(service.resolve_product("classic chiken burgr"))
+        assert product is not None
+        assert product.name == "Classic Chicken Burger"
+
+
+@pytest.mark.tier1
 class TestOrderingSeed:
     """Catalogue seed idempotency coverage."""
 
