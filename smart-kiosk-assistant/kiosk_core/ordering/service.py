@@ -93,8 +93,19 @@ class OrderingService:
           1. exact product_id
           2. normalised product_id or name equality
           3. unique normalised-substring match on name
-          4. closest name by difflib ratio (cutoff 0.6)
-          5. unique product whose name contains every query token
+          4. unique product whose name contains every query token
+          5. closest name by difflib ratio (cutoff 0.6)
+
+        Step 4 is checked before the difflib ratio (5) on purpose: a
+        distinguishing word the customer actually said (e.g. "spicy" in
+        "spicy chicken burger") is a precise, deliberate signal that a
+        character-similarity ratio can lose to a shorter, more generic name
+        ("Classic Chicken Burger" scores marginally higher than "Spicy
+        Chicken Crunch Burger" against that query by pure ratio, 0.857 vs
+        0.851, silently ordering the wrong burger with no error). Requiring
+        every query token to be present AND the match to be unique keeps this
+        step precise — it only overrides the ratio when it has a strictly
+        stronger, unambiguous signal.
 
         Args:
             ref: An id or name reference, e.g. "BURGER-NV-001" or "classic
@@ -124,17 +135,17 @@ class OrderingService:
         if len(contains) == 1:
             return contains[0]
 
-        name_map = {_normalize(p.name): p for p in products}
-        close = difflib.get_close_matches(nref, list(name_map), n=1, cutoff=0.6)
-        if close:
-            return name_map[close[0]]
-
         qtokens = set(nref.split())
         token_hits = [
             p for p in products if qtokens and qtokens.issubset(set(_normalize(p.name).split()))
         ]
         if len(token_hits) == 1:
             return token_hits[0]
+
+        name_map = {_normalize(p.name): p for p in products}
+        close = difflib.get_close_matches(nref, list(name_map), n=1, cutoff=0.6)
+        if close:
+            return name_map[close[0]]
 
         return None
 
