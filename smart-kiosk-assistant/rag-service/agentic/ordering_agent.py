@@ -318,7 +318,7 @@ _CONFIRM_INTENT_RE = re.compile(
 _ORDER_TOOLS = frozenset(
     {
         "place_order", "update_order", "confirm_order", "confirm_active_order",
-        "get_order", "remove_from_order",
+        "get_order", "remove_from_order", "cancel_order",
     }
 )
 
@@ -389,6 +389,7 @@ _TOOL_NAMES = (
     "confirm_order",
     "confirm_active_order",
     "remove_from_order",
+    "cancel_order",
     "get_upsell_suggestions",
 )
 
@@ -1009,6 +1010,13 @@ unavailable from memory.
    is prose and does not define the catalogue, so using it invents items that
    do not exist. If the customer names a category ("chicken burgers"), call
    list_products(category) and report ONLY the returned rows.
+   - If the result is ``{"category_not_found": true, ...}``, the item or
+     category the customer asked about is not on the menu AT ALL — nothing we
+     sell is related to it (e.g. "dosa", "sushi", "biryani" at a burger/pizza
+     kiosk). Say plainly that we don't have it, then name the real categories
+     from the result and ask which they'd like to see instead. NEVER present
+     any product as if it were related to what they asked for — an unrelated
+     item is not an answer.
 3. INFO question with no product price involved — opening hours, ingredients,
    "is X vegan?", allergens, offers, outlet or policy details — call
    knowledge_lookup.
@@ -1031,9 +1039,9 @@ unavailable from memory.
    tool returned it (it is a plain number), then wish them well. Never invent,
    pad, or reformat an order id, and never state an order is confirmed before
    the tool has returned.
-6. REMOVE — "remove X", "take X off", "drop the X", "I don't want the X",
-   "cancel the X" — call remove_from_order with one entry per item the customer
-   named. Put ALL the items in ONE call: "remove the fries and the coke" is a
+6. REMOVE — "remove X", "take X off", "drop the X", "I don't want the X" —
+   call remove_from_order with one entry per item the customer named. Put ALL
+   the items in ONE call: "remove the fries and the coke" is a
    single call with two entries, never two calls. Pass the spoken name as
    product_id and leave quantity out unless the customer removes only some of
    several units ("remove one of the two burgers" → quantity 1).
@@ -1043,6 +1051,19 @@ unavailable from memory.
    - If `cart_empty` is true, say the cart is now empty and ask what they would
      like instead. Do NOT call confirm_order on an empty cart.
    - Never use update_order to remove something: it only adds.
+6b. CANCEL THE WHOLE ORDER — "cancel my order", "cancel my whole/entire/complete
+   order", "cancel everything", "start over", "scrap my order" — call
+   cancel_order. Do NOT enumerate items from memory and call remove_from_order
+   item-by-item for a whole-order cancellation: you may misremember or invent
+   an item that was never ordered. cancel_order needs no item list — it cancels
+   whatever the customer's current order actually is.
+   - If the result has `cancelled: true`, tell the customer their order has
+     been cancelled and ask if they'd like to start a new one.
+   - If the result has an `error` (no open order), say there is no open order
+     to cancel — never claim a cancellation that did not happen.
+   - A request naming specific items ("cancel the fries") is a REMOVE (rule 6),
+     not a whole-order cancellation — only "my order"/"everything"/"whole
+     order" phrasing means cancel_order.
 
 ## The customer's name
 A turn may begin with a tag like `[customer_name=Jitendra]`. That is the name

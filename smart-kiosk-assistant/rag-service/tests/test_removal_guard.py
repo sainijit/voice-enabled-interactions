@@ -123,6 +123,50 @@ def test_undecodable_result_is_not_a_success() -> None:
     assert removal_guard.current_state().succeeded is False
 
 
+def test_cancel_order_success_is_recorded_with_items_removed() -> None:
+    payload = {"cancelled": True, "order_id": 42, "items_removed": ["Pepsi (330 ml)", "Fries"]}
+    removal_guard.record_tool_result("cancel_order", _mcp_envelope(payload))
+
+    state = removal_guard.current_state()
+    assert state.succeeded is True
+    assert state.attempted is True
+    assert state.no_open_order is False
+    assert state.cart_items == ["Pepsi (330 ml)", "Fries"]
+
+
+def test_cancel_order_with_no_open_order_is_recorded_distinctly() -> None:
+    payload = {"error": "There is no open order to cancel for this customer."}
+    removal_guard.record_tool_result("cancel_order", _mcp_envelope(payload))
+
+    state = removal_guard.current_state()
+    assert state.succeeded is False
+    assert state.no_open_order is True
+
+
+def test_cancel_order_claim_with_no_open_order_is_replaced() -> None:
+    removal_guard.record_tool_result(
+        "cancel_order",
+        _mcp_envelope({"error": "There is no open order to cancel."}),
+    )
+    reply, corrected = removal_guard.validate_reply(
+        "I've cancelled your order. Anything else?"
+    )
+    assert corrected is True
+    assert reply == removal_guard._REFUSAL_NO_OPEN_ORDER
+
+
+def test_cancel_order_claim_backed_by_success_is_left_alone() -> None:
+    removal_guard.record_tool_result(
+        "cancel_order",
+        _mcp_envelope({"cancelled": True, "order_id": 5, "items_removed": ["Pepsi"]}),
+    )
+    reply, corrected = removal_guard.validate_reply(
+        "Your order has been cancelled. Would you like to start a new one?"
+    )
+    assert corrected is False
+    assert "cancelled" in reply
+
+
 # ---------------------------------------------------------------------------
 # Reply validation — the behaviour that was reported broken
 # ---------------------------------------------------------------------------
