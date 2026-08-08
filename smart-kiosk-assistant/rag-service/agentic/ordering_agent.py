@@ -29,6 +29,7 @@ import time
 from typing import Any
 
 from agentic import config as agent_cfg
+from agentic import confirm_guard
 from agentic import item_intent_guard
 from agentic import llm_metrics
 from agentic import menu_guard
@@ -231,13 +232,20 @@ _UNCONFIRMED_TAIL = "Would you like to confirm your order?"
 
 
 def _strip_false_confirmation(reply: str, tool_calls: list[str]) -> tuple[str, bool]:
-    """Remove "your order is confirmed" claims that no confirm tool backs.
+    """Remove "your order is confirmed" claims that no confirm tool *actually
+    completed*.
 
     ``place_order`` and ``update_order`` leave the order in ``draft``. A reply
     that nonetheless says the order is confirmed sends the customer away
     believing the kitchen has their food, which is the single worst failure this
-    kiosk can produce. The existing unbacked-claim guard only triggers when *no*
-    order tool ran, so it cannot catch this case — ``place_order`` did run.
+    kiosk can produce.
+
+    Checking tool *names* alone is not enough: the model can call
+    ``confirm_order`` with a hallucinated ``order_id`` (observed live: the
+    literal guess ``12345``), which fails with an "Order not found" error —
+    nothing is confirmed, yet ``confirm_order`` is still in ``tool_calls``.
+    This checks ``confirm_guard``'s recorded *result* instead of the bare tool
+    name, so a failed confirm attempt is treated the same as no attempt at all.
 
     Only the offending sentences are dropped, not the whole reply: the item
     names, prices, and upsell lines around them came from a real tool result and
@@ -245,26 +253,38 @@ def _strip_false_confirmation(reply: str, tool_calls: list[str]) -> tuple[str, b
 
     Args:
         reply: The assistant's drafted reply.
-        tool_calls: Tools invoked this turn, in call order.
+        tool_calls: Tools invoked this turn, in call order. Unused for the
+            confirm decision itself (kept for the caller's logging) — the
+            source of truth is ``confirm_guard.current_state()``.
 
     Returns:
         ``(reply, changed)`` — the cleaned reply and whether anything was cut.
     """
-    if not reply or any(tool in _CONFIRM_TOOLS for tool in tool_calls):
+    if not reply or confirm_guard.current_state().succeeded:
         return reply, False
     if not _CONFIRM_CLAIM_RE.search(reply):
         return reply, False
+
+    # A confirm was attempted this turn and failed (e.g. a hallucinated
+    # order_id) rather than never being attempted at all — say so honestly
+    # instead of the generic "would you like to confirm?" invitation, which
+    # reads as if the customer hasn't asked yet when they just did.
+    fallback = (
+        confirm_guard.build_refusal()
+        if confirm_guard.current_state().attempted
+        else _UNCONFIRMED_TAIL
+    )
 
     sentences = [s.strip() for s in _SENTENCE_END_RE.split(reply) if s.strip()]
     kept = [s for s in sentences if not _CONFIRM_CLAIM_RE.search(s)]
     if not kept:
         # The entire reply was the false claim — there is nothing truthful left
         # to keep, so ask for confirmation instead of inventing content.
-        return _UNCONFIRMED_TAIL, True
+        return fallback, True
 
     cleaned = " ".join(kept)
     if "confirm" not in cleaned.lower():
-        cleaned = f"{cleaned} {_UNCONFIRMED_TAIL}"
+        cleaned = f"{cleaned} {fallback}"
     return cleaned, True
 
 
@@ -614,11 +634,13 @@ class _SentenceGate:
             tool in _ORDER_TOOLS for tool in tool_calls
         ):
             return False
-        # (c2) A *confirmation* claim additionally needs a confirm tool; chat()
-        #      strips it otherwise, so it must never reach TTS first.
-        if _CONFIRM_CLAIM_RE.search(sentence) and not any(
-            tool in _CONFIRM_TOOLS for tool in tool_calls
-        ):
+        # (c2) A *confirmation* claim additionally needs a confirm tool that
+        #      actually succeeded — not merely one that was invoked. A
+        #      hallucinated order_id (e.g. confirm_order(12345)) still shows
+        #      up in tool_calls but fails server-side; checking invocation
+        #      alone reintroduces the exact bug _strip_false_confirmation now
+        #      guards against post-hoc. See agentic/confirm_guard.py.
+        if _CONFIRM_CLAIM_RE.search(sentence) and not confirm_guard.current_state().succeeded:
             return False
         # (c3) menu_guard.validate_reply() can still replace the *whole* reply
         #      whenever this turn had an off-menu/ambiguous rejection and no
@@ -1357,6 +1379,7 @@ class OrderingAgent:
             # successful result.
             menu_guard.record_tool_result(tool_name, result)
             removal_guard.record_tool_result(tool_name, result)
+            confirm_guard.record_tool_result(tool_name, result)
 
             # Skip the 2nd LLM call (pure narration) when this is the turn's
             # only tool call and the outcome cleanly matches an authored
@@ -1541,6 +1564,7 @@ class OrderingAgent:
         # name-based guard reads as success. See agentic/menu_guard.py.
         menu_guard.begin_turn()
         removal_guard.begin_turn()
+        confirm_guard.begin_turn()
         _tool_call_count_ctx.set(_ToolCallCounter())
 
         try:
