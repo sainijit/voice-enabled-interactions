@@ -17,6 +17,7 @@ from kiosk_core.ordering.models import (
     Order,
     OrderItemIn,
     Product,
+    ProductResolution,
     RemoveOrderItem,
     UpsellRequest,
     UpsellSuggestion,
@@ -40,6 +41,81 @@ def _normalize(text: str) -> str:
     burger") against catalogue product ids and names.
     """
     return _NON_ALNUM.sub(" ", (text or "").lower()).strip()
+
+
+def _resolve_against(ref: str, products: list[Product]) -> ProductResolution:
+    """Pure product-reference resolver: no I/O, deterministic, unit-testable.
+
+    Implements the exact resolution ladder documented on
+    ``OrderingService.resolve_product`` (id/name equality, unique substring,
+    unique token-subset, token-overlap ambiguity check, difflib fallback),
+    but returns an explicit :class:`ProductResolution` instead of collapsing
+    "ambiguous" and "no match at all" into the same ``None``.
+
+    Args:
+        ref: Free-form reference, already known non-empty by the caller.
+        products: The full candidate set to match against (already fetched;
+            this function does no database access).
+
+    Returns:
+        A ``ProductResolution`` with status ``MATCH``, ``AMBIGUOUS``, or
+        ``NOT_FOUND``.
+    """
+    nref = _normalize(ref)
+    if not nref:
+        return ProductResolution(status="NOT_FOUND")
+
+    for p in products:
+        if _normalize(p.product_id) == nref or _normalize(p.name) == nref:
+            return ProductResolution(status="MATCH", product=p, confidence=1.0)
+
+    contains = [p for p in products if nref in _normalize(p.name)]
+    if len(contains) == 1:
+        return ProductResolution(status="MATCH", product=contains[0], confidence=0.9)
+
+    qtokens = set(nref.split())
+    token_hits = [
+        p for p in products if qtokens and qtokens.issubset(set(_normalize(p.name).split()))
+    ]
+    if len(token_hits) == 1:
+        return ProductResolution(status="MATCH", product=token_hits[0], confidence=0.9)
+
+    # Before falling back to raw character-similarity, check for a
+    # token-overlap tie among plausible candidates. difflib's ratio does
+    # not know that a word like "chicken" vs "paneer" is dietary-defining,
+    # not stylistic like "spicy" vs "classic" — so it can rank a
+    # completely different item above the one the customer actually named
+    # just because more characters happen to line up (observed live:
+    # "chicken tikka burger" — not on the menu — resolved to "Paneer
+    # Tikka Burger" over "Classic Chicken Burger" purely on character
+    # ratio, silently swapping a non-veg request for a veg item). A tie in
+    # shared *words* between two or more distinct real products means the
+    # reference is genuinely ambiguous and must not be silently guessed —
+    # same principle as the uniqueness requirement above.
+    #
+    # The overlap must be at least 2 words before it counts as a
+    # meaningful signal: a single shared generic word ("classic" in both
+    # "Classic Chicken Burger" and "Classic French Fries") is common
+    # across unrelated categories and must not itself block a genuine
+    # single-typo match from reaching the difflib fallback below.
+    if qtokens:
+        overlap_scores = [
+            (len(qtokens & set(_normalize(p.name).split())), p) for p in products
+        ]
+        max_overlap = max((score for score, _ in overlap_scores), default=0)
+        if max_overlap >= 2:
+            top = [p for score, p in overlap_scores if score == max_overlap]
+            if len(top) > 1:
+                return ProductResolution(status="AMBIGUOUS", candidates=top)
+
+    name_map = {_normalize(p.name): p for p in products}
+    close = difflib.get_close_matches(nref, list(name_map), n=1, cutoff=0.6)
+    if close:
+        matched_name = close[0]
+        ratio = difflib.SequenceMatcher(None, nref, matched_name).ratio()
+        return ProductResolution(status="MATCH", product=name_map[matched_name], confidence=round(ratio, 3))
+
+    return ProductResolution(status="NOT_FOUND")
 
 
 def _is_veg(product_id: str) -> bool:
@@ -89,13 +165,33 @@ class OrderingService:
         partial, or slightly misheard) — to the real Product, so callers never
         depend on the model emitting a perfect identifier.
 
+        This is a thin compatibility wrapper over
+        :meth:`resolve_product_detailed` for existing callers that only need
+        "did it resolve or not" — see that method for the full resolution
+        ladder and an explicit ``MATCH``/``AMBIGUOUS``/``NOT_FOUND`` result.
+
+        Args:
+            ref: An id or name reference, e.g. "BURGER-NV-001" or "classic
+                chicken burger".
+
+        Returns:
+            The matching Product, or None if no confident match exists
+            (including when the reference is genuinely ambiguous — an
+            ambiguous match is treated as no match, never a guess).
+        """
+        result = await self.resolve_product_detailed(ref)
+        return result.product if result.status == "MATCH" else None
+
+    async def resolve_product_detailed(self, ref: str) -> ProductResolution:
+        """Resolve a free-form product reference with an explicit outcome.
+
         Resolution order (first match wins):
           1. exact product_id
           2. normalised product_id or name equality
           3. unique normalised-substring match on name
           4. unique product whose name contains every query token
-          5. reject (return None) if two or more distinct products tie on the
-             most shared query words — see below
+          5. reject as ``AMBIGUOUS`` if two or more distinct products tie on
+             the most shared query words — see below
           6. closest name by difflib ratio (cutoff 0.6)
 
         Step 4 is checked before the difflib ratio (6) on purpose: a
@@ -129,70 +225,20 @@ class OrderingService:
                 chicken burger".
 
         Returns:
-            The matching Product, or None if no confident match exists.
+            A ``ProductResolution`` — ``MATCH`` with the product and a
+            confidence, ``AMBIGUOUS`` with the tied candidates, or
+            ``NOT_FOUND``.
         """
         if not ref:
-            return None
+            return ProductResolution(status="NOT_FOUND")
         async with get_db() as db:
             repo = SqliteProductRepository(db)
             exact = await repo.get(ref)
             if exact is not None:
-                return exact
+                return ProductResolution(status="MATCH", product=exact, confidence=1.0)
             products = await repo.list_all()
 
-        nref = _normalize(ref)
-        if not nref:
-            return None
-
-        for p in products:
-            if _normalize(p.product_id) == nref or _normalize(p.name) == nref:
-                return p
-
-        contains = [p for p in products if nref in _normalize(p.name)]
-        if len(contains) == 1:
-            return contains[0]
-
-        qtokens = set(nref.split())
-        token_hits = [
-            p for p in products if qtokens and qtokens.issubset(set(_normalize(p.name).split()))
-        ]
-        if len(token_hits) == 1:
-            return token_hits[0]
-
-        # Before falling back to raw character-similarity, check for a
-        # token-overlap tie among plausible candidates. difflib's ratio does
-        # not know that a word like "chicken" vs "paneer" is dietary-defining,
-        # not stylistic like "spicy" vs "classic" — so it can rank a
-        # completely different item above the one the customer actually named
-        # just because more characters happen to line up (observed live:
-        # "chicken tikka burger" — not on the menu — resolved to "Paneer
-        # Tikka Burger" over "Classic Chicken Burger" purely on character
-        # ratio, silently swapping a non-veg request for a veg item). A tie in
-        # shared *words* between two or more distinct real products means the
-        # reference is genuinely ambiguous and must not be silently guessed —
-        # same principle as the uniqueness requirement above.
-        #
-        # The overlap must be at least 2 words before it counts as a
-        # meaningful signal: a single shared generic word ("classic" in both
-        # "Classic Chicken Burger" and "Classic French Fries") is common
-        # across unrelated categories and must not itself block a genuine
-        # single-typo match from reaching the difflib fallback below.
-        if qtokens:
-            overlap_scores = [
-                (len(qtokens & set(_normalize(p.name).split())), p) for p in products
-            ]
-            max_overlap = max((score for score, _ in overlap_scores), default=0)
-            if max_overlap >= 2:
-                top = [p for score, p in overlap_scores if score == max_overlap]
-                if len(top) > 1:
-                    return None
-
-        name_map = {_normalize(p.name): p for p in products}
-        close = difflib.get_close_matches(nref, list(name_map), n=1, cutoff=0.6)
-        if close:
-            return name_map[close[0]]
-
-        return None
+        return _resolve_against(ref, products)
 
     async def resolve_cart_item(self, ref: str, cart_product_ids: list[str]) -> str | None:
         """Resolve a spoken reference against the products already in a cart.
