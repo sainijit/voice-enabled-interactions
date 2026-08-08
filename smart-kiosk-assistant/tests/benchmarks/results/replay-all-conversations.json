@@ -1,7 +1,7 @@
 [
   {
     "file": "conversations/010d82f0-1faf-4a38-8556-4f0e3dd1edfa.jsonl",
-    "conversation_id": "replay-b81ccd26",
+    "conversation_id": "replay-96fac121",
     "turns": [
       {
         "index": 1,
@@ -11,7 +11,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2811.4,
+        "latency_ms": 2587.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -24,7 +24,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3108.8,
+        "latency_ms": 2894.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -33,9 +33,9 @@
         "index": 3,
         "user": "What's the total for my order?",
         "expected_assistant": "The total for your order is \u20b9258. Would you like to confirm your order?",
-        "reply": "Your total for the order is \u20b9258. Would you like to add anything else?",
+        "reply": "The total for your order is \u20b9258. Would you like to add anything else?",
         "tool_calls": [],
-        "latency_ms": 1376.2,
+        "latency_ms": 1296.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -44,11 +44,11 @@
         "index": 4,
         "user": "Can you remove french fries from my order please?",
         "expected_assistant": "The Classic French Fries (Regular) have been removed from your order. Your total is now \u20b9169 for the Classic Chicken Burger. Would you like to confirm your order?",
-        "reply": "There is no open order, so nothing can be removed.  Would you like to start a new order?",
+        "reply": "I've removed Classic French Fries (Regular). Your new total is \u20b9169.",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 4332.2,
+        "latency_ms": 2488.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -57,7 +57,7 @@
   },
   {
     "file": "conversations/034f6494-0b83-40e6-a22a-1c2e8e10fbab.jsonl",
-    "conversation_id": "replay-c2b47f86",
+    "conversation_id": "replay-f65fdf63",
     "turns": [
       {
         "index": 1,
@@ -67,7 +67,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4806.1,
+        "latency_ms": 4499.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -80,7 +80,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5066.5,
+        "latency_ms": 4797.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -93,7 +93,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 7055.7,
+        "latency_ms": 6702.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -106,7 +106,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 4556.3,
+        "latency_ms": 4366.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -115,11 +115,11 @@
         "index": 5,
         "user": "Can you remove plastic chicken burger, double chicken tower, tower? and Panita Cabargar from my god.",
         "expected_assistant": "I couldn't process your request. Let me know which items you'd like to remove from your order.",
-        "reply": "I've removed Spicy Chicken Crunch Burger and Double Stack Veg. \\\"Tower\\\" and \\\"Panita Cabargar\\\" are not in your order. Your new total is \u20b9248. What would you like to order next?",
+        "reply": "I've removed Spicy Chicken Crunch Burger and Double Stack Veg. \\\"Tower\\\" and \\\"Panita Cabargar\\\" are not in your cart. Your new total is \u20b9248. What would you like to order next?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 7544.7,
+        "latency_ms": 7220.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -128,15 +128,15 @@
   },
   {
     "file": "conversations/04b03082-8d4f-4956-a7e1-bd1f48adc8b8.jsonl",
-    "conversation_id": "replay-51742977",
+    "conversation_id": "replay-3304e5db",
     "turns": [
       {
         "index": 1,
         "user": "coming on the researchers you have",
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you're looking for?",
-        "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
+        "reply": "I don't have information about researchers or specific items you're referring to. Could you please clarify what you're looking for?",
         "tool_calls": [],
-        "latency_ms": 1122.4,
+        "latency_ms": 2790.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -145,11 +145,11 @@
         "index": 2,
         "user": "Show me the burgers.",
         "expected_assistant": "We have Aloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alooti Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Alloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5232.3,
+        "latency_ms": 4639.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -162,7 +162,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6824.1,
+        "latency_ms": 6419.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -175,7 +175,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3752.2,
+        "latency_ms": 3541.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -188,7 +188,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3646.1,
+        "latency_ms": 3431.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -197,11 +197,9 @@
         "index": 6,
         "user": "Can you tell me who is the president of India?",
         "expected_assistant": "The President of India is Droupadi Murmu. Let me know if you need help with anything else!",
-        "reply": "The president of India is Droupadi Murmu. Would you like to order something or need assistance with something else?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 6592.9,
+        "reply": "I don't have information about the president of India. Would you like me to help you with anything else from the menu?",
+        "tool_calls": [],
+        "latency_ms": 3018.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -210,11 +208,11 @@
         "index": 7,
         "user": "May I know the restaurant name?",
         "expected_assistant": "The restaurant name is QuickBite Express. Let me know if you need help with anything else!",
-        "reply": "The restaurant name is QuickBite Express. Would you like to order something or need assistance with something else?",
+        "reply": "The restaurant is called QuickBite Express.",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5781.0,
+        "latency_ms": 3236.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -223,9 +221,9 @@
         "index": 8,
         "user": "What is the sitting capacity of Kick-Bite Express restaurant?",
         "expected_assistant": "The sitting capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Let me know if you need help with anything else!",
-        "reply": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to order something or need assistance with something else?",
+        "reply": "I don't have information about the sitting capacity of Kick-Bite Express restaurant. Would you like me to help you with anything else from the menu?",
         "tool_calls": [],
-        "latency_ms": 1990.5,
+        "latency_ms": 3269.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -234,11 +232,9 @@
         "index": 9,
         "user": "Would you be able to help me to book a table?",
         "expected_assistant": "I'm sorry, but I don't have the capability to book tables. However, you can call the outlet directly for table bookings. Let me know if you need help with anything else!",
-        "reply": "Table booking is not supported at QuickBite Express. However, you can contact the restaurant directly or use their app for table booking. Would you like assistance with something else?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 6929.2,
+        "reply": "I don't have the capability to book tables. Would you like me to help you with anything else from the menu?",
+        "tool_calls": [],
+        "latency_ms": 2704.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -247,9 +243,9 @@
         "index": 10,
         "user": "Can you tell me how we can reduce the... Traffic in Bangalore",
         "expected_assistant": "I'm sorry, but I don't have information on reducing traffic in Bangalore. Let me know if you need help with anything else!",
-        "reply": "I'm unable to provide information on traffic in Bangalore. However, you can use navigation apps like Google Maps or Citymapper for real-time traffic updates and alternative routes. Would you like assistance with something else?",
+        "reply": "I don't have information about reducing traffic in Bangalore. Would you like me to help you with anything else from the menu?",
         "tool_calls": [],
-        "latency_ms": 2336.0,
+        "latency_ms": 2811.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -258,9 +254,9 @@
         "index": 11,
         "user": "Which model are you using?",
         "expected_assistant": "I'm using the QuickBite Express kiosk system, designed to help customers place orders and get information about our restaurant. Let me know if you need assistance!",
-        "reply": "I am using the latest model of QuickBite Express, which is designed to provide accurate and efficient service for our customers. Would you like to order something or need assistance with something else?",
+        "reply": "I am using the QuickBite Express kiosk system, which is designed to help customers place orders and manage their meals efficiently. Would you like to proceed with ordering or have any other questions?",
         "tool_calls": [],
-        "latency_ms": 2196.1,
+        "latency_ms": 2011.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -269,11 +265,11 @@
         "index": 12,
         "user": "Can you please add the rest? Uh, i first pizzerion into my card oil pressure to get this car into from a fossil",
         "expected_assistant": "I'm using the QuickBite Express kiosk system, which is designed to help customers place orders and get information about our restaurant. Let me know if you need assistance!",
-        "reply": "I don't have information about the model of QuickBite Express. Would you like assistance with something else?",
+        "reply": "Your request is unclear. Could you please clarify what you mean by \"add the rest\" and \"pizzerion into my card oil pressure\"? I\u2019m here to help, but I need more details to understand your question.",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 6924.8,
+        "latency_ms": 4557.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -282,11 +278,11 @@
         "index": 13,
         "user": "I'd like to add one restaurant special Pizza, if you can help.",
         "expected_assistant": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
-        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
+        "reply": "'Pizza' is a menu category, not a single item, so nothing was added yet. Do NOT say it is unavailable \u2014 we do sell it.  Which one would you like?",
         "tool_calls": [
-          "list_products"
+          "place_order"
         ],
-        "latency_ms": 5398.5,
+        "latency_ms": 8097.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -295,11 +291,9 @@
         "index": 14,
         "user": "Do you have any North Indian? which I can try.",
         "expected_assistant": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). None of these are North Indian pizzas. Would you like to try something else?",
-        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
-        "tool_calls": [
-          "list_products"
-        ],
-        "latency_ms": 5340.6,
+        "reply": "We have a few North Indian options available. Would you like to try any of the following: Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), or Pepperoni-Style Chicken Pizza (Regular) (269)? Which one would you like?",
+        "tool_calls": [],
+        "latency_ms": 3933.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -312,7 +306,7 @@
         "tool_calls": [
           "cancel_order"
         ],
-        "latency_ms": 4561.8,
+        "latency_ms": 3920.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -321,17 +315,17 @@
   },
   {
     "file": "conversations/12d7ca43-f94e-407f-af64-aca37641b8ce.jsonl",
-    "conversation_id": "replay-87637c33",
+    "conversation_id": "replay-3db31741",
     "turns": [
       {
         "index": 1,
         "user": "What is the restaurant name?",
         "expected_assistant": "The restaurant is called QuickBite Express. We serve Indian and Continental fusion cuisine, and our menu includes items like Chicken Pizzas, Burgers, Sides, and more. Would you like to see the full menu or check our opening hours?",
-        "reply": "The restaurant is called QuickBite Express. Here is what we offer: Indian + Continental Fusion cuisine. Would you like to see the menu categories?",
+        "reply": "The restaurant is called QuickBite Express.",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 6101.7,
+        "latency_ms": 3760.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -340,11 +334,11 @@
         "index": 2,
         "user": "I'd like to order one chicken tikka burger.",
         "expected_assistant": "I've added Paneer Tikka Burger to your order. Your total is now \u20b9159. Would you also like Classic French Fries (Regular) (\u20b989)?",
-        "reply": "The item \"chicken_tikka_burger\" is not on the menu. Here are available vegetarian options: Paneer Tikka Burger (\u20b9159), Aloo Tikki Burger (\u20b9119), and Crispy Veg Patty Burger (\u20b9129). Would you like to try one of these?",
+        "reply": "The item \"chicken_tikka_burger\" is not available. We have alternatives: Paneer Tikka Burger (159), Aloo Tikki Burger (119), and Crispy Veg Patty Burger (129). Would you like to try one of these?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6808.6,
+        "latency_ms": 5899.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -357,7 +351,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5117.2,
+        "latency_ms": 4703.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -370,7 +364,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5538.3,
+        "latency_ms": 5074.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -379,17 +373,17 @@
   },
   {
     "file": "conversations/1933e5d8-10f9-4caf-8083-9eb55f046ee9.jsonl",
-    "conversation_id": "replay-527f193c",
+    "conversation_id": "replay-1776129a",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant please?",
         "expected_assistant": "We offer a variety of wraps and rolls, including the Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), Crispy Chicken Burrito (\u20b9179), Grilled Chicken Caesar Wrap (\u20b9169), and Spicy Chicken Seekh Roll (\u20b9179). Would you like to try any of these?",
-        "reply": "We offer a variety of wraps and rolls, including the Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), Crispy Chicken Burrito (\u20b9179), Grilled Chicken Caesar Wrap (\u20b9169), and Spicy Chicken Seekh Roll (\u20b9179). Would you like to try any of these?",
+        "reply": "We offer a variety of Indian and Continental fusion dishes, including Chicken Wraps & Rolls. Our restaurant is open from 8 AM to 12 AM, except on Sundays when we close at 11 PM. We also provide delivery through Swiggy, Zomato, and our own app. Would you like to know more about our menu or what we offer?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 6232.6,
+        "latency_ms": 5853.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -398,17 +392,17 @@
   },
   {
     "file": "conversations/22e1ffb4-0dc3-46c3-abc6-6008920f193c.jsonl",
-    "conversation_id": "replay-05e70dd3",
+    "conversation_id": "replay-9633ddb6",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant?",
         "expected_assistant": "The restaurant, QuickBite Express, is a Quick Service Restaurant (QSR) in Chennai, South India. It offers Indian + Continental Fusion cuisine. The outlet is open from Monday to Thursday 8 AM\u201311 PM, Friday and Saturday 8 AM\u201312 AM, and Sunday 9 AM\u201311 PM. It also provides delivery via Swiggy, Zomato, and its own app. The restaurant has 64 indoor and 12 outdoor seating options.",
-        "reply": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, India, offering a fusion of Indian and continental cuisine. We are open from 8 AM to 12 AM, except on Sundays, when we close at 11 PM. Our menu includes items like Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), and more. We also offer delivery through Swiggy, Zomato, and our own app. Would you like to see the full menu or place an order?",
+        "reply": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, South India, offering a fusion of Indian and continental cuisine. We are open from Monday to Thursday, 8 AM to 11 PM, and Friday to Saturday, 8 AM to 12 AM. On Sundays, we are open from 9 AM to 11 PM. We also serve breakfast from 8 AM to 11 AM. Our menu includes a variety of items, such as Chicken Wraps & Rolls, with prices starting at \u20b9169. We also offer delivery through Swiggy, Zomato, and our own app. For more details, please ask!",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 11048.8,
+        "latency_ms": 11516.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -421,7 +415,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5983.4,
+        "latency_ms": 5590.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -430,7 +424,7 @@
   },
   {
     "file": "conversations/27232ee4-92cd-4740-953e-5b84802d2662.jsonl",
-    "conversation_id": "replay-a8686aba",
+    "conversation_id": "replay-8286036a",
     "turns": [
       {
         "index": 1,
@@ -440,7 +434,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 3150.8,
+        "latency_ms": 2976.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -453,7 +447,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4278.8,
+        "latency_ms": 4072.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -462,11 +456,11 @@
         "index": 3,
         "user": "I like to learn Bargherita regularly.",
         "expected_assistant": "I've added Margherita Pizza (Regular) to your order. Your total is now \u20b9179. Would you also like Pepsi (330 ml) (\u20b959)?",
-        "reply": "I've added Margherita Pizza (Regular) to your order. Your total is now \u20b9179. Would you also like Pepsi (330 ml) (\u20b959)?",
+        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
         "tool_calls": [
-          "place_order"
+          "list_products"
         ],
-        "latency_ms": 2964.9,
+        "latency_ms": 4182.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -475,9 +469,9 @@
         "index": 4,
         "user": "I won't like to explore beer bridges also.",
         "expected_assistant": "We have beverages (5 items), burgers (7 items), desserts (2 items), pizza (4 items), sides (4 items), and wraps (4 items). Which category would you like to explore?",
-        "reply": "We have Margherita Pizza (Regular) (\u20b9179). Would you also like Pepsi (330 ml) (\u20b959)?",
+        "reply": "We have beverages (5 items), burgers (7 items), desserts (2 items), pizza (4 items), sides (4 items), and wraps (4 items). Which category would you like to explore?",
         "tool_calls": [],
-        "latency_ms": 1946.0,
+        "latency_ms": 2069.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -486,9 +480,11 @@
         "index": 5,
         "user": "what you have in privileges.",
         "expected_assistant": "We offer the following in our restaurant: Opening Hours: Mon\u2013Thu 8 AM\u201311 PM, Fri\u2013Sat 8 AM\u201312 AM, Sun 9 AM\u201311 PM. Breakfast: 8 AM\u201311 AM daily. All-Day Menu: 11 AM onwards. Seating: 64 indoor + 12 outdoor seats. Delivery: Available via Swiggy, Zomato, and QuickBite app. Takeaway: Available at counter; estimated 5\u201310 min wait. Parking: Adjacent lot with 2-wheeler and 4-wheeler bays. Wi-Fi: QuickBite_Guest. Loyalty Program: QBRewards (app-based). Would you like to know more about any of these",
-        "reply": "We have Pepsi (330 ml) (\u20b959). Would you like to order anything else?",
-        "tool_calls": [],
-        "latency_ms": 1286.9,
+        "reply": "We do not have any privileges. Would you like to explore any of our categories?",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 4808.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -497,9 +493,11 @@
         "index": 6,
         "user": "I would like to explore beverages.",
         "expected_assistant": "We have 7UP (330 ml) (59), Cold Coffee (300 ml) (99), Fresh Lime Soda (300 ml) (69), Mango Lassi (300 ml) (89), and Pepsi (330 ml) (59). Which one would you like to try?",
-        "reply": "We have Pepsi (330 ml) (\u20b959). Would you like to order anything else?",
-        "tool_calls": [],
-        "latency_ms": 2666.5,
+        "reply": "We have 7UP (330 ml) (59), Cold Coffee (300 ml) (99), Fresh Lime Soda (300 ml) (69), Mango Lassi (300 ml) (89), and Pepsi (330 ml) (59). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 4806.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -508,9 +506,11 @@
         "index": 7,
         "user": "Add fresh lines",
         "expected_assistant": "We have 7UP (330 ml) (59), Cold Coffee (300 ml) (99), Fresh Lime Soda (300 ml) (69), Mango Lassi (300 ml) (89), and Pepsi (330 ml) (59). Which one would you like to try?",
-        "reply": "We have Pepsi (330 ml) (\u20b959). Would you like to order anything else?",
-        "tool_calls": [],
-        "latency_ms": 1292.3,
+        "reply": "I've added Fresh Lime Soda (300 ml) to your order. Your total is now \u20b969. Would you also like Classic French Fries (Regular) (\u20b989)?",
+        "tool_calls": [
+          "place_order"
+        ],
+        "latency_ms": 2860.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -519,11 +519,9 @@
         "index": 8,
         "user": "I would like to try fresh lime soda",
         "expected_assistant": "I've added Fresh Lime Soda (300 ml) to your order. Your total is now \u20b9248. Would you also like Pepsi (330 ml) (\u20b959)?",
-        "reply": "I've added Fresh Lime Soda (300 ml) to your order. Your total is now \u20b9248. Would you also like Pepsi (330 ml) (\u20b959)?",
-        "tool_calls": [
-          "place_order"
-        ],
-        "latency_ms": 3059.1,
+        "reply": "I've added Fresh Lime Soda (300 ml) to your order. Your total is now \u20b969. Would you also like Classic French Fries (Regular) (\u20b989)?",
+        "tool_calls": [],
+        "latency_ms": 2402.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -532,11 +530,11 @@
         "index": 9,
         "user": "I would like to add dosa",
         "expected_assistant": "We have 7UP (330 ml) (59), Cold Coffee (300 ml) (99), Fresh Lime Soda (300 ml) (69), Mango Lassi (300 ml) (89), and Pepsi (330 ml) (59). Which one would you like to try?",
-        "reply": "We have 7UP (330 ml) (59), Cold Coffee (300 ml) (99), Fresh Lime Soda (300 ml) (69), Mango Lassi (300 ml) (89), and Pepsi (330 ml) (59). Would you like to order any of these?",
+        "reply": "We have 7UP (330 ml) (59), Cold Coffee (300 ml) (99), Fresh Lime Soda (300 ml) (69), Mango Lassi (300 ml) (89), and Pepsi (330 ml) (59). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5444.3,
+        "latency_ms": 6892.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -545,11 +543,11 @@
         "index": 10,
         "user": "I would like to remove the margarita pizza.",
         "expected_assistant": "I've removed Margherita Pizza (Regular). Your new total is \u20b969.",
-        "reply": "I've removed Margherita Pizza (Regular). Your new total is \u20b969.",
+        "reply": "I'm sorry, but the Margherita Pizza is not in your order. Your cart currently has Fresh Lime Soda (300 ml). Would you like to remove that instead?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 2847.1,
+        "latency_ms": 5204.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -562,7 +560,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3155.1,
+        "latency_ms": 2733.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -571,11 +569,11 @@
         "index": 12,
         "user": "Will I find parking in your restaurant?",
         "expected_assistant": "Yes, there is parking available at our restaurant. We have a shared lot adjacent to the outlet with spaces for both 2-wheeler and 4-wheeler vehicles. Would you like to know more about our parking facilities?",
-        "reply": "We have parking available. Would you like to proceed with your order?",
+        "reply": "Yes, there is parking available at our restaurant. We have a shared lot adjacent to the outlet with spaces for both 2-wheeler and 4-wheeler vehicles. Would you like to proceed with your order or explore more options?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 4921.2,
+        "latency_ms": 5629.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -584,11 +582,11 @@
         "index": 13,
         "user": "I would like to cancel my order.",
         "expected_assistant": "I've removed Chicken BBQ Pizza (Regular). Your new total is \u20b969.",
-        "reply": "Your order has been cancelled. Would you like to start over and place a new order?",
+        "reply": "Your order has been cancelled. We removed Fresh Lime Soda (300 ml) and Chicken BBQ Pizza (Regular) from your cart. Would you like to start over and place a new order?",
         "tool_calls": [
           "cancel_order"
         ],
-        "latency_ms": 3010.9,
+        "latency_ms": 4186.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -597,23 +595,25 @@
         "index": 14,
         "user": "I want to cancel my complete order.",
         "expected_assistant": "Your order is now empty. Would you like to add anything else, or is there anything else you'd like to know about our menu or services?",
-        "reply": "Sorry, I wasn't able to remove that \u2014 it doesn't look like it's in your order. What would you like me to take off?",
-        "tool_calls": [],
-        "latency_ms": 2467.9,
+        "reply": "Your cart is currently empty. There is no active order to cancel. Would you like to start fresh and place a new order?",
+        "tool_calls": [
+          "cancel_order"
+        ],
+        "latency_ms": 3456.1,
         "error": null,
-        "guard_corrected": true,
+        "guard_corrected": false,
         "hard_failed": false
       }
     ]
   },
   {
     "file": "conversations/2eb723ab-962b-4cd1-bc9f-998b3f2726f3.jsonl",
-    "conversation_id": "replay-1ad88366",
+    "conversation_id": "replay-20edb4bf",
     "turns": []
   },
   {
     "file": "conversations/343cd1c8-8d8f-446d-8eaa-c6705048891f.jsonl",
-    "conversation_id": "replay-8134ceeb",
+    "conversation_id": "replay-43723e1e",
     "turns": [
       {
         "index": 1,
@@ -621,7 +621,7 @@
         "expected_assistant": "We have burgers, beverages, desserts, pizza, sides, and wraps. Which category would you like to explore?",
         "reply": "Please specify the item you'd like to order.",
         "tool_calls": [],
-        "latency_ms": 591.7,
+        "latency_ms": 566.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -634,7 +634,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6071.7,
+        "latency_ms": 5688.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -647,7 +647,7 @@
         "tool_calls": [
           "get_upsell_suggestions"
         ],
-        "latency_ms": 6490.1,
+        "latency_ms": 6064.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -656,9 +656,9 @@
         "index": 4,
         "user": "I would like to try all of them.",
         "expected_assistant": "We have added Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269) to your order. Total: 916. Would you like a Pepsi (330 ml) (59) to go with your pizzas?",
-        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
+        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (269). Would you like to try all of them?",
         "tool_calls": [],
-        "latency_ms": 3120.5,
+        "latency_ms": 2850.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -667,17 +667,17 @@
   },
   {
     "file": "conversations/35d35de6-c2ce-4b3c-86b0-fcc96ec59186.jsonl",
-    "conversation_id": "replay-95262fa0",
+    "conversation_id": "replay-529b1be7",
     "turns": [
       {
         "index": 1,
         "user": "What are your restaurant opening hours?",
         "expected_assistant": "The restaurant is open from Monday to Thursday, 8 AM to 11 PM, and on Fridays and Saturdays, 8 AM to 12 AM. On Sundays, it is open from 9 AM to 11 PM. Breakfast is served from 8 AM to 11 AM daily. The last order is 30 minutes before closing, and the kitchen closes 15 minutes before closing. Would you like to know anything else?",
-        "reply": "Our restaurant is open from 8 AM to 12 AM daily, with breakfast hours from 8 AM to 11 AM. The all-day menu is available from 11 AM onwards. Would you like to order or explore our menu?",
+        "reply": "We are open from 8 AM to 12 AM on Fridays and Saturdays, and 9 AM to 11 PM on Sundays. Our breakfast hours are 8 AM to 11 AM daily. Would you like to know more about our menu or other details?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5252.8,
+        "latency_ms": 4857.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -686,9 +686,9 @@
         "index": 2,
         "user": "I would like to order",
         "expected_assistant": "Sure, I can help you with that. What would you like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm ready to take your order. What would you like to order?",
         "tool_calls": [],
-        "latency_ms": 2886.6,
+        "latency_ms": 1003.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -697,9 +697,9 @@
         "index": 3,
         "user": "I would like to order.",
         "expected_assistant": "Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm ready to take your order. What would you like to order?",
         "tool_calls": [],
-        "latency_ms": 2909.5,
+        "latency_ms": 870.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -708,11 +708,11 @@
         "index": 4,
         "user": "1 P Bla",
         "expected_assistant": "I'm sorry, but I don't recognize \"1 P Bla\" as a valid product. Could you please tell me the name of the item you'd like to order?",
-        "reply": "I've added Classic French Fries (Regular) to your order. Your total is now \u20b989. Would you also like Pepsi (330 ml) (\u20b959)?",
+        "reply": "Sorry, we don't have 1 P Bla on the menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3030.6,
+        "latency_ms": 4381.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -721,9 +721,9 @@
         "index": 5,
         "user": "I would like to order.",
         "expected_assistant": "Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm ready to take your order. What would you like to order?",
         "tool_calls": [],
-        "latency_ms": 3149.1,
+        "latency_ms": 943.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -732,9 +732,9 @@
         "index": 6,
         "user": "French phrase",
         "expected_assistant": "I'm sorry, but I don't understand what you mean by \"French phrase.\" Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm sorry, but I don't understand what you mean by \"French phrase.\" Could you please clarify what you'd like to order?",
         "tool_calls": [],
-        "latency_ms": 2863.5,
+        "latency_ms": 1429.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -743,9 +743,11 @@
         "index": 7,
         "user": "French fries",
         "expected_assistant": "Great! We have French fries available. The price is \u20b979. Would you like to proceed with ordering French fries?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
-        "tool_calls": [],
-        "latency_ms": 2875.9,
+        "reply": "I've added Classic French Fries (Regular) to your order. Your total is now \u20b989. Would you also like Pepsi (330 ml) (\u20b959)?",
+        "tool_calls": [
+          "place_order"
+        ],
+        "latency_ms": 2649.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -754,9 +756,11 @@
         "index": 8,
         "user": "Go ahead and add a pizza.",
         "expected_assistant": "We have added the Classic French Fries (Regular) to your order. The total is \u20b989. As an upsell, you might enjoy a Pepsi (330 ml) for \u20b959. Would you like to confirm this order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
-        "tool_calls": [],
-        "latency_ms": 6114.7,
+        "reply": "The item \"pizza\" is a category, not a single item. Would you like to choose one of these pizzas? Chicken BBQ Pizza (Regular) \u2014 \u20b9249 Margherita Pizza (Regular) \u2014 \u20b9179 Paneer Makhani Pizza (Regular) \u2014 \u20b9219 Pepperoni-Style Chicken Pizza (Regular) \u2014 \u20b9269 Which one would you like?",
+        "tool_calls": [
+          "place_order"
+        ],
+        "latency_ms": 7740.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -765,9 +769,9 @@
         "index": 9,
         "user": "That is a wrong order. You have added wrong item.",
         "expected_assistant": "I apologize for the confusion. Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I see, let me clarify. The available pizza options are: Chicken BBQ Pizza (Regular) \u2014 \u20b9249 Margherita Pizza (Regular) \u2014 \u20b9179 Paneer Makhani Pizza (Regular) \u2014 \u20b9219 Pepperoni-Style Chicken Pizza (Regular) \u2014 \u20b9269 Would you like to choose one of these?",
         "tool_calls": [],
-        "latency_ms": 6676.4,
+        "latency_ms": 9024.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -776,9 +780,9 @@
         "index": 10,
         "user": "One Pigeon",
         "expected_assistant": "I'm sorry, but I don't recognize \"One Pigeon\" as a valid product. Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm sorry, but \"One Pigeon\" is not on the menu. Would you like to try something else?",
         "tool_calls": [],
-        "latency_ms": 2962.3,
+        "latency_ms": 1618.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -787,9 +791,9 @@
         "index": 11,
         "user": "One piece out!",
         "expected_assistant": "I'm sorry, but I don't recognize \"One piece out!\" as a valid product. Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm sorry, but \"One piece out!\" is not a valid order. Would you like to try something else?",
         "tool_calls": [],
-        "latency_ms": 3044.7,
+        "latency_ms": 1389.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -798,9 +802,9 @@
         "index": 12,
         "user": "peace of Trinity.",
         "expected_assistant": "I'm sorry, but I don't recognize \"peace of Trinity\" as a valid product. Could you please tell me the name of the item you'd like to order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "I'm sorry, but \"peace of Trinity\" is not on the menu. Would you like to try something else?",
         "tool_calls": [],
-        "latency_ms": 2974.5,
+        "latency_ms": 1330.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -809,9 +813,11 @@
         "index": 13,
         "user": "I would like to order one Margarita Pizza.",
         "expected_assistant": "We have added the Margherita Pizza (Regular) to your order. The total is \u20b9268. As an upsell, you might enjoy a Pepsi (330 ml) for \u20b959. Would you like to confirm this order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
-        "tool_calls": [],
-        "latency_ms": 7186.1,
+        "reply": "I've added Margherita Pizza (Regular) to your order. Your total is now \u20b9268. Would you also like Pepsi (330 ml) (\u20b959)?",
+        "tool_calls": [
+          "place_order"
+        ],
+        "latency_ms": 2960.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -820,9 +826,9 @@
         "index": 14,
         "user": "Do you have diet coke?",
         "expected_assistant": "We do have Diet Coke available. The price is \u20b959. Would you like to add it to your order?",
-        "reply": "We have Classic Salted Fries (Regular) (\u20b979), Classic Salted Fries (Large) (\u20b9109), and Masala Fries (\u20b999 / \u20b9129). Which one would you like to try?",
+        "reply": "Yes, we do have Diet Coke. Would you like to add it to your order?",
         "tool_calls": [],
-        "latency_ms": 6992.8,
+        "latency_ms": 1504.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -830,18 +836,23 @@
     ]
   },
   {
+    "file": "conversations/48746796-477a-4fcb-91b2-037fa57c9663.jsonl",
+    "conversation_id": "replay-dbe8c777",
+    "turns": []
+  },
+  {
     "file": "conversations/49141cc0-085f-469f-8d32-cef8598cd355.jsonl",
-    "conversation_id": "replay-3e855ed7",
+    "conversation_id": "replay-408e94b6",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant please?",
         "expected_assistant": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, South India, known for its Indian + Continental Fusion cuisine. We offer a variety of items including wraps, burgers, and more. Our hours are Mon\u2013Thu 8 AM\u201311 PM, Fri\u2013Sat 8 AM\u201312 AM, and Sun 9 AM\u201311 PM. We also provide delivery via Swiggy, Zomato, and our app. Would you like to see our menu?",
-        "reply": "We offer a variety of wraps and kathi rolls, including the Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), Crispy Chicken Burrito (\u20b9179), Grilled Chicken Caesar Wrap (\u20b9169), and Spicy Chicken Seekh Roll (\u20b9179). Would you like to try any of these?",
+        "reply": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, India, offering a fusion of Indian and continental cuisine. We are open from 8 AM to 12 AM, except on Sundays, when we close at 11 PM. Our menu includes items like Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), and more. We also offer delivery through Swiggy, Zomato, and our own app. Would you like to see the full menu or place an order?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 6329.4,
+        "latency_ms": 10672.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -854,7 +865,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4573.9,
+        "latency_ms": 7658.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -867,7 +878,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 4603.0,
+        "latency_ms": 4248.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -876,11 +887,11 @@
         "index": 4,
         "user": "I'd like to try one masala dosa, that's what I-",
         "expected_assistant": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Would you like to try any of these?",
-        "reply": "We have Chicken Tikka Kathi Roll (\u20b9149), Mixed Veg Fajita Wrap (\u20b9149), Paneer Bhurji Kathi Roll (\u20b9129), and Peri Peri Chicken Wrap (\u20b9169). Would you like to try any of these instead?",
+        "reply": "We do not serve dosa or any related items. Our menu includes beverages, burgers, desserts, pizza, sides, and wraps. Would you like to see any of these categories instead?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 6016.6,
+        "latency_ms": 5167.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -889,9 +900,11 @@
         "index": 5,
         "user": "I'll just go with the onion and rinse for now",
         "expected_assistant": "You ordered Onion Rings (\u20b9109). We also recommend Pepsi (330 ml) (\u20b959). Confirm your order?",
-        "reply": "We have Chicken Tikka Kathi Roll (\u20b9149), Mixed Veg Fajita Wrap (\u20b9149), Paneer Bhurji Kathi Roll (\u20b9129), and Peri Peri Chicken Wrap (\u20b9169). Would you like to try any of these instead?",
-        "tool_calls": [],
-        "latency_ms": 4794.8,
+        "reply": "We have Chicken Tikka Kathi Roll (\u20b9149), Mixed Veg Fajita Wrap (\u20b9149), Paneer Bhurji Kathi Roll (\u20b9129), and Peri Peri Chicken Wrap (\u20b9169). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 6048.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -900,12 +913,12 @@
   },
   {
     "file": "conversations/5937422c-3de8-44e7-83be-35d42e9b9314.jsonl",
-    "conversation_id": "replay-9b322a76",
+    "conversation_id": "replay-b9cf870d",
     "turns": []
   },
   {
     "file": "conversations/5bb0d931-72cb-4925-a2fa-0934efce0ccf.jsonl",
-    "conversation_id": "replay-4d2176b8",
+    "conversation_id": "replay-56a05e16",
     "turns": [
       {
         "index": 1,
@@ -915,7 +928,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2670.7,
+        "latency_ms": 2563.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -924,11 +937,9 @@
         "index": 2,
         "user": "Add a price",
         "expected_assistant": "We have added the chicken burger (169). Would you like to try the Classic French Fries (Regular) (89)?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), and you might also like Classic French Fries (Regular) (\u20b989). Would you like to add anything else?",
-        "tool_calls": [
-          "get_upsell_suggestions"
-        ],
-        "latency_ms": 3528.8,
+        "reply": "I can help with our menu, opening hours, and taking your order. What would you like?",
+        "tool_calls": [],
+        "latency_ms": 4162.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -937,11 +948,11 @@
         "index": 3,
         "user": "Add\u53ef rice.",
         "expected_assistant": "The item you requested could not be found in the menu. Would you like to try a different item?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), and you might also like Classic French Fries (Regular) (\u20b989). Would you like to add anything else?",
+        "reply": "Sorry, we don't have rice on the menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5560.7,
+        "latency_ms": 4436.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -950,11 +961,11 @@
         "index": 4,
         "user": "add a regular French fries",
         "expected_assistant": "We have added the regular French Fries (89) to your order. Your total is now 258. Would you like to try the Peri Peri Fries (Regular) (99)?",
-        "reply": "I've added Classic French Fries (Regular) to your order. Your total is now \u20b9427. Would you also like Peri Peri Fries (Regular) (\u20b999)?",
+        "reply": "I've added Classic French Fries (Regular) to your order. Your total is now \u20b9258. Would you also like Peri Peri Fries (Regular) (\u20b999)?",
         "tool_calls": [
-          "update_order"
+          "place_order"
         ],
-        "latency_ms": 2523.8,
+        "latency_ms": 2763.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -963,9 +974,9 @@
         "index": 5,
         "user": "or dependent friends",
         "expected_assistant": "I'm sorry, but I don't understand your request. Would you like to add another item to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you like to add anything else?",
+        "reply": "I'm sorry, but I cannot process that request. Would you like to try adding a different item from the menu?",
         "tool_calls": [],
-        "latency_ms": 2553.4,
+        "latency_ms": 1578.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -974,7 +985,7 @@
   },
   {
     "file": "conversations/768c310a-5a15-4b7c-bb87-e03d7eea5e0a.jsonl",
-    "conversation_id": "replay-4447b5b4",
+    "conversation_id": "replay-2917e223",
     "turns": [
       {
         "index": 1,
@@ -984,7 +995,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2552.2,
+        "latency_ms": 2532.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -993,11 +1004,11 @@
         "index": 2,
         "user": "I want to add coconut chutney as well.",
         "expected_assistant": "Sorry, we don't have coconut_chutney on the menu at the moment. Please choose from our menu \u2014 we do have Double Chicken Tower at 219 rupees, Classic Chicken Burger at 169 rupees and Chocolate Brownie at 89 rupees. Would you like one of those?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), and Classic French Fries (Regular) (\u20b989). Would you also like Coconut Chutney (\u20b959)?",
+        "reply": "Sorry, we don't have coconut_chutney on the menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5867.5,
+        "latency_ms": 4252.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1006,9 +1017,11 @@
         "index": 3,
         "user": "Mag\u012bt\u0101",
         "expected_assistant": "I'm sorry, but I don't understand the word \"Mag\u012bt\u0101\". Could you please clarify what you'd like to order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), and Classic French Fries (Regular) (\u20b989). Would you also like Coconut Chutney (\u20b959)?",
-        "tool_calls": [],
-        "latency_ms": 1919.2,
+        "reply": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 5032.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1017,9 +1030,11 @@
         "index": 4,
         "user": "Mar greita pida",
         "expected_assistant": "I'm sorry, but I don't understand the word \"Mar greita pida\". Could you please clarify what you'd like to order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), and Classic French Fries (Regular) (\u20b989). Would you also like Coconut Chutney (\u20b959)?",
-        "tool_calls": [],
-        "latency_ms": 1923.1,
+        "reply": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 5310.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1028,11 +1043,11 @@
         "index": 5,
         "user": "Before confirming my order, I want to add Classic French phrase",
         "expected_assistant": "I'm sorry, but \"Classic French phrase\" is not a product we have. Could you please clarify what you'd like to add to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)?",
+        "reply": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Which one would you like to try?",
         "tool_calls": [
-          "place_order"
+          "list_products"
         ],
-        "latency_ms": 7202.2,
+        "latency_ms": 5295.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1041,9 +1056,11 @@
         "index": 6,
         "user": "Can you add O classic. French fries before confirming my order",
         "expected_assistant": "I'm sorry, but \"O classic. French fries\" is not a product we have. Could you please clarify what you'd like to add to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)?",
-        "tool_calls": [],
-        "latency_ms": 2579.7,
+        "reply": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 5568.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1052,9 +1069,11 @@
         "index": 7,
         "user": "I would like to add classic French phrase.",
         "expected_assistant": "I'm sorry, but \"classic French phrase\" is not a product we have. Could you please clarify what you'd like to add to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)?",
-        "tool_calls": [],
-        "latency_ms": 2606.7,
+        "reply": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 5472.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1063,9 +1082,11 @@
         "index": 8,
         "user": "Can you add a cold coffee?",
         "expected_assistant": "We have the Classic Chicken Burger (\u20b9169) and the Cold Coffee (300 ml) (\u20b999). Would you like to add Classic French Fries (Regular) (\u20b989) to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)? Would you like to add Cold Coffee (\u20b969)?",
-        "tool_calls": [],
-        "latency_ms": 3130.8,
+        "reply": "I've added Cold Coffee (300 ml) to your order. Your total is now \u20b9268. Would you also like Classic French Fries (Regular) (\u20b989)?",
+        "tool_calls": [
+          "place_order"
+        ],
+        "latency_ms": 2878.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1074,9 +1095,11 @@
         "index": 9,
         "user": "Add little to little",
         "expected_assistant": "I'm sorry, but I don't understand the phrase \"little to little\". Could you please clarify what you'd like to add to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)? Would you like to add Cold Coffee (\u20b969)?",
-        "tool_calls": [],
-        "latency_ms": 3234.6,
+        "reply": "We have 7UP (330 ml) (\u20b959), Cold Coffee (300 ml) (\u20b999), Fresh Lime Soda (300 ml) (\u20b969), Mango Lassi (300 ml) (\u20b989), and Pepsi (330 ml) (\u20b959). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 6808.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1085,9 +1108,11 @@
         "index": 10,
         "user": "I am very very friendly...",
         "expected_assistant": "I'm sorry, but I don't understand the phrase \"I am very very friendly...\". Could you please clarify what you'd like to add to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)? Would you like to add Cold Coffee (\u20b969)?",
-        "tool_calls": [],
-        "latency_ms": 3154.7,
+        "reply": "We have 7UP (330 ml) (\u20b959), Cold Coffee (300 ml) (\u20b999), Fresh Lime Soda (300 ml) (\u20b969), Mango Lassi (300 ml) (\u20b989), and Pepsi (330 ml) (\u20b959). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 6848.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1096,9 +1121,11 @@
         "index": 11,
         "user": "Paris Paris Goodbye",
         "expected_assistant": "I'm sorry, but I don't understand the phrase \"Paris Paris Goodbye\". Could you please clarify what you'd like to add to your order?",
-        "reply": "We have Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Peri Peri Fries (Regular) (\u20b999). Would you also like Coconut Chutney (\u20b959)? Would you like to add Cold Coffee (\u20b969)?",
-        "tool_calls": [],
-        "latency_ms": 3254.6,
+        "reply": "We have 7UP (330 ml) (\u20b959), Cold Coffee (300 ml) (\u20b999), Fresh Lime Soda (300 ml) (\u20b969), Mango Lassi (300 ml) (\u20b989), and Pepsi (330 ml) (\u20b959). Which one would you like to try?",
+        "tool_calls": [
+          "list_products"
+        ],
+        "latency_ms": 6871.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1106,16 +1133,21 @@
     ]
   },
   {
+    "file": "conversations/77265208-dbc3-4710-9d2d-18007b1a3664.jsonl",
+    "conversation_id": "replay-178917fd",
+    "turns": []
+  },
+  {
     "file": "conversations/7b925988-66d6-45f1-8c3f-63a1effd8604.jsonl",
-    "conversation_id": "replay-edf8419e",
+    "conversation_id": "replay-4cea8307",
     "turns": [
       {
         "index": 1,
         "user": "dB En for at personality",
         "expected_assistant": "We have beverages (5), burgers (7), desserts (2), pizza (4), sides (4), and wraps (4). Which category would you like to explore?",
-        "reply": "I see. Could you please clarify what you're asking for? I can help you with our menu items, prices, or any other information you need.",
+        "reply": "I see. Could you please clarify what you're asking for? Are you looking for menu items, prices, availability, or something else?",
         "tool_calls": [],
-        "latency_ms": 3125.5,
+        "latency_ms": 2835.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1128,7 +1160,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4963.6,
+        "latency_ms": 4683.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1141,7 +1173,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6902.4,
+        "latency_ms": 6494.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1154,7 +1186,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3864.8,
+        "latency_ms": 3569.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1167,7 +1199,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 2832.9,
+        "latency_ms": 2691.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1176,7 +1208,7 @@
   },
   {
     "file": "conversations/8972af1f-5266-48a7-892a-2d871d97867d.jsonl",
-    "conversation_id": "replay-2f7d7eee",
+    "conversation_id": "replay-8770cf1d",
     "turns": [
       {
         "index": 1,
@@ -1186,7 +1218,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 3145.1,
+        "latency_ms": 3005.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1195,11 +1227,11 @@
         "index": 2,
         "user": "burgers.",
         "expected_assistant": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Aloo Tikki Burger (\u20b9119), Classic Chicken Burger (\u20b9169), Crispy Veg Patty Burger (\u20b9129), Double Chicken Tower (\u20b9219), Double Stack Veg (\u20b9189), Paneer Tikka Burger (\u20b9159), and Spicy Chicken Crunch Burger (\u20b9179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4980.7,
+        "latency_ms": 5044.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1212,7 +1244,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3053.7,
+        "latency_ms": 2827.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1221,11 +1253,11 @@
         "index": 4,
         "user": "I would like to add coca cola also.",
         "expected_assistant": "I've added Classic French Fries (Regular) to your order. Your total is now \u20b9268. Would you also like Peri Peri Fries (Regular) (\u20b999)?",
-        "reply": "Sorry, we don't have dd coca cola also on the menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
+        "reply": "\"Classic Coca Cola (12oz)\" is not on the menu. Here are real alternatives: Classic Chicken Burger (\u20b9169). Would you like to try this instead?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5319.8,
+        "latency_ms": 5243.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1234,11 +1266,11 @@
         "index": 5,
         "user": "Coca-Cola not French fries.",
         "expected_assistant": "Sorry, that isn't on our menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
-        "reply": "I've added Classic Chicken Burger to your order. Your total is now \u20b9348. Would you also like Classic French Fries (Regular) (\u20b989)?",
+        "reply": "I've added Classic French Fries (Regular) to your order. Your total is now \u20b9268. Would you also like Peri Peri Fries (Regular) (\u20b999)?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3072.8,
+        "latency_ms": 2809.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1246,8 +1278,13 @@
     ]
   },
   {
+    "file": "conversations/8c649737-4bf1-4e4f-8927-ccfc0380da30.jsonl",
+    "conversation_id": "replay-e582a4b6",
+    "turns": []
+  },
+  {
     "file": "conversations/957038d7-0d0f-4d98-88b9-3fa0241d14d9.jsonl",
-    "conversation_id": "replay-60b22000",
+    "conversation_id": "replay-26191d83",
     "turns": [
       {
         "index": 1,
@@ -1255,7 +1292,7 @@
         "expected_assistant": "I'm sorry, I don't understand your question. Would you like to see our menu or place an order?",
         "reply": "I don't have the capability to go anywhere or compare locations. How can I assist you with your order or questions about our menu?",
         "tool_calls": [],
-        "latency_ms": 3063.2,
+        "latency_ms": 2896.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1264,9 +1301,9 @@
         "index": 2,
         "user": "Tell me something about to the front feed.",
         "expected_assistant": "I'm not sure I understand what you're asking. Would you like to see our menu or place an order?",
-        "reply": "I don't have access to information about a \"front feed.\" How can I assist you with your order or questions about our menu?",
+        "reply": "I don't have the capability to go anywhere or compare locations. How can I assist you with your order or questions about our menu?",
         "tool_calls": [],
-        "latency_ms": 3267.5,
+        "latency_ms": 2823.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1275,17 +1312,17 @@
   },
   {
     "file": "conversations/98f377b8-2aef-4e67-8c7b-e999f967ac38.jsonl",
-    "conversation_id": "replay-ce30f8fe",
+    "conversation_id": "replay-a2a659e9",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant please?",
         "expected_assistant": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, India, offering a fusion of Indian and continental cuisine. We are open from 8 AM to 12 AM on weekdays and 9 AM to 11 PM on weekends. Our menu includes items like Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), and Crispy Chicken Burrito (\u20b9179). Would you like to see the full menu or place an order?",
-        "reply": "Here is information about QuickBite Express: Brand Name: QuickBite Express | Tagline: \"Fresh. Fast. Flavourful.\" Outlet Type: Quick Service Restaurant (QSR) | Parent Company: QuickBite India Pvt. Ltd. Cuisine: Indian + Continental Fusion | FSSAI License: 10015033005321 GST Registration: 33AAACQ5678G1ZM Hours: Mon\u2013Thu 8 AM\u201311 PM \u00b7 Fri\u2013Sat 8 AM\u201312 AM \u00b7 Sun 9 AM\u201311 PM Breakfast Hours: 8 AM\u201311 AM daily | All-Day Menu: 11 AM onwards Last Order: 30 minutes before closing | Kitchen Closes: 15 minutes before",
+        "reply": "We offer a variety of Indian and Continental fusion dishes, including Chicken Wraps & Rolls. Our menu includes options like the Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), and more. For more details, feel free to ask!",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 11229.7,
+        "latency_ms": 5069.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1298,7 +1335,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3230.4,
+        "latency_ms": 2778.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1307,11 +1344,11 @@
         "index": 3,
         "user": "Now I'd like to cancel my order, please.",
         "expected_assistant": "Your order has been cancelled. The cart is now empty. Would you like to place a new order or see the menu?",
-        "reply": "Your order has been cancelled. The \"Classic Chicken Burger\" has been removed from your cart. Would you like to start over with a new order?",
+        "reply": "Your order has been cancelled. The Classic Chicken Burger has been removed from your cart. Would you like to start over and place a new order?",
         "tool_calls": [
           "cancel_order"
         ],
-        "latency_ms": 3755.0,
+        "latency_ms": 3393.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1324,7 +1361,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3529.2,
+        "latency_ms": 3318.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1333,22 +1370,24 @@
         "index": 5,
         "user": "Yes, I'd like to proceed with this edition.",
         "expected_assistant": "Your order for 1 Pepsi (330 ml) is confirmed. Order ID: 101. Total: \u20b959. Would you like to add anything else?",
-        "reply": "Your order is confirmed! Order number 233, total \u20b9228. Thank you!",
+        "reply": "Thank you for choosing QuickBite Express! Have a great meal! Sorry, I couldn't confirm your order just now. Please say \"confirm my order\" once more, or ask a member of staff.",
         "tool_calls": [
-          "confirm_active_order"
+          "confirm_order"
         ],
-        "latency_ms": 4402.0,
+        "latency_ms": 3122.1,
         "error": null,
-        "guard_corrected": false,
+        "guard_corrected": true,
         "hard_failed": false
       },
       {
         "index": 6,
         "user": "What is the capital of India?",
         "expected_assistant": "The capital of India is New Delhi. Would you like to place an order or see the menu?",
-        "reply": "The capital of India is New Delhi.",
-        "tool_calls": [],
-        "latency_ms": 913.5,
+        "reply": "The capital of India is New Delhi. Let me know if you need any more information!",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 4055.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1357,9 +1396,11 @@
         "index": 7,
         "user": "How to control the traffic in Bangalore",
         "expected_assistant": "I don't have information about traffic control in Bangalore. However, I can help you with our menu or place an order. Would you like to see the menu or place an order?",
-        "reply": "The best way to control traffic in Bangalore is to use the official traffic management system, which includes real-time traffic updates and navigation apps like Google Maps or Waze. These apps help in finding the least congested routes. Additionally, following traffic signals and avoiding sudden lane changes can also help in managing traffic flow.",
-        "tool_calls": [],
-        "latency_ms": 3096.5,
+        "reply": "I don't have information about traffic control in Bangalore. However, you can check the latest traffic updates and navigation tips on the official Bangalore Traffic Police website or use a navigation app like Google Maps for real-time traffic information. Let me know if you need help with anything else!",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 5611.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1368,17 +1409,17 @@
   },
   {
     "file": "conversations/9ad186c5-cf90-4617-8dd1-0131ee37279e.jsonl",
-    "conversation_id": "replay-33ce4ebc",
+    "conversation_id": "replay-01e1ebe4",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant?",
         "expected_assistant": "The restaurant, QuickBite Express, is a Quick Service Restaurant (QSR) in Chennai, South India. It offers Indian + Continental Fusion cuisine and has a FSSAI license. The outlet is open from 8 AM to 12 AM on Fridays and Saturdays, and 9 AM to 11 PM on Sundays. It also provides delivery via Swiggy, Zomato, and its own app. The restaurant has 64 indoor and 12 outdoor seating options.",
-        "reply": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, India, offering a fusion of Indian and continental cuisine. We are open from 8 AM to 12 AM on weekdays, 8 AM to 12 AM on weekends, and 9 AM to 11 PM on Sundays. We also offer breakfast from 8 AM to 11 AM. For more details, please let me know what you'd like to order!",
+        "reply": "We are QuickBite Express, a QSR voice kiosk offering Indian + Continental fusion cuisine. Our outlet is open from 8 AM to 12 AM, except on Sundays when it closes at 11 PM. We serve a variety of items, including Chicken Wraps & Rolls, with prices starting at \u20b9169. Would you like to see the full menu or place an order?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 10267.2,
+        "latency_ms": 9175.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1391,7 +1432,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3017.6,
+        "latency_ms": 2790.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1400,11 +1441,11 @@
         "index": 3,
         "user": "Do you have masala dosa?",
         "expected_assistant": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Which one would you like to try?",
-        "reply": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Do you want any of these?",
+        "reply": "We currently do not have masala dosa on the menu. However, you can try our sides like Classic French Fries (\u20b989), Garlic Bread (\u20b999), Onion Rings (\u20b9109), or Peri Peri Fries (\u20b999). Would you like to order any of these?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4466.6,
+        "latency_ms": 4752.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1413,11 +1454,11 @@
         "index": 4,
         "user": "Just tell me whether you have Masala Dosa or don't. Just yes or no.",
         "expected_assistant": "We do not have Masala Dosa on the menu. Would you like to try any of the sides listed above?",
-        "reply": "We do not have Masala Dosa on the menu. Would you like to try any of the sides we do have?",
+        "reply": "We do not have Masala Dosa on the menu.",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4563.9,
+        "latency_ms": 3128.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1426,11 +1467,11 @@
         "index": 5,
         "user": "I'd like to order one Pepsi.",
         "expected_assistant": "We have added Pepsi (330 ml) to your order. The total is \u20b959. Would you like to try Classic French Fries (Regular) (\u20b989) as a pairing?",
-        "reply": "\"Pepsi (12oz) (Regular)\" is not on the menu. Here are real alternatives: Paneer Makhani Pizza (Regular) (\u20b9219), Margherita Pizza (Regular) (\u20b9179). Would you like to try any of these?",
+        "reply": "We do not have Pepsi (Regular) (12oz) on the menu. However, you can try our pizzas like Paneer Makhani Pizza (Regular) (\u20b9219). Would you like to order that?",
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6797.8,
+        "latency_ms": 5675.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1439,7 +1480,7 @@
   },
   {
     "file": "conversations/9bd54abc-2198-4aab-b6a8-f94c8a6e4536.jsonl",
-    "conversation_id": "replay-45abc890",
+    "conversation_id": "replay-ba8fc44c",
     "turns": [
       {
         "index": 1,
@@ -1449,7 +1490,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2503.8,
+        "latency_ms": 2382.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1462,7 +1503,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 4503.8,
+        "latency_ms": 4507.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1475,7 +1516,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2682.1,
+        "latency_ms": 2533.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1484,17 +1525,17 @@
   },
   {
     "file": "conversations/a29c9c39-8eee-4004-a500-e2a18ada8c4f.jsonl",
-    "conversation_id": "replay-2168b0aa",
+    "conversation_id": "replay-b1fca6ea",
     "turns": [
       {
         "index": 1,
         "user": "Hi can you tell me something about your restaurant?",
         "expected_assistant": "We have burgers, pizza, wraps, sides, beverages, and desserts. Which category would you like to explore?",
-        "reply": "QuickBite Express is a Quick Service Restaurant (QSR) in Chennai, South India, offering a fusion of Indian and Continental cuisine. We are open from 8 AM to 12 AM on Fridays and Saturdays, and 9 AM to 11 PM on Sundays. Our menu includes burgers, pizzas, wraps, sides, beverages, and desserts. We also offer delivery through Swiggy, Zomato, and our own app. Would you like to see our menu or have any specific questions about our items?",
+        "reply": "We are QuickBite Express, a QSR voice kiosk offering Indian + Continental fusion cuisine. Our menu includes burgers, pizza, wraps, sides, beverages, and desserts. We are open from 8 AM onwards, with breakfast hours until 11 AM. We offer takeout, delivery via Swiggy, Zomato, and our app, and have 64 indoor + 12 outdoor seats. Would you like to see our menu or have any specific questions?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 10844.4,
+        "latency_ms": 9910.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1503,11 +1544,9 @@
         "index": 2,
         "user": "Can you tell me the timings of your restaurant?",
         "expected_assistant": "Our restaurant is open from 8 AM to 11 PM on weekdays, 8 AM to 12 AM on weekends, and 9 AM to 11 PM on Sundays. What else would you like to know?",
-        "reply": "Our restaurant is open from 8 AM to 11 PM, Monday through Thursday. On Fridays and Saturdays, we are open until 12 AM. On Sundays, we are open from 9 AM to 11 PM. We also offer a breakfast menu from 8 AM to 11 AM daily. Would you like to see our menu or have any other questions?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 6773.6,
+        "reply": "We are open from 8 AM onwards, with breakfast hours until 11 AM. We are closed at 12 AM on Fridays and Saturdays, and until 11 PM on Sundays. Would you like to see our menu or have any other questions?",
+        "tool_calls": [],
+        "latency_ms": 2667.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1516,11 +1555,11 @@
         "index": 3,
         "user": "What is the restaurant name?",
         "expected_assistant": "The restaurant's name is QuickBite Express. What else would you like to know?",
-        "reply": "The restaurant is called QuickBite Express. We are a Quick Service Restaurant (QSR) in Chennai, South India, offering a fusion of Indian and Continental cuisine. Would you like to see our menu or have any other questions?",
+        "reply": "The restaurant is called QuickBite Express. We are a QSR voice kiosk offering a variety of menu items, including burgers, pizza, wraps, sides, beverages, and desserts. Would you like to see our menu or have any other questions?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 8484.7,
+        "latency_ms": 8063.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1529,7 +1568,7 @@
   },
   {
     "file": "conversations/ad058309-fe2c-4c5f-987a-04894d930fc3.jsonl",
-    "conversation_id": "replay-bc612b65",
+    "conversation_id": "replay-38128920",
     "turns": [
       {
         "index": 1,
@@ -1537,7 +1576,7 @@
         "expected_assistant": "I'm here to help you with your order. What would you like to order?",
         "reply": "I'm just a kiosk ordering assistant. How can I help you today?",
         "tool_calls": [],
-        "latency_ms": 854.0,
+        "latency_ms": 800.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1550,7 +1589,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2761.3,
+        "latency_ms": 2476.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1563,7 +1602,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 2918.2,
+        "latency_ms": 2785.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1576,7 +1615,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2854.4,
+        "latency_ms": 2539.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1585,11 +1624,11 @@
         "index": 5,
         "user": "Can you remove masala dosa from my cart?",
         "expected_assistant": "The cart currently has Fresh Lime Soda (300 ml) and Chocolate Brownie. None of the items you mentioned are in the cart. Would you like to remove one of these?",
-        "reply": "None of the items in your cart are \"masala dosa\". Your cart currently has Fresh Lime Soda (300 ml) and Chocolate Brownie. Which of these would you like to remove?",
+        "reply": "None of the items you asked for are in your cart. Your current order includes Fresh Lime Soda (300 ml) and Chocolate Brownie. Would you like to remove either of these?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 5281.0,
+        "latency_ms": 4888.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1598,11 +1637,11 @@
         "index": 6,
         "user": "What is the location of restaurant?",
         "expected_assistant": "The restaurant is located in Chennai, South India. Would you like to know more about our menu or services?",
-        "reply": "The restaurant is located in Chennai, South India. It is a Quick Service Restaurant (QSR) with Indian + Continental Fusion cuisine. The outlet is open from Monday to Sunday, with specific hours for breakfast, lunch, and dinner. Would you like more details about the location or hours?",
+        "reply": "The restaurant is located in Chennai, South India. It is a Quick Service Restaurant (QSR) with Indian + Continental Fusion cuisine. Would you like to know more about the menu or other details?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5859.1,
+        "latency_ms": 4737.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1611,12 +1650,12 @@
   },
   {
     "file": "conversations/bb961950-0232-4474-93be-30f2627957a7.jsonl",
-    "conversation_id": "replay-46b6f7fc",
+    "conversation_id": "replay-9d38eaba",
     "turns": []
   },
   {
     "file": "conversations/cab11329-8a6c-4d37-b93f-2ab914939e52.jsonl",
-    "conversation_id": "replay-c4135693",
+    "conversation_id": "replay-6d958dd5",
     "turns": [
       {
         "index": 1,
@@ -1626,7 +1665,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2708.3,
+        "latency_ms": 2560.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1635,11 +1674,11 @@
         "index": 2,
         "user": "Can you add one classic french fries as well?",
         "expected_assistant": "You ordered a Classic Chicken Burger (\u20b9169) and Classic French Fries (Regular) (\u20b989). We recommend Peri Peri Fries (Regular) (\u20b999). Confirm your order?",
-        "reply": "Would you like to confirm your order?",
+        "reply": "Sorry, that isn't on our menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
         "tool_calls": [
           "update_order"
         ],
-        "latency_ms": 4871.8,
+        "latency_ms": 4728.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1648,11 +1687,11 @@
         "index": 3,
         "user": "Can you add one cold coffee also?",
         "expected_assistant": "You ordered a Classic Chicken Burger (\u20b9169), Classic French Fries (Regular) (\u20b989), and Cold Coffee (\u20b999). We recommend Peri Peri Fries (Regular) (\u20b999). Confirm your order?",
-        "reply": "I've added Cold Coffee (300 ml) to your order. Your total is now \u20b9268. Would you also like Classic French Fries (Regular) (\u20b989)?",
+        "reply": "Sorry, that isn't on our menu at the moment. Please choose an item from our menu \u2014 what would you like instead?",
         "tool_calls": [
-          "place_order"
+          "update_order"
         ],
-        "latency_ms": 2798.7,
+        "latency_ms": 4832.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1661,9 +1700,9 @@
         "index": 4,
         "user": "If you have any remote penetrate on the other",
         "expected_assistant": "We don't have any item called \"remote penetrate.\" Would you like to see the menu or place another order?",
-        "reply": "I'm sorry, but I don't understand your request. Could you please clarify what you're asking for?",
+        "reply": "I'm sorry, but I don't understand your request. Would you like to add another item to your order or adjust anything else?",
         "tool_calls": [],
-        "latency_ms": 1523.0,
+        "latency_ms": 1485.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1672,11 +1711,11 @@
         "index": 5,
         "user": "Can you remove french fries from the order?",
         "expected_assistant": "You ordered a Classic Chicken Burger (\u20b9169) and Cold Coffee (\u20b999). We recommend Peri Peri Fries (Regular) (\u20b999). Confirm your order?",
-        "reply": "The cart currently contains: Classic Chicken Burger and Cold Coffee (300 ml). It seems the French Fries are not in the order. Could you please confirm which item you'd like to remove from your order?",
+        "reply": "The cart currently contains: Classic Chicken Burger. Would you like to remove it or adjust anything else?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 5215.4,
+        "latency_ms": 3871.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1685,17 +1724,17 @@
   },
   {
     "file": "conversations/d6c38ce7-a1a0-4d09-a4d5-65900a5195fb.jsonl",
-    "conversation_id": "replay-8a9a1b68",
+    "conversation_id": "replay-7659e616",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant?",
         "expected_assistant": "The restaurant, QuickBite Express, is a Quick Service Restaurant (QSR) in Chennai, South India. It offers Indian + Continental Fusion cuisine and has a FSSAI license. The outlet is open from 8 AM to 12 AM on Fridays and Saturdays, and 9 AM to 11 PM on Sundays. It also provides delivery via Swiggy, Zomato, and its own app. The restaurant has 64 indoor and 12 outdoor seating options.",
-        "reply": "We offer a variety of Indian and continental fusion dishes, including Chicken Wraps & Rolls. Here are some options: Chicken Tikka Kathi Roll \u2014 \u20b9169 Butter Chicken Wrap \u2014 \u20b9179 Crispy Chicken Burrito \u2014 \u20b9179 Grilled Chicken Caesar Wrap \u2014 \u20b9169 Spicy Chicken Seekh Roll \u2014 \u20b9179 Would you like to see more options or place an order?",
+        "reply": "We offer a variety of hot beverages and desserts. Our hot beverages are served from 8 AM to 11 PM, and desserts from 11 AM to 11 PM (with some limitations during breakfast). We also offer milk options like full cream, toned, oat milk, and almond milk, with additional costs for certain types. Sugar levels can be adjusted, and we can provide sweetener like stevia upon request. Would you like to try any of our offerings?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 10864.4,
+        "latency_ms": 6718.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1708,7 +1747,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2987.8,
+        "latency_ms": 2852.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1721,7 +1760,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3086.3,
+        "latency_ms": 2943.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1734,7 +1773,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3130.0,
+        "latency_ms": 2971.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1742,18 +1781,23 @@
     ]
   },
   {
+    "file": "conversations/d9e43e0e-004f-4d3e-8c0c-9a97eeb66b05.jsonl",
+    "conversation_id": "replay-6a7434ac",
+    "turns": []
+  },
+  {
     "file": "conversations/ef776fff-2275-4fe2-a3ae-e05b6cc778e0.jsonl",
-    "conversation_id": "replay-62cf0b05",
+    "conversation_id": "replay-c7c19be0",
     "turns": [
       {
         "index": 1,
         "user": "Can you tell me something about the restaurant?",
         "expected_assistant": "The restaurant, QuickBite Express, is a Quick Service Restaurant (QSR) in Chennai, South India. It offers Indian + Continental Fusion cuisine. The outlet is open from Monday to Thursday 8 AM\u201311 PM, Friday and Saturday 8 AM\u201312 AM, and Sunday 9 AM\u201311 PM. It also provides delivery via Swiggy, Zomato, and its own app. The restaurant has 64 indoor and 12 outdoor seating options.",
-        "reply": "We serve Indian and Continental fusion cuisine, with breakfast from 8 AM\u201311 AM and a full menu from 11 AM onwards. Our hot beverages and desserts are available until 11 PM. Do you need more details?",
+        "reply": "We serve Indian and Continental fusion cuisine, with breakfast from 8 AM\u201311 AM and a full menu from 11 AM onwards. Our hot beverages and desserts are available until 11 PM. Would you like to see our menu or ask about something else?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 4962.3,
+        "latency_ms": 4962.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1766,7 +1810,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2848.5,
+        "latency_ms": 2721.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1779,7 +1823,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3087.4,
+        "latency_ms": 2983.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1788,11 +1832,11 @@
         "index": 4,
         "user": "Can you remove all the when it comes from my card?",
         "expected_assistant": "Your current order has been successfully removed. The cart is now empty. Would you like to place a new order?",
-        "reply": "I've removed Aloo Tikki Burger and Fresh Lime Soda (300 ml). Your cart is now empty.",
+        "reply": "I've removed the Aloo Tikki Burger and Fresh Lime Soda from your order. The classic french fries (regular) were not in your cart. Your cart is now empty. Would you like to order something else?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3722.1,
+        "latency_ms": 6544.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1801,17 +1845,17 @@
   },
   {
     "file": "conversations/fec407b2-c99c-4004-87da-1c8bc1a5bc33.jsonl",
-    "conversation_id": "replay-2435f84e",
+    "conversation_id": "replay-40ee12f7",
     "turns": [
       {
         "index": 1,
         "user": "Tell me something about the restaurant.",
         "expected_assistant": "We have burgers, pizza, wraps, sides, beverages, and desserts. Which category would you like to explore?",
-        "reply": "We offer a variety of Indian and continental fusion dishes, including Chicken Wraps & Rolls. Our menu includes options like the Chicken Tikka Kathi Roll (\u20b9169), Butter Chicken Wrap (\u20b9179), and Crispy Chicken Burrito (\u20b9179). Would you like to explore our menu further?",
+        "reply": "We serve Indian + Continental fusion cuisine. Our menu includes items like the Chicken Tikka Kathi Roll (\u20b9169) and Butter Chicken Wrap (\u20b9179). Would you like to explore our menu or check our opening hours?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 7514.4,
+        "latency_ms": 6039.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1820,11 +1864,11 @@
         "index": 2,
         "user": "I would like to explore different type of burgers.",
         "expected_assistant": "Sorry, I encountered an error. Please try again.",
-        "reply": "We have the following burgers: Aloo Tikki Burger (\u20b9119), Classic Chicken Burger (\u20b9169), Crispy Veg Patty Burger (\u20b9129), Double Chicken Tower (\u20b9219), Double Stack Veg (\u20b9189), Paneer Tikka Burger (\u20b9159), and Spicy Chicken Crunch Burger (\u20b9179). Which one would you like to try?",
+        "reply": "We have the following burgers: Aloo Tikki Burger (\u20b9119), Classic Chicken Burger (\u20b9169), Crispy Veg Patty Burger (\u20b9129), Double Chicken Tower (\u20b9219), Double Stack Veg (\u20b9189), Paneer Tikka Burger (\u20b9159), Spicy Chicken Crunch Burger (\u20b9179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5811.1,
+        "latency_ms": 5477.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1833,11 +1877,11 @@
         "index": 3,
         "user": "I would like to explore different type of burgers.",
         "expected_assistant": "Sorry, I encountered an error. Please try again.",
-        "reply": "We have the following burgers: Aloo Tikki Burger (\u20b9119), Classic Chicken Burger (\u20b9169), Crispy Veg Patty Burger (\u20b9129), Double Chicken Tower (\u20b9219), Double Stack Veg (\u20b9189), Paneer Tikka Burger (\u20b9159), and Spicy Chicken Crunch Burger (\u20b9179). Which one would you like to try?",
+        "reply": "We have the following burgers: Aloo Tikki Burger (\u20b9119), Classic Chicken Burger (\u20b9169), Crispy Veg Patty Burger (\u20b9129), Double Chicken Tower (\u20b9219), Double Stack Veg (\u20b9189), Paneer Tikka Burger (\u20b9159), Spicy Chicken Crunch Burger (\u20b9179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 6033.8,
+        "latency_ms": 5612.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1846,15 +1890,15 @@
   },
   {
     "file": "conversations/replay-04f99d23.jsonl",
-    "conversation_id": "replay-bf9b5c51",
+    "conversation_id": "replay-7318a85c",
     "turns": [
       {
         "index": 1,
         "user": "Coming on the researchers, you have...",
         "expected_assistant": "Sorry, I encountered an error. Please try again.",
-        "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
+        "reply": "I'm sorry, but I don't understand the request. Could you please clarify what you need?",
         "tool_calls": [],
-        "latency_ms": 1113.8,
+        "latency_ms": 975.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1867,7 +1911,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 3818.1,
+        "latency_ms": 3643.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1880,7 +1924,7 @@
         "tool_calls": [
           "cancel_order"
         ],
-        "latency_ms": 2788.9,
+        "latency_ms": 2670.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1889,7 +1933,7 @@
   },
   {
     "file": "conversations/replay-401407cc.jsonl",
-    "conversation_id": "replay-b3a10645",
+    "conversation_id": "replay-e0db99a2",
     "turns": [
       {
         "index": 1,
@@ -1899,7 +1943,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2371.4,
+        "latency_ms": 2258.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1912,7 +1956,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4320.1,
+        "latency_ms": 4069.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1925,7 +1969,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 3010.1,
+        "latency_ms": 2577.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1938,7 +1982,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5758.3,
+        "latency_ms": 5166.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1947,15 +1991,15 @@
   },
   {
     "file": "conversations/replay-4048fa5d.jsonl",
-    "conversation_id": "replay-e86f187c",
+    "conversation_id": "replay-10daf201",
     "turns": [
       {
         "index": 1,
         "user": "Coming on the researchers, you have...",
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
-        "reply": "I'm sorry, but I don't understand the request. Could you please clarify what you need help with?",
+        "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 1123.5,
+        "latency_ms": 1064.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1964,11 +2008,11 @@
         "index": 2,
         "user": "Tell me the burgers.",
         "expected_assistant": "We have Aloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alootikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Alooti Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4923.7,
+        "latency_ms": 4647.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -1977,7 +2021,7 @@
   },
   {
     "file": "conversations/replay-49d47e85.jsonl",
-    "conversation_id": "replay-a655ed43",
+    "conversation_id": "replay-f5c901f9",
     "turns": [
       {
         "index": 1,
@@ -1987,7 +2031,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2365.3,
+        "latency_ms": 2266.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2000,7 +2044,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4296.0,
+        "latency_ms": 4049.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2009,7 +2053,7 @@
   },
   {
     "file": "conversations/replay-60fd7d58.jsonl",
-    "conversation_id": "replay-b7c83801",
+    "conversation_id": "replay-29dd4625",
     "turns": [
       {
         "index": 1,
@@ -2019,7 +2063,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2404.6,
+        "latency_ms": 2277.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2032,7 +2076,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4314.8,
+        "latency_ms": 4064.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2045,7 +2089,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2727.7,
+        "latency_ms": 2583.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2058,7 +2102,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5419.3,
+        "latency_ms": 5163.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2067,7 +2111,7 @@
   },
   {
     "file": "conversations/replay-683e5f84.jsonl",
-    "conversation_id": "replay-3116a3e5",
+    "conversation_id": "replay-db951d1c",
     "turns": [
       {
         "index": 1,
@@ -2077,7 +2121,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2391.5,
+        "latency_ms": 2226.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2090,7 +2134,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4305.8,
+        "latency_ms": 4058.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2103,7 +2147,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2991.5,
+        "latency_ms": 2487.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2116,7 +2160,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5749.9,
+        "latency_ms": 5098.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2125,15 +2169,15 @@
   },
   {
     "file": "conversations/replay-6b53b4f3.jsonl",
-    "conversation_id": "replay-dbd77f6f",
+    "conversation_id": "replay-cf4ee774",
     "turns": [
       {
         "index": 1,
         "user": "Coming on the researchers, you have...",
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
-        "reply": "I'm sorry, but I don't understand the request. Could you please clarify what you need help with?",
+        "reply": "I'm sorry, but I don't understand the request. Could you please clarify what you need?",
         "tool_calls": [],
-        "latency_ms": 1117.4,
+        "latency_ms": 981.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2142,11 +2186,11 @@
         "index": 2,
         "user": "Tell me the burgers.",
         "expected_assistant": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alooti Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4937.7,
+        "latency_ms": 4594.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2159,7 +2203,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6904.0,
+        "latency_ms": 6412.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2172,7 +2216,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3841.5,
+        "latency_ms": 3584.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2181,11 +2225,11 @@
         "index": 5,
         "user": "If I remove all home and burst or bring my order, we'll be the total after that.",
         "expected_assistant": "I see. Could you please clarify what you'd like to do with the order? Are you trying to confirm it, update it, or view it?",
-        "reply": "I've removed Aloo Tikki Burger, Crispy Veg Patty Burger, Double Stack Veg, Paneer Tikka Burger, and Spicy Chicken Crunch Burger. Your cart is now empty.",
+        "reply": "I've removed Alo Tikki Burger, Crispy Veg Patty Burger, Paneer Tikka Burger, and Spicy Chicken Crunch Burger. Double Stack Veg was not in the cart. Your cart is now empty. Would you like to add anything else?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 5924.4,
+        "latency_ms": 8902.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2194,11 +2238,9 @@
         "index": 6,
         "user": "Can you tell me who is the president of India?",
         "expected_assistant": "The president of India is Droupadi Murmu. She took office on 7 July 2022. Would you like to know more about the Indian president or something else?",
-        "reply": "The president of India is Droupadi Murmu. She took office on 7 July 2022. Would you like to know anything else?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 4604.8,
+        "reply": "I don't have information about the president of India. Would you like to see our menu or place an order?",
+        "tool_calls": [],
+        "latency_ms": 2661.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2207,11 +2249,11 @@
         "index": 7,
         "user": "May I know the restaurant name?",
         "expected_assistant": "The restaurant's name is QuickBite Express. Is there anything else I can help you with?",
-        "reply": "The restaurant name is QuickBite Express. Is there anything else I can assist you with?",
+        "reply": "The restaurant is called QuickBite Express.",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5491.4,
+        "latency_ms": 3665.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2220,9 +2262,11 @@
         "index": 8,
         "user": "What is the sitting capacity of kick, bite-express restaurant?",
         "expected_assistant": "The sitting capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to know more about our restaurant or make a selection from our menu?",
-        "reply": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Is there anything else I can assist you with?",
-        "tool_calls": [],
-        "latency_ms": 1857.1,
+        "reply": "The sitting capacity of Kick Bite-Express restaurant is 64 indoor seats plus 12 outdoor patio seats. Would you like to see our menu or place an order?",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 4907.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2231,11 +2275,9 @@
         "index": 9,
         "user": "Would you be able to help me to book a table?",
         "expected_assistant": "We currently do not offer table booking services. However, you can place an order for takeaway or dine-in. Would you like to proceed with ordering or would you prefer to check our menu?",
-        "reply": "We do not offer table booking services. However, you can visit our restaurant directly or use our app for more information. Is there anything else I can assist you with?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 6982.2,
+        "reply": "I don't have the capability to book tables. However, you can call ahead to reserve a table. Would you like to see our menu or place an order?",
+        "tool_calls": [],
+        "latency_ms": 3654.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2244,11 +2286,9 @@
         "index": 10,
         "user": "Can you tell me how we can reduce the traffic in Bangalore?",
         "expected_assistant": "I'm sorry, but I don't have the capability to provide information on traffic management in Bangalore. However, I can help you with our menu or order. Would you like to proceed with ordering or check our menu?",
-        "reply": "I'm sorry, but I don't have information about reducing traffic in Bangalore. However, you can visit our restaurant directly or use our app for more information. Is there anything else I can assist you with?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 5233.9,
+        "reply": "I don't have the capability to provide information on traffic management in Bangalore. Would you like to see our menu or place an order?",
+        "tool_calls": [],
+        "latency_ms": 3101.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2257,9 +2297,9 @@
         "index": 11,
         "user": "Which model are you using?",
         "expected_assistant": "I am using the QuickBite Express kiosk system, which is designed to help customers place orders and navigate our menu. Would you like to proceed with ordering or check our menu?",
-        "reply": "I am using the QuickBite Express kiosk system, which is designed to help customers place orders and get information about our restaurant. Is there anything else I can assist you with?",
+        "reply": "I am using the QuickBite Express kiosk system, designed to assist with ordering and menu inquiries. Would you like to see our menu or place an order?",
         "tool_calls": [],
-        "latency_ms": 2203.2,
+        "latency_ms": 1823.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2268,11 +2308,9 @@
         "index": 12,
         "user": "Can you please add the rest? I first bazirion to my card. from a fossil.",
         "expected_assistant": "I don't have information about the \"rest\" or \"bazirion\" you mentioned. Would you like to proceed with ordering from our menu or check our available items?",
-        "reply": "I'm sorry, but I don't have information about a \"rest of the model.\" Would you like assistance with anything else related to our restaurant or order?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 6597.3,
+        "reply": "I don't have information about the rest of the model. Would you like to see our menu or place an order?",
+        "tool_calls": [],
+        "latency_ms": 3682.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2281,11 +2319,11 @@
         "index": 13,
         "user": "I'd like to add one restaurant special pizza if you can help.",
         "expected_assistant": "We currently do not have a \"restaurant special pizza\" on our menu. You can choose from our regular pizza options. Would you like to proceed with ordering one of our pizzas or check our full menu?",
-        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
+        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Would you like to try any of these?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5186.9,
+        "latency_ms": 4634.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2294,11 +2332,11 @@
         "index": 14,
         "user": "Do you have any North Indian, which I can try?",
         "expected_assistant": "We currently do not offer North Indian dishes on our menu. You can try our South Indian and Continental Fusion options. Would you like to proceed with ordering one of our available items or check our full menu?",
-        "reply": "We don't have North Indian dishes on the menu. Our available categories are beverages, burgers, desserts, pizza, sides, and wraps. Which one would you like to see?",
+        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (2 And Pepperoni-Style Chicken Pizza (Regular) (269). Would you like to try any of these?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4378.7,
+        "latency_ms": 4667.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2307,11 +2345,11 @@
         "index": 15,
         "user": "I'd like to remove all the items from my card.",
         "expected_assistant": "To remove all items from your card, tap the \"Clear Cart\" option on the screen. If that doesn't work, try closing the app and reopening it. Let me know if you need further assistance.",
-        "reply": "Your order has been cancelled. Would you like to start fresh with a new order?",
+        "reply": "Your order has been cancelled. Would you like to place a new order or see our menu?",
         "tool_calls": [
           "cancel_order"
         ],
-        "latency_ms": 3466.6,
+        "latency_ms": 3113.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2320,7 +2358,7 @@
   },
   {
     "file": "conversations/replay-857bb82c.jsonl",
-    "conversation_id": "replay-0f546acc",
+    "conversation_id": "replay-5f0acfbb",
     "turns": [
       {
         "index": 1,
@@ -2330,7 +2368,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2380.7,
+        "latency_ms": 2257.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2343,7 +2381,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4329.2,
+        "latency_ms": 4070.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2356,7 +2394,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2680.0,
+        "latency_ms": 2547.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2369,7 +2407,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5437.6,
+        "latency_ms": 5122.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2378,7 +2416,7 @@
   },
   {
     "file": "conversations/replay-92352ead.jsonl",
-    "conversation_id": "replay-931360b8",
+    "conversation_id": "replay-af67f6fc",
     "turns": [
       {
         "index": 1,
@@ -2388,7 +2426,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2400.2,
+        "latency_ms": 2228.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2401,7 +2439,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4304.5,
+        "latency_ms": 4093.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2414,7 +2452,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2730.8,
+        "latency_ms": 2501.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2427,7 +2465,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5443.5,
+        "latency_ms": 5123.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2436,7 +2474,7 @@
   },
   {
     "file": "conversations/replay-a4972b62.jsonl",
-    "conversation_id": "replay-3a4bd7d8",
+    "conversation_id": "replay-78ae5708",
     "turns": [
       {
         "index": 1,
@@ -2444,7 +2482,7 @@
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
         "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 1116.2,
+        "latency_ms": 1054.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2453,11 +2491,11 @@
         "index": 2,
         "user": "Tell me the burgers.",
         "expected_assistant": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alooti Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Alloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4962.8,
+        "latency_ms": 4618.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2470,7 +2508,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6854.4,
+        "latency_ms": 6379.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2479,7 +2517,7 @@
   },
   {
     "file": "conversations/replay-ba6a09ac.jsonl",
-    "conversation_id": "replay-8b050b3b",
+    "conversation_id": "replay-9418675b",
     "turns": [
       {
         "index": 1,
@@ -2489,7 +2527,7 @@
         "tool_calls": [
           "list_categories"
         ],
-        "latency_ms": 2351.3,
+        "latency_ms": 2269.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2502,7 +2540,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4326.3,
+        "latency_ms": 4072.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2515,7 +2553,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 2642.7,
+        "latency_ms": 2858.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2528,7 +2566,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 5411.5,
+        "latency_ms": 5481.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2537,7 +2575,7 @@
   },
   {
     "file": "conversations/replay-bca21d9c.jsonl",
-    "conversation_id": "replay-4af7b140",
+    "conversation_id": "replay-eaf2b206",
     "turns": [
       {
         "index": 1,
@@ -2545,7 +2583,7 @@
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
         "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 1106.6,
+        "latency_ms": 1057.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2554,11 +2592,11 @@
         "index": 2,
         "user": "Tell me the burgers.",
         "expected_assistant": "We have Aloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Aloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4896.1,
+        "latency_ms": 4646.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2571,7 +2609,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6887.7,
+        "latency_ms": 6501.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2584,7 +2622,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3852.3,
+        "latency_ms": 3505.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2593,11 +2631,11 @@
         "index": 5,
         "user": "If I remove all home and burst or bring my order, we'll be the total after that.",
         "expected_assistant": "We have no items in your cart. Would you like to order something else?",
-        "reply": "I've removed Aloo Tikki Burger, Crispy Veg Patty Burger, Double Stack Veg, Paneer Tikka Burger, and Spicy Chicken Crunch Burger. Your cart is now empty.",
+        "reply": "We currently have no items in your order. Would you like to add anything else?",
         "tool_calls": [
-          "remove_from_order"
+          "get_order"
         ],
-        "latency_ms": 5897.6,
+        "latency_ms": 3926.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2606,9 +2644,11 @@
         "index": 6,
         "user": "Can you tell me who is the president of India?",
         "expected_assistant": "The current president of India is Droupadi Murmu. Let me know if you need anything else!",
-        "reply": "I don't have access to real-time information about the president of India. Would you like to order something from the menu?",
-        "tool_calls": [],
-        "latency_ms": 3927.6,
+        "reply": "The President of India is Droupadi Murmu. She took office on 7 July 2022. Would you like to proceed with your order or have any other questions?",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 4118.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2617,11 +2657,11 @@
         "index": 7,
         "user": "May I know the restaurant name?",
         "expected_assistant": "The restaurant name is QuickBite Express. Let me know if you need anything else!",
-        "reply": "The restaurant is called QuickBite Express.",
+        "reply": "The restaurant's name is QuickBite Express. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 4154.4,
+        "latency_ms": 5647.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2630,9 +2670,9 @@
         "index": 8,
         "user": "What is the sitting capacity of kick, bite-express restaurant?",
         "expected_assistant": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Let me know if you need anything else!",
-        "reply": "I don't have access to real-time information about the sitting capacity of Kick Bite-Express restaurant. Would you like to order something from the menu?",
+        "reply": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [],
-        "latency_ms": 3473.9,
+        "latency_ms": 1925.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2641,9 +2681,9 @@
         "index": 9,
         "user": "Would you be able to help me to book a table?",
         "expected_assistant": "I'm sorry, but I don't have the capability to book tables. However, you can call the outlet directly for table bookings. Let me know if you need help with anything else!",
-        "reply": "I don't have the capability to book tables. Would you like to order something from the menu?",
+        "reply": "I don't have the capability to book tables at QuickBite Express. However, you can contact the restaurant directly or use their app for table booking. Would you like help with anything else?",
         "tool_calls": [],
-        "latency_ms": 2502.1,
+        "latency_ms": 4478.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2652,9 +2692,9 @@
         "index": 10,
         "user": "Can you tell me how we can reduce the traffic in Bangalore?",
         "expected_assistant": "I'm sorry, but I don't have information on reducing traffic in Bangalore. However, you can visit the QuickBite Express restaurant for delicious food and a comfortable dining experience. Let me know if you need help with anything else!",
-        "reply": "I don't have the capability to provide traffic reduction strategies. Would you like to order something from the menu?",
+        "reply": "I'm unable to provide information on reducing traffic in Bangalore as it is beyond the scope of my capabilities. However, you can visit the official Bangalore Traffic Police website or contact them directly for the latest updates and recommendations. Would you like help with anything else?",
         "tool_calls": [],
-        "latency_ms": 2718.8,
+        "latency_ms": 2624.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2663,9 +2703,9 @@
         "index": 11,
         "user": "Which model are you using?",
         "expected_assistant": "I am using the QuickBite Express kiosk system, designed to help customers place orders and get information about our restaurant. Let me know if you need assistance with anything else!",
-        "reply": "I am using the latest AI model to assist you with your order. Would you like to order something from the menu?",
+        "reply": "I am using the Qwen2.5 model, which is a large language model developed by Alibaba Cloud. Would you like help with anything else?",
         "tool_calls": [],
-        "latency_ms": 1382.7,
+        "latency_ms": 1708.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2674,9 +2714,11 @@
         "index": 12,
         "user": "Can you please add the rest? I first bazirion to my card. from a fossil.",
         "expected_assistant": "I'm the QuickBite Express kiosk system, designed to help customers place orders and get information about our restaurant. Let me know if you need assistance with anything else!",
-        "reply": "I don't have access to real-time information about the restaurant's payment systems or card details. Would you like to order something from the menu?",
-        "tool_calls": [],
-        "latency_ms": 3974.9,
+        "reply": "The restaurant's name is QuickBite Express. Would you like to proceed with your order or have any other questions?",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 6224.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2689,7 +2731,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4733.6,
+        "latency_ms": 4752.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2698,11 +2740,11 @@
         "index": 14,
         "user": "Do you have any North Indian, which I can try?",
         "expected_assistant": "We have Classic French Fries (Regular) (\u20b989), Garlic Bread (4 pcs) (\u20b999), Onion Rings (\u20b9109), and Peri Peri Fries (Regular) (\u20b999). Would you like to try any of these?",
-        "reply": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Which one would you like to try?",
+        "reply": "We don't have North Indian dishes on the menu. Our available categories are beverages, burgers, desserts, pizza, sides, and wraps. Which one would you like to see?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4884.3,
+        "latency_ms": 3969.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2711,11 +2753,11 @@
         "index": 15,
         "user": "I'd like to remove all the items from my card.",
         "expected_assistant": "The cart is already empty. Would you like to order something else?",
-        "reply": "I don't see any items in your cart. Would you like to order something from the menu?",
+        "reply": "I've cancelled your order. The following items have been removed: Alloo Tikki Burger, Crispy Veg Patty Burger, Double Stack Veg, Paneer Tikka Burger, and Spicy Chicken Crunch Burger. Would you like to start over with a new order?",
         "tool_calls": [
-          "remove_from_order"
+          "cancel_order"
         ],
-        "latency_ms": 9247.1,
+        "latency_ms": 4977.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2724,7 +2766,7 @@
   },
   {
     "file": "conversations/replay-c60368c2.jsonl",
-    "conversation_id": "replay-3ef96771",
+    "conversation_id": "replay-3c81c597",
     "turns": [
       {
         "index": 1,
@@ -2732,7 +2774,7 @@
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
         "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 1103.7,
+        "latency_ms": 1053.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2741,11 +2783,11 @@
         "index": 2,
         "user": "Tell me the burgers.",
         "expected_assistant": "We have Aloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alooti Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4930.2,
+        "latency_ms": 4608.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2758,7 +2800,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6839.8,
+        "latency_ms": 6504.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2771,7 +2813,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 3817.4,
+        "latency_ms": 3675.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2780,11 +2822,11 @@
         "index": 5,
         "user": "If I remove all home and burst or bring my order, we'll be the total after that.",
         "expected_assistant": "Your cart is empty. Would you like to order something else?",
-        "reply": "I've removed Alooti Tikki Burger, Crispy Veg Patty Burger, Paneer Tikka Burger, and Spicy Chicken Crunch Burger. Double Stack Veg was not in your cart. Your cart is now empty. Would you like to start over with a new order?",
+        "reply": "I've removed Alo Tikki Burger, Crispy Veg Patty Burger, Paneer Tikka Burger, and Spicy Chicken Crunch Burger. Double Stack Veg was not in your cart. Your cart is now empty. Would you like to start over with a new order?",
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 9661.3,
+        "latency_ms": 9112.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2793,11 +2835,11 @@
         "index": 6,
         "user": "Can you tell me who is the president of India?",
         "expected_assistant": "The President of India is Droupadi Murmu. Would you like help with anything else?",
-        "reply": "The president of India is Droupadi Murmu. She took office on 17 July 2022. Would you like to know anything else about our restaurant or menu?",
+        "reply": "The president of India is Droupadi Murmu. She took office on 25 July 2022. Would you like to know anything else about our restaurant or menu?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 4510.9,
+        "latency_ms": 4312.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2806,11 +2848,11 @@
         "index": 7,
         "user": "May I know the restaurant name?",
         "expected_assistant": "The restaurant name is QuickBite Express. Would you like help with anything else?",
-        "reply": "The restaurant name is QuickBite Express. Would you like to order something from our menu?",
+        "reply": "The restaurant name is QuickBite Express. Would you like to place an order or explore our menu?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5510.7,
+        "latency_ms": 5500.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2819,9 +2861,9 @@
         "index": 8,
         "user": "What is the sitting capacity of kick, bite-express restaurant?",
         "expected_assistant": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like help with anything else?",
-        "reply": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to order something from our menu?",
+        "reply": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to place an order or explore our menu?",
         "tool_calls": [],
-        "latency_ms": 1859.3,
+        "latency_ms": 1781.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2830,9 +2872,9 @@
         "index": 9,
         "user": "Would you be able to help me to book a table?",
         "expected_assistant": "I'm sorry, but I don't have the capability to book tables. However, you can call the outlet directly for table bookings. Would you like help with anything else?",
-        "reply": "We currently do not offer table booking services. However, you can visit our restaurant during our dine-in hours, which are from 8 AM to 11 AM for breakfast and 11 AM onwards for the rest of the day. Would you like to order something from our menu instead?",
+        "reply": "We currently do not offer table booking services. However, you can enjoy our dine-in service or place an order for takeaway. Would you like to place an order or explore our menu?",
         "tool_calls": [],
-        "latency_ms": 3104.3,
+        "latency_ms": 1992.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2841,9 +2883,9 @@
         "index": 10,
         "user": "Can you tell me how we can reduce the traffic in Bangalore?",
         "expected_assistant": "I'm sorry, but I don't have the capability to provide information on reducing traffic in Bangalore. Would you like help with anything else?",
-        "reply": "We currently do not offer table booking services. However, you can visit our restaurant during our dine-in hours, which are from 8 AM to 11 AM for breakfast and 11 AM onwards for the rest of the day. Would you like to order something from our menu instead?",
+        "reply": "We currently do not offer table booking services. However, you can enjoy our dine-in service or place an order for takeaway. Would you like to place an order or explore our menu?",
         "tool_calls": [],
-        "latency_ms": 3224.8,
+        "latency_ms": 1996.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2852,9 +2894,9 @@
         "index": 11,
         "user": "Which model are you using?",
         "expected_assistant": "I am using the QuickBite Express kiosk system, designed to assist with ordering and providing information about our restaurant. Would you like to place an order or ask about something else?",
-        "reply": "I am using the QuickBite Express kiosk system, designed to assist customers with ordering and navigating our menu. Would you like to order something from our menu or ask about something else?",
+        "reply": "I am using the QuickBite Express kiosk system, designed to assist customers with ordering and navigating our menu. Would you like to place an order or explore our menu?",
         "tool_calls": [],
-        "latency_ms": 2268.2,
+        "latency_ms": 1928.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2863,11 +2905,11 @@
         "index": 12,
         "user": "Can you please add the rest? I first bazirion to my card. from a fossil.",
         "expected_assistant": "I am the QuickBite Express kiosk system, designed to help with ordering and providing information about our restaurant. Would you like to place an order or ask about something else?",
-        "reply": "I don't have information about traffic reduction strategies in Bangalore. Would you like to order something from our menu instead?",
+        "reply": "We do not provide information on traffic management or city planning. Would you like to place an order or explore our menu?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 6163.5,
+        "latency_ms": 6315.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2876,9 +2918,9 @@
         "index": 13,
         "user": "I'd like to add one restaurant special pizza if you can help.",
         "expected_assistant": "We have Chicken BBQ Pizza (Regular) (249), Margherita Pizza (Regular) (179), Paneer Makhani Pizza (Regular) (219), and Pepperoni-Style Chicken Pizza (Regular) (269). Would you like to add one of these to your order?",
-        "reply": "I don't have a \"restaurant special pizza\" on our menu. Our pizza options include Classic Chicken, Spicy Chicken BBQ, and Chicken Tikka. Would you like to try any of these?",
+        "reply": "I cannot add items not on the menu. Our pizza options include Classic Chicken (\u20b9209/personal), Spicy Chicken BBQ (\u20b9219/personal), and Chicken Tikka (\u20b9219/personal). Would you like to place an order or explore our menu?",
         "tool_calls": [],
-        "latency_ms": 4978.9,
+        "latency_ms": 5924.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2887,11 +2929,9 @@
         "index": 14,
         "user": "Do you have any North Indian, which I can try?",
         "expected_assistant": "We have Classic French Fries (Regular) (89), Garlic Bread (4 pcs) (99), Onion Rings (109), and Peri Peri Fries (Regular) (99). Would you like to try any of these?",
-        "reply": "We don't have any North Indian dishes on our menu. Our available categories are beverages, burgers, desserts, pizza, sides, and wraps. Which category would you like to explore?",
-        "tool_calls": [
-          "list_products"
-        ],
-        "latency_ms": 6891.7,
+        "reply": "I cannot add items not on the menu. Our North Indian options include Chicken Tikka (\u20b9219/personal), Chicken Keema (\u20b9229/personal), and Chicken Pizzas. Would you like to place an order or explore our menu?",
+        "tool_calls": [],
+        "latency_ms": 2929.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2900,11 +2940,11 @@
         "index": 15,
         "user": "I'd like to remove all the items from my card.",
         "expected_assistant": "Your cart is now empty. Would you like to order something else?",
-        "reply": "Your order has been cancelled. Would you like to start a new order or ask about something else?",
+        "reply": "To remove all items from your card, tap the \"Clear Cart\" option on the screen. If that doesn't work, try closing the app and reopening it. Let me know if you need further assistance.",
         "tool_calls": [
-          "cancel_order"
+          "knowledge_lookup"
         ],
-        "latency_ms": 3518.1,
+        "latency_ms": 4782.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2913,7 +2953,7 @@
   },
   {
     "file": "conversations/replay-d08d7c7c.jsonl",
-    "conversation_id": "replay-2792bb2e",
+    "conversation_id": "replay-78255d1d",
     "turns": [
       {
         "index": 1,
@@ -2921,7 +2961,7 @@
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
         "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 1108.8,
+        "latency_ms": 1052.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2930,11 +2970,11 @@
         "index": 2,
         "user": "Tell me the burgers.",
         "expected_assistant": "We have Alo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
-        "reply": "We have Alloo Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
+        "reply": "We have Alooti Tikki Burger (119), Classic Chicken Burger (169), Crispy Veg Patty Burger (129), Double Chicken Tower (219), Double Stack Veg (189), Paneer Tikka Burger (159), and Spicy Chicken Crunch Burger (179). Which one would you like to try?",
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4902.3,
+        "latency_ms": 4662.9,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2947,7 +2987,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6856.5,
+        "latency_ms": 6533.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2960,7 +3000,7 @@
         "tool_calls": [
           "remove_from_order"
         ],
-        "latency_ms": 4571.3,
+        "latency_ms": 4370.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2969,11 +3009,11 @@
         "index": 5,
         "user": "If I remove all home and burst or bring my order, we'll be the total after that.",
         "expected_assistant": "We don't have an active order to confirm or modify. Your cart is empty. Would you like to add anything else?",
-        "reply": "We currently have no open order. Would you like to start a new one?",
+        "reply": "We currently have no items in your order. Would you like to add anything else?",
         "tool_calls": [
           "get_order"
         ],
-        "latency_ms": 4145.5,
+        "latency_ms": 3993.8,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2982,11 +3022,11 @@
         "index": 6,
         "user": "Can you tell me who is the president of India?",
         "expected_assistant": "The president of India is Droupadi Murmu. She took office on 7 July 2022. Would you like to place an order or have any other questions?",
-        "reply": "The President of India is Droupadi Murmu. She took office on 7 July 2022. Would you like to place an order or have any other questions?",
+        "reply": "The President of India is Droupadi Murmu. She took office on 7 July 2022. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 4313.9,
+        "latency_ms": 4143.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -2995,11 +3035,11 @@
         "index": 7,
         "user": "May I know the restaurant name?",
         "expected_assistant": "The restaurant's name is QuickBite Express. Would you like to place an order or have any other questions?",
-        "reply": "The name of this restaurant is QuickBite Express. Would you like to place an order or have any other questions?",
+        "reply": "The name of this restaurant is QuickBite Express. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5946.3,
+        "latency_ms": 5711.0,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3008,11 +3048,11 @@
         "index": 8,
         "user": "What is the sitting capacity of kick, bite-express restaurant?",
         "expected_assistant": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to place an order or have any other questions?",
-        "reply": "The sitting capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to place an order or have any other questions?",
+        "reply": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [
           "knowledge_lookup"
         ],
-        "latency_ms": 5578.7,
+        "latency_ms": 5300.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3021,9 +3061,9 @@
         "index": 9,
         "user": "Would you be able to help me to book a table?",
         "expected_assistant": "We currently do not offer table booking services. However, you can enjoy our dine-in service or place an order for takeaway. Would you like to place an order or have any other questions?",
-        "reply": "We currently do not offer table booking services. However, you can enjoy our dine-in service or place a takeaway order. Would you like to place an order or have any other questions?",
+        "reply": "We currently do not offer table booking services. However, you can visit our restaurant directly or use our app to place an order. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [],
-        "latency_ms": 2151.6,
+        "latency_ms": 2170.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3032,11 +3072,9 @@
         "index": 10,
         "user": "Can you tell me how we can reduce the traffic in Bangalore?",
         "expected_assistant": "We currently do not provide table booking services. However, you can enjoy our dine-in service or place an order for takeaway. Would you like to place an order or have any other questions?",
-        "reply": "I don't have information about traffic management in Bangalore. However, you can use the QuickBite app or website to place an order or learn more about our services. Would you like to place an order or have any other questions?",
-        "tool_calls": [
-          "knowledge_lookup"
-        ],
-        "latency_ms": 5541.4,
+        "reply": "We currently do not offer table booking services. However, you can visit our restaurant directly or use our app to place an order. Would you like to proceed with your order or have any other questions?",
+        "tool_calls": [],
+        "latency_ms": 2182.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3045,9 +3083,9 @@
         "index": 11,
         "user": "Which model are you using?",
         "expected_assistant": "I am using the QuickBite Express kiosk system, designed to assist customers with ordering food and providing information about our restaurant. Would you like to place an order or have any other questions?",
-        "reply": "I am using the QuickBite Express kiosk system, which is designed to help customers place orders and navigate our menu. Would you like to place an order or have any other questions?",
+        "reply": "I am using the QuickBite Express kiosk system, which is designed to help customers place orders and navigate our menu. Would you like to proceed with your order or have any other questions?",
         "tool_calls": [],
-        "latency_ms": 2251.5,
+        "latency_ms": 2142.1,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3056,9 +3094,11 @@
         "index": 12,
         "user": "Can you please add the rest? I first bazirion to my card. from a fossil.",
         "expected_assistant": "The seating capacity of QuickBite Express is 64 indoor seats and 12 outdoor patio seats. Would you like to place an order or have any other questions?",
-        "reply": "I don't have information about adding items from a fossil. Would you like to place an order or have any other questions?",
-        "tool_calls": [],
-        "latency_ms": 5111.1,
+        "reply": "The parent company of QuickBite Express is QuickBite India Pvt. Ltd. Would you like to proceed with your order or have any other questions?",
+        "tool_calls": [
+          "knowledge_lookup"
+        ],
+        "latency_ms": 6975.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3071,7 +3111,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5150.7,
+        "latency_ms": 4925.3,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3084,7 +3124,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 5321.7,
+        "latency_ms": 5081.7,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3093,11 +3133,11 @@
         "index": 15,
         "user": "I'd like to remove all the items from my card.",
         "expected_assistant": "To remove all items from your card, swipe the card at the terminal and select \"Clear All\" from the menu. Follow the on-screen instructions to complete the process. If you need further assistance, ask a staff member.",
-        "reply": "I've cancelled your order. The items removed are Aloo Tikki Burger, Crispy Veg Patty Burger, Double Stack Veg, and Paneer Tikka Burger. Would you like to start a new order or have any other questions?",
+        "reply": "I've cancelled your order. The items removed are Aloo Tikki Burger, Crispy Veg Patty Burger, Double Stack Veg, and Paneer Tikka Burger. Would you like to start over with a new order?",
         "tool_calls": [
           "cancel_order"
         ],
-        "latency_ms": 5278.2,
+        "latency_ms": 4911.2,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3106,7 +3146,7 @@
   },
   {
     "file": "conversations/replay-d153b098.jsonl",
-    "conversation_id": "replay-a6c9c82e",
+    "conversation_id": "replay-0547bdac",
     "turns": [
       {
         "index": 1,
@@ -3114,7 +3154,7 @@
         "expected_assistant": "I'm sorry, I don't understand your message. Could you please clarify what you need help with?",
         "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 1105.0,
+        "latency_ms": 1056.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3123,15 +3163,15 @@
   },
   {
     "file": "conversations/replay-de98b625.jsonl",
-    "conversation_id": "replay-06014f01",
+    "conversation_id": "replay-8d4a2d74",
     "turns": [
       {
         "index": 1,
         "user": "coming on the researchers you have",
         "expected_assistant": "I see. Let me check our menu items for you. Would you like to see the categories or specific items?",
-        "reply": "I see. Could you please tell me what specific information you're looking for about our menu or restaurant? For example, are you asking about available items, prices, or something else?",
+        "reply": "I'm sorry, but I don't understand your message. Could you please clarify what you're asking for?",
         "tool_calls": [],
-        "latency_ms": 3453.6,
+        "latency_ms": 1051.4,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3144,7 +3184,7 @@
         "tool_calls": [
           "list_products"
         ],
-        "latency_ms": 4964.3,
+        "latency_ms": 4659.6,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
@@ -3157,7 +3197,7 @@
         "tool_calls": [
           "place_order"
         ],
-        "latency_ms": 6830.3,
+        "latency_ms": 6500.5,
         "error": null,
         "guard_corrected": false,
         "hard_failed": false
