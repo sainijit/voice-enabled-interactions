@@ -28,6 +28,7 @@ import re
 import time
 from typing import Any
 
+from agentic import action_result
 from agentic import config as agent_cfg
 from agentic import confirm_guard
 from agentic import item_intent_guard
@@ -203,8 +204,10 @@ _ORDER_CLAIM_RE = re.compile(
 )
 
 # Tools that actually finalise an order. Only these make a "your order is
-# confirmed" sentence true.
-_CONFIRM_TOOLS = frozenset({"confirm_order", "confirm_active_order"})
+# confirmed" sentence true. Sourced from action_result.CLAIM_TOOLS — the
+# single registry also consumed by confirm_guard.py and menu/removal guards,
+# so a new confirm-type tool only needs to be added in one place.
+_CONFIRM_TOOLS = action_result.CLAIM_TOOLS[action_result.ORDER_CONFIRMED]
 
 # A claim that the order is *finalised*, as opposed to merely added to. This is
 # narrower than _ORDER_CLAIM_RE: adding an item legitimately mentions the order,
@@ -335,12 +338,10 @@ _CONFIRM_INTENT_RE = re.compile(
 
 # Tools that actually mutate or read an order. A reply claiming an order was
 # placed or confirmed is only trustworthy if one of these ran this turn.
-_ORDER_TOOLS = frozenset(
-    {
-        "place_order", "update_order", "confirm_order", "confirm_active_order",
-        "get_order", "remove_from_order", "cancel_order",
-    }
-)
+# Sourced from action_result.ORDER_TOOLS (== every claim-bearing tool, plus
+# the read-only get_order) — the single registry also consumed by every
+# guard, so a new order-related tool only needs to be added in one place.
+_ORDER_TOOLS = action_result.ORDER_TOOLS
 
 _ORDER_CLAIM_FALLBACK = (
     "Sorry, I could not complete that just now and I don't want to tell you it "

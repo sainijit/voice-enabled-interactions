@@ -33,16 +33,19 @@ test as plain functions over text and recorded tool results.
 from __future__ import annotations
 
 import contextvars
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentic import action_result
+
 logger = logging.getLogger(__name__)
 
 # Only these tools' results legitimise a "that's off your order now" claim.
-_REMOVAL_TOOLS = frozenset({"remove_from_order", "cancel_order"})
+# Sourced from action_result.CLAIM_TOOLS — see that module for why this must
+# not be a locally redefined set.
+_REMOVAL_TOOLS = action_result.CLAIM_TOOLS[action_result.ITEM_REMOVED]
 
 # Claims that an item was taken out of the cart. Kept broad, in the same
 # spirit as ``menu_guard._ADDED_PATTERNS``: the model has seen a tool result by
@@ -128,28 +131,6 @@ def current_state() -> _TurnState:
     return _turn_state.get()
 
 
-def _unwrap(raw: Any) -> dict[str, Any] | None:
-    """Extract the tool's own JSON payload from an MCP response envelope.
-
-    Mirrors ``menu_guard._unwrap`` — see there for the envelope shape.
-    """
-    if not isinstance(raw, dict):
-        return None
-    if "error" in raw and "result" not in raw:
-        return raw
-
-    result = raw.get("result")
-    if isinstance(result, dict):
-        return result
-    if not isinstance(result, str) or not result:
-        return None
-    try:
-        decoded = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return decoded if isinstance(decoded, dict) else None
-
-
 def record_tool_result(tool_name: str, raw: Any) -> None:
     """Classify one removal-tool result as success or rejection.
 
@@ -163,7 +144,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
 
     state = _turn_state.get()
     state.attempted = True
-    payload = _unwrap(raw)
+    payload = action_result.unwrap(raw)
     if payload is None:
         logger.warning(
             "[REMOVAL-GUARD] Could not decode result of %s — treating as unsuccessful",

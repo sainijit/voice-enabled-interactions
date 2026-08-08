@@ -38,44 +38,14 @@ guards in this package.
 
 from __future__ import annotations
 
-import json
 from typing import Any
+
+from agentic.action_result import unwrap
 
 # How many upsell/alternative suggestions to mention in one spoken sentence.
 # Matches the ceiling already used by menu_guard and mcp_server for the same
 # reason: a voice customer stops retaining a list beyond this.
 _MAX_SPOKEN_ALTERNATIVES = 3
-
-
-def unwrap(raw: Any) -> dict[str, Any] | None:
-    """Extract the tool's own JSON payload from the MCP response envelope.
-
-    Mirrors ``menu_guard._unwrap`` / ``removal_guard._unwrap`` — see there for
-    the full rationale. Duplicated rather than imported to keep this module
-    self-contained and independently testable, matching the existing pattern
-    between those two guards.
-
-    Args:
-        raw: The value returned by ``mcp_client.call_tool``.
-
-    Returns:
-        The decoded tool payload, or ``None`` when there is nothing decodable
-        (a transport-level error is returned as-is).
-    """
-    if not isinstance(raw, dict):
-        return None
-    if "error" in raw and "result" not in raw:
-        return raw
-    result = raw.get("result")
-    if isinstance(result, dict):
-        return result
-    if not isinstance(result, str) or not result:
-        return None
-    try:
-        decoded = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return decoded if isinstance(decoded, dict) else None
 
 
 def _money(value: Any) -> str:
