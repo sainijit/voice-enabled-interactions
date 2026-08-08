@@ -17,6 +17,8 @@ POST /api/v1/agent/chat
     mcp_ms         float|None — cumulative MCP tool round-trip time for the turn
     mcp_calls      int        — number of MCP tool round-trips for the turn
     guard_ms       float|None — cumulative truthfulness-guard processing time
+    template_ms    float|None — deterministic reply-template render time
+    templated      bool       — True when the narration LLM call was skipped
 """
 
 from __future__ import annotations
@@ -97,6 +99,20 @@ class AgentChatResponse(BaseModel):
             "milliseconds. None when no guard-relevant tool ran this turn."
         ),
     )
+    template_ms: float | None = Field(
+        default=None,
+        description=(
+            "Time spent rendering a deterministic reply template, in "
+            "milliseconds. None when no template was attempted this turn."
+        ),
+    )
+    templated: bool = Field(
+        default=False,
+        description=(
+            "True when a deterministic template produced the reply, meaning "
+            "the second (narration) LLM call was skipped for this turn."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +166,8 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
         mcp_ms=result.get("mcp_ms"),
         mcp_calls=result.get("mcp_calls", 0),
         guard_ms=result.get("guard_ms"),
+        template_ms=result.get("template_ms"),
+        templated=result.get("templated", False),
     )
 
 

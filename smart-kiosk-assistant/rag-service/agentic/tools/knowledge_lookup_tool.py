@@ -194,6 +194,14 @@ def _format_sources(records, budget: int = _MAX_CONTEXT_CHARS) -> str:
     return "\n\n".join(blocks)
 
 
+# Results that are NOT knowledge-base context: a redirect to the catalogue
+# tool, or an honest "nothing found". Callers that want to *pre-ground* a turn
+# with retrieved context (see ordering_agent's PREGROUND_KNOWLEDGE) must be
+# able to tell these apart from real context, since injecting either into the
+# prompt as if it were fact would be actively misleading.
+NON_CONTEXT_RESULTS = frozenset({_NO_CONTEXT, _USE_LIST_PRODUCTS})
+
+
 async def knowledge_lookup(question: str) -> str:
     """Look up facts about hours, ingredients, allergens, policies, or outlet information.
 

@@ -87,3 +87,22 @@ RETRY_ON_MISSING_TOOL_CALL: bool = os.getenv(
 STREAM_SENTENCES: bool = os.getenv(
     "AGENT_STREAM_SENTENCES", "false"
 ).lower() in ("true", "1", "yes")
+
+# Retrieve knowledge-base context BEFORE the first LLM call for questions that
+# are unambiguously about the outlet (hours, name, parking, allergens...).
+#
+# Google ADK's tool loop costs two inferences per tool-calling turn, and
+# Qwen3-4B-int4 frequently answers an outlet question from "memory" on the
+# first pass — which is invented, trips the ungrounded-reply guard, and forces
+# a retry, for THREE inferences in total. Measured live: "restaurant name and
+# timings" took 8.5 s of LLM time across 3 calls, of which retrieval was 110 ms.
+#
+# Pre-grounding inverts that. Retrieval is deterministic and cheap, so the
+# facts are put in front of the model before it speaks, and the turn needs one
+# inference with no tool call and nothing to retry. The model cannot invent
+# hours it was already handed.
+#
+# Set to false to restore the pure tool-calling path.
+PREGROUND_KNOWLEDGE: bool = os.getenv(
+    "AGENT_PREGROUND_KNOWLEDGE", "true"
+).lower() in ("true", "1", "yes")

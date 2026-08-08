@@ -38,6 +38,7 @@ from agentic import removal_guard
 from agentic import reply_templates
 from agentic.adk_runtime import create_adk_model, create_runner, create_session_service
 from agentic.mcp_client import MCPTool, bootstrap_mcp_tools, call_tool, get_all_tools
+from agentic.tools import knowledge_lookup_tool as knowledge_tool
 from agentic.tools.knowledge_lookup_tool import knowledge_lookup
 
 logger = logging.getLogger(__name__)
@@ -1009,6 +1010,14 @@ THIS conversation. Don't guess, invent, or recall prices. If a tool returns an
 `error` with `available_products`, offer those real items — never call something
 unavailable from memory.
 
+EVERY turn must begin with a tool call unless the customer said something purely
+social ("hi", "thanks", "bye") or you are asking them a clarifying question.
+You do not know ANY fact about this restaurant from memory — not its name, not
+its hours, not what it sells. Those facts live in the tools. Answering a factual
+question directly, or saying "let me look that up", wastes the customer's turn:
+there is no second chance to speak, so the lookup must happen NOW, in this turn,
+before you reply.
+
 ## Rules (check in order)
 0. GENERAL "what do you serve / what's on the menu / show me the menu" (no food
    type named) — call list_categories and answer from its result.
@@ -1041,8 +1050,14 @@ unavailable from memory.
      any product as if it were related to what they asked for — an unrelated
      item is not an answer.
 3. INFO question with no product price involved — opening hours, ingredients,
-   "is X vegan?", allergens, offers, outlet or policy details — call
-   knowledge_lookup.
+   "is X vegan?", allergens, offers, outlet or policy details, the restaurant's
+   NAME, address, contact, facilities — if the turn already carries a
+   `[knowledge]...[/knowledge]` block (see below), ANSWER FROM THAT BLOCK
+   IMMEDIATELY and call no tool. Otherwise call knowledge_lookup FIRST, on this
+   same turn, before writing any reply. This includes questions you feel you
+   already know the answer to: you do not know this restaurant's name or hours,
+   and stating them from memory is how a customer gets told the wrong opening
+   time. Never reply "let me check that for you" — call the tool instead.
 4. BROWSE a named category ("show me burgers") — call list_products(category), then
    list EVERY product returned with NAME and PRICE verbatim in one comma-separated
    sentence, then ask which they want. Omitting the full list is WRONG.
@@ -1087,6 +1102,18 @@ unavailable from memory.
    - A request naming specific items ("cancel the fries") is a REMOVE (rule 6),
      not a whole-order cancellation — only "my order"/"everything"/"whole
      order" phrasing means cancel_order.
+
+## The `[knowledge]` block
+A turn may begin with a `[knowledge] ... [/knowledge]` block. That is the
+authoritative knowledge base, already looked up for you. When it is present:
+- Answer the customer's question from it directly, in ONE or TWO short spoken
+  sentences. Do NOT call knowledge_lookup — the lookup already happened.
+- Use only what the block says. If it does not cover the question, say so
+  plainly rather than filling the gap from memory.
+- NEVER speak the tags, the block's numbering (`[1]`, `[2]`), or the words
+  "knowledge base" or "context" out loud. Summarise the facts naturally.
+- It changes nothing about ordering: if the customer also asked to order
+  something, still follow Rule 1.
 
 ## The customer's name
 A turn may begin with a tag like `[customer_name=Jitendra]`. That is the name
@@ -1403,7 +1430,9 @@ class OrderingAgent:
                 and calls_this_turn == 1
                 and tool_name in reply_templates.SPEAKABLE_TOOLS
             ):
-                spoken = reply_templates.speak(tool_name, result)
+                _tpl_start = time.monotonic()
+                spoken = reply_templates.speak(tool_name, result, _utterance_ctx.get())
+                llm_metrics.record_template((time.monotonic() - _tpl_start) * 1000)
                 if spoken is not None:
                     logger.info(
                         "[AGENT→MCP] tool=%s templated reply, skipping narration call: %r",
@@ -1502,6 +1531,10 @@ class OrderingAgent:
                 result recording + whole-reply validation). Tracked to rule
                 guard overhead in or out as a latency contributor, since
                 these are pure in-process functions and should stay small.
+              - ``template_ms``: float | None — time spent rendering a
+                deterministic reply template (None when none was attempted).
+              - ``templated``: bool — True when a template was rendered, i.e.
+                the second (narration) LLM call was skipped for this turn.
         """
         if not self._bootstrapped:
             await self.bootstrap()
@@ -1564,6 +1597,37 @@ class OrderingAgent:
         # not something the customer said and would only add noise here.
         utterance_token = _utterance_ctx.set(message)
 
+        # ── Pre-grounding ────────────────────────────────────────────────
+        # For an unambiguous outlet question, retrieve the facts BEFORE the
+        # model speaks rather than hoping it chooses knowledge_lookup and
+        # then paying for a retry when it doesn't. Retrieval is ~110 ms; the
+        # inference it removes is ~3 s. See agentic/config.py.
+        #
+        # Catalogue and order intents are excluded: those are answered by
+        # list_products/place_order, and prose context would only invite the
+        # model to invent products from marketing copy.
+        pregrounded = False
+        if (
+            agent_cfg.PREGROUND_KNOWLEDGE
+            and _KNOWLEDGE_QUERY_RE.search(message)
+            and not _CATALOGUE_QUERY_RE.search(message)
+            and not _ORDER_ACTION_RE.search(message)
+        ):
+            try:
+                context = await knowledge_lookup(message)
+            except Exception:  # noqa: BLE001 — pre-grounding is best-effort
+                logger.exception("[AGENT] Pre-grounding failed | session=%s", session_id)
+                context = ""
+            if context and context not in knowledge_tool.NON_CONTEXT_RESULTS:
+                full_message = (
+                    f"[knowledge]\n{context}\n[/knowledge]\n\n{full_message}"
+                )
+                pregrounded = True
+                logger.info(
+                    "[AGENT] Pre-grounded outlet question | session=%s context_chars=%d",
+                    session_id, len(context),
+                )
+
         content = genai_types.Content(
             role="user",
             parts=[genai_types.Part(text=full_message)],
@@ -1596,9 +1660,14 @@ class OrderingAgent:
             # A turn that answers a catalogue question, promises a lookup, or
             # refuses without calling any tool is ungrounded. Re-run once with
             # an explicit correction rather than speaking the bad reply.
+            #
+            # A pre-grounded turn is exempt: the authoritative knowledge was
+            # already put in front of the model, so "no tool call" is the
+            # intended outcome here, not a grounding failure. Retrying would
+            # spend two more inferences reaching the same answer.
             should_retry, nudge_text = (
                 _needs_tool_retry("".join(reply_parts), message)
-                if not tool_calls
+                if not tool_calls and not pregrounded
                 else (False, "")
             )
             if agent_cfg.RETRY_ON_MISSING_TOOL_CALL and should_retry:
@@ -1655,7 +1724,7 @@ class OrderingAgent:
             # Same reasoning as the catalogue path: an outlet question with no
             # tool call is either invented or an unnecessary refusal, and the
             # customer has no way to ask a follow-up mid-turn.
-            if not tool_calls and _KNOWLEDGE_QUERY_RE.search(message):
+            if not tool_calls and not pregrounded and _KNOWLEDGE_QUERY_RE.search(message):
                 grounded = await self._force_knowledge(message, session_id)
                 if grounded:
                     reply_parts, tool_calls = [grounded], ["knowledge_lookup"]
@@ -1742,6 +1811,7 @@ class OrderingAgent:
         retrieval = llm_metrics.retrieval_snapshot()
         mcp = llm_metrics.mcp_snapshot()
         guard = llm_metrics.guard_snapshot()
+        template = llm_metrics.template_snapshot()
 
         # Reconcile what was already spoken against the authoritative reply.
         # The gate is designed so that no post-hoc guard can rewrite a released
@@ -1771,6 +1841,8 @@ class OrderingAgent:
             "mcp_ms": mcp["ms"],
             "mcp_calls": mcp["calls"],
             "guard_ms": guard["ms"],
+            "template_ms": template["ms"],
+            "templated": template["calls"] > 0,
             "streamed": streamed,
         }
 
@@ -1897,37 +1969,23 @@ class OrderingAgent:
         args = {"category": category} if category else {}
         try:
             envelope = await call_tool(tool, args)
-            data = json.loads((envelope or {}).get("result", "") or "null")
         except Exception:
             logger.exception("[AGENT] Deterministic catalogue lookup failed | session=%s", session_id)
             return "", tool
-        if not isinstance(data, list) or not data:
-            return "", tool
-        parts: list[str] = []
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            name = entry.get("name") or entry.get("category")
-            if not name:
-                continue
-            price = entry.get("price")
-            count = entry.get("item_count", entry.get("count"))
-            if price is not None:
-                parts.append(f"{name} (₹{int(price) if float(price).is_integer() else price})")
-            elif count is not None:
-                parts.append(f"{name} ({count} items)")
-            else:
-                parts.append(str(name))
-        if not parts:
+        # Same formatter the skip-summarization path uses, so a catalogue
+        # answer reads identically whether the model called the tool itself or
+        # this recovery path had to. ``utterance`` is forced to browse intent:
+        # reaching here already means the model produced no tool call at all,
+        # so there is no in-flight mutation for a template to cut short.
+        spoken = reply_templates.speak(tool, envelope, utterance="")
+        if not spoken:
             return "", tool
         logger.info(
             "[AGENT] Model promised a lookup without calling a tool — answered "
             "deterministically | session=%s tool=%s category=%r",
             session_id, tool, category,
         )
-        listing = ", ".join(parts)
-        tail = "Which one would you like?" if category else "Which would you like to explore?"
-        return f"We have {listing}. {tail}", tool
+        return spoken, tool
 
     async def _run_turn(
         self,

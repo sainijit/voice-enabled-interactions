@@ -11,7 +11,7 @@ import json
 from agentic import reply_templates as rt
 
 
-def _envelope(payload: dict) -> dict:
+def _envelope(payload) -> dict:
     """Wrap a payload the way mcp_client.call_tool wraps a real MCP result."""
     return {"status": "success", "result": json.dumps(payload)}
 
@@ -138,9 +138,90 @@ class TestSpeakRemoval:
         assert rt.speak("remove_from_order", _envelope(payload)) is None
 
 
+class TestSpeakCatalogue:
+    """Catalogue reads are the largest deterministic win — see speak_catalogue."""
+
+    def test_browsed_category_lists_every_row_with_price(self):
+        payload = [
+            {"product_id": "B1", "name": "Aloo Tikki Burger", "category": "burgers", "price": 119.0},
+            {"product_id": "B2", "name": "Classic Chicken Burger", "category": "burgers", "price": 169.0},
+            {"product_id": "B3", "name": "Paneer Tikka Burger", "category": "burgers", "price": 159.0},
+        ]
+        sentence = rt.speak("list_products", _envelope(payload), "I would like to explore burgers.")
+        assert sentence is not None
+        # Every row must survive verbatim — omitting one is the failure the
+        # system prompt calls out explicitly as WRONG.
+        for name, price in (("Aloo Tikki Burger", "119"),
+                            ("Classic Chicken Burger", "169"),
+                            ("Paneer Tikka Burger", "159")):
+            assert name in sentence
+            assert f"₹{price}" in sentence
+        assert "119.00" not in sentence  # TTS would say "point zero zero"
+        assert sentence.endswith("Which one would you like to try?")
+
+    def test_category_summary_is_spoken_with_counts(self):
+        payload = [
+            {"category": "burgers", "item_count": 7},
+            {"category": "pizza", "item_count": 4},
+        ]
+        sentence = rt.speak("list_categories", _envelope(payload), "what do you serve")
+        assert sentence is not None
+        assert "burgers (7 items)" in sentence
+        assert "pizza (4 items)" in sentence
+        assert "explore" in sentence
+
+    def test_unknown_category_is_refused_without_offering_unrelated_items(self):
+        payload = {
+            "category_not_found": True,
+            "requested": "dosa",
+            "message": "Do not invent a product or offer unrelated items ...",
+            "categories": ["burgers", "pizza", "sides"],
+        }
+        sentence = rt.speak("list_products", _envelope(payload), "do you have dosa")
+        assert sentence is not None
+        assert "don't have dosa" in sentence
+        assert "burgers" in sentence and "pizza" in sentence
+        # The payload's own message is authored for the model, never spoken.
+        assert "Do not invent" not in sentence
+
+    def test_mutation_intent_defers_to_the_llm(self):
+        """skip_summarization ends the turn — never cut a pending order short."""
+        payload = [{"name": "Aloo Tikki Burger", "price": 119.0, "category": "burgers",
+                    "product_id": "B1"}]
+        for utterance in (
+            "I would like to order one double chicken tower",
+            "add a coke",
+            "remove the fries",
+            "please confirm my order",
+        ):
+            assert rt.speak("list_products", _envelope(payload), utterance) is None, utterance
+
+    def test_browse_phrasings_are_templated(self):
+        payload = [{"name": "Aloo Tikki Burger", "price": 119.0, "category": "burgers",
+                    "product_id": "B1"}]
+        for utterance in (
+            "I would like to explore burgers.",
+            "show me the burgers",
+            "what burgers do you have",
+            "which pizzas are available",
+        ):
+            assert rt.speak("list_products", _envelope(payload), utterance) is not None, utterance
+
+    def test_row_without_a_price_defers(self):
+        """A row we cannot describe faithfully must be narrated, not guessed."""
+        payload = [{"name": "Mystery Item", "category": "burgers", "product_id": "B9"}]
+        assert rt.speak("list_products", _envelope(payload), "show me burgers") is None
+
+    def test_empty_catalogue_defers(self):
+        assert rt.speak("list_products", _envelope([]), "show me burgers") is None
+
+
 class TestSpeakDispatch:
+    def test_unrecognised_shape_defers(self):
+        assert rt.speak("list_products", _envelope({"anything": 1}), "show me") is None
+
     def test_unknown_tool_defers(self):
-        assert rt.speak("list_products", _envelope({"anything": 1})) is None
+        assert rt.speak("get_upsell_suggestions", _envelope({"anything": 1})) is None
 
     def test_transport_error_defers(self):
         assert rt.speak("place_order", {"error": "Tool place_order timed out"}) is None
@@ -152,4 +233,16 @@ class TestSpeakDispatch:
         assert rt.SPEAKABLE_TOOLS == {
             "place_order", "update_order", "confirm_order",
             "confirm_active_order", "remove_from_order",
+            "list_products", "list_categories",
         }
+
+    def test_mutation_templates_ignore_utterance(self):
+        """The browse gate must never suppress a mutation template."""
+        payload = {
+            "order_id": 12, "total": 219.0,
+            "just_added": [{"name": "Double Chicken Tower", "quantity": 1}],
+            "upsell_suggestions": [],
+        }
+        spoken = rt.speak("place_order", _envelope(payload),
+                          "I would like to order one double chicken tower")
+        assert spoken is not None and "Double Chicken Tower" in spoken

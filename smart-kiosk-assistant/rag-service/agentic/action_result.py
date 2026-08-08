@@ -106,6 +106,40 @@ def unwrap(raw: Any) -> dict[str, Any] | None:
     return decoded if isinstance(decoded, dict) else None
 
 
+def unwrap_any(raw: Any) -> Any:
+    """Like :func:`unwrap`, but preserves a JSON *list* payload.
+
+    ``unwrap`` narrows its return to ``dict | None`` because every guard that
+    consumes it immediately calls ``.get()``; handing those a list would turn
+    a shape mismatch into an ``AttributeError`` deep inside a truthfulness
+    check. Catalogue tools (``list_products``/``list_categories``) legitimately
+    return a top-level JSON array, so the response templates need a decoder
+    that keeps it.
+
+    Args:
+        raw: The value returned by ``call_tool``.
+
+    Returns:
+        The decoded payload — ``dict``, ``list``, or ``None`` when there is
+        nothing decodable.
+    """
+    if not isinstance(raw, dict):
+        return None
+    if "error" in raw and "result" not in raw:
+        return raw
+
+    result = raw.get("result")
+    if isinstance(result, (dict, list)):
+        return result
+    if not isinstance(result, str) or not result:
+        return None
+    try:
+        decoded = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return decoded if isinstance(decoded, (dict, list)) else None
+
+
 @dataclass
 class ActionResult:
     """Normalized view of one tool outcome, independent of its raw payload shape.

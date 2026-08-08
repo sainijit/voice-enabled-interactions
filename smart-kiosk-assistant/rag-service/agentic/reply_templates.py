@@ -38,9 +38,10 @@ guards in this package.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from agentic.action_result import unwrap
+from agentic.action_result import unwrap, unwrap_any
 
 # How many upsell/alternative suggestions to mention in one spoken sentence.
 # Matches the ceiling already used by menu_guard and mcp_server for the same
@@ -71,6 +72,87 @@ def _join_names(names: list[str]) -> str:
     if len(names) == 2:
         return f"{names[0]} and {names[1]}"
     return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
+def speak_catalogue(payload: Any) -> str | None:
+    """Template a reply for a ``list_products`` / ``list_categories`` result.
+
+    Catalogue results are the single largest deterministic win available in
+    this agent. ``_AGENT_INSTRUCTION`` Rule 4 already dictates the exact
+    sentence the model must produce from this data — "We have <Name> (<price>),
+    ... Which one would you like to try?" — so the second LLM call is spending
+    ~3 s of Qwen inference reproducing a string that is fully determined by
+    the tool result. Every name and price here is copied verbatim from
+    kiosk-core's response, which makes this strictly *more* faithful than the
+    model's paraphrase, never less: it cannot drop, rename, or re-price a row.
+
+    Three payload shapes are produced by ``mcp_server.list_products``:
+
+    * ``[{product_id, name, category, price}, ...]`` — a browsed category.
+    * ``[{category, item_count}, ...]`` — the category summary, also what
+      ``list_categories`` returns.
+    * ``{category_not_found, requested, categories, message}`` — the customer
+      asked for something the kiosk does not carry at all ("dosa", "sushi").
+
+    Args:
+        payload: The tool's own JSON result, already unwrapped from the MCP
+            transport envelope.
+
+    Returns:
+        A spoken sentence, or ``None`` to defer to normal LLM narration when
+        the shape is not one of the three above.
+    """
+    # "We don't carry that" — built from `requested` + `categories` only. The
+    # payload's own `message` field is deliberately NOT spoken: it is authored
+    # for the model ("Do not invent a product...") and is nonsense over TTS.
+    # Templating this case also removes the specific failure it was written to
+    # catch, where the model cherry-picked unrelated items from the catalogue
+    # and presented them as an answer.
+    if isinstance(payload, dict):
+        if not payload.get("category_not_found"):
+            return None
+        categories = [str(c) for c in (payload.get("categories") or []) if c]
+        requested = str(payload.get("requested") or "").strip()
+        if not categories or not requested:
+            return None
+        return (
+            f"Sorry, we don't have {requested} on the menu. "
+            f"We do serve {_join_names(categories)}. "
+            f"Which would you like to see?"
+        )
+
+    if not isinstance(payload, list) or not payload:
+        return None
+
+    # Category summary — entries carry a category and a count and, crucially,
+    # NO product ``name``. Testing only for "has category, lacks price" would
+    # swallow a real product row whose price failed to serialise, reporting
+    # the customer's category back at them as if it were the whole answer.
+    if all(
+        isinstance(e, dict) and e.get("category") and not e.get("name")
+        for e in payload
+    ):
+        parts = [
+            f"{e['category']} ({e.get('item_count', e.get('count'))} items)"
+            if e.get("item_count", e.get("count")) is not None
+            else str(e["category"])
+            for e in payload
+        ]
+        return (
+            f"We have {_join_names(parts)}. "
+            f"Which category would you like to explore?"
+        )
+
+    # A browsed category — every entry must carry a name and a price, or we
+    # cannot describe the row faithfully and the model should speak instead.
+    if all(
+        isinstance(e, dict) and e.get("name") and e.get("price") is not None
+        for e in payload
+    ):
+        parts = [f"{e['name']} (₹{_money(e['price'])})" for e in payload]
+        return f"We have {_join_names(parts)}. Which one would you like to try?"
+
+    return None
 
 
 def speak_order_mutation(payload: dict[str, Any]) -> str | None:
@@ -171,6 +253,8 @@ _TEMPLATES = {
     "confirm_order": speak_confirm,
     "confirm_active_order": speak_confirm,
     "remove_from_order": speak_removal,
+    "list_products": speak_catalogue,
+    "list_categories": speak_catalogue,
 }
 
 # Public: which tools this module can ever speak for. Checked by
@@ -178,14 +262,58 @@ _TEMPLATES = {
 # doesn't know about is never a candidate for skipping narration.
 SPEAKABLE_TOOLS = frozenset(_TEMPLATES)
 
+# Catalogue tools are speakable only when the customer was actually browsing.
+#
+# Templating sets ``skip_summarization``, which ADK treats as the END of the
+# turn. For a mutating tool that is safe — the mutation already happened and
+# the template describes it. For a *read* like ``list_products`` it is only
+# safe if the read was the customer's goal. Were the model to use
+# ``list_products`` as an intermediate lookup before ``place_order``, ending
+# the turn at the lookup would drop the order.
+#
+# Measured across the 234-turn replay corpus that has never happened (zero
+# multi-tool turns; 56 single catalogue turns), and the failure mode is a
+# stale menu recital rather than a false claim, so no truthfulness invariant
+# rests on this. It is still gated, because the gate is free.
+_CATALOGUE_TOOLS = frozenset({"list_products", "list_categories"})
 
-def speak(tool_name: str, raw_result: Any) -> str | None:
+# Explicit cart-mutation intent. Deliberately narrow: a false NEGATIVE here
+# just costs one LLM call (today's behaviour), while a false POSITIVE could
+# swallow an order. Bare "order" is not enough — "what's in my order" is a
+# read; only "order a/one/the <thing>" is an instruction to buy.
+_MUTATION_INTENT_RE = re.compile(
+    r"\b(?:add|adding|buy|purchase|remove|removing|delete|drop|cancel|"
+    r"confirm|checkout|check\s+out|place\s+(?:the|my)\s+order|"
+    r"order\s+(?:me\s+)?(?:a|an|one|two|three|four|five|\d+|the)\b)",
+    re.IGNORECASE,
+)
+
+
+def is_browse_intent(utterance: str) -> bool:
+    """Return True when a catalogue read may be spoken as the whole turn.
+
+    Args:
+        utterance: The customer's raw message for this turn.
+
+    Returns:
+        ``False`` when the customer asked to change the cart, in which case a
+        catalogue tool can only have been an intermediate step and the turn
+        must be allowed to continue to the mutating call.
+    """
+    return not _MUTATION_INTENT_RE.search(utterance or "")
+
+
+def speak(tool_name: str, raw_result: Any, utterance: str = "") -> str | None:
     """Return a spoken reply for ``tool_name``'s result, or None to defer to the LLM.
 
     Args:
         tool_name: The MCP tool that was just called.
         raw_result: The raw value returned by ``mcp_client.call_tool`` (the
             MCP transport envelope, not yet decoded).
+        utterance: The customer's raw message this turn. Only consulted for
+            catalogue reads — see ``_CATALOGUE_TOOLS``. Defaults to empty,
+            which is treated as browse intent, so existing callers and the
+            mutation templates are unaffected.
 
     Returns:
         A ready-to-speak sentence, or ``None`` when this tool/outcome
@@ -194,7 +322,13 @@ def speak(tool_name: str, raw_result: Any) -> str | None:
     template = _TEMPLATES.get(tool_name)
     if template is None:
         return None
-    payload = unwrap(raw_result)
+    if tool_name in _CATALOGUE_TOOLS and not is_browse_intent(utterance):
+        return None
+    # Catalogue tools return a top-level JSON array; the mutation tools all
+    # return an object. ``unwrap`` narrows to dict for the guards' benefit,
+    # so catalogue reads need the list-preserving decoder.
+    decode = unwrap_any if tool_name in _CATALOGUE_TOOLS else unwrap
+    payload = decode(raw_result)
     if payload is None:
         return None
     return template(payload)

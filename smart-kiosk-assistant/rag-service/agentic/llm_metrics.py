@@ -52,6 +52,13 @@ _mcp_stats: ContextVar[Dict[str, float] | None] = ContextVar("_mcp_stats", defau
 # than assuming it is negligible.
 _guard_stats: ContextVar[Dict[str, float] | None] = ContextVar("_guard_stats", default=None)
 
+# Holds {"ms": float, "calls": int} of deterministic response-template
+# rendering this turn (agentic/reply_templates.py). Its value is not the time
+# it costs — pure string formatting, microseconds — but the time it SAVES:
+# a non-zero ``calls`` here means a whole Qwen inference (~2-3s) was skipped
+# for this turn. Read alongside ``llm_calls`` to see the optimisation working.
+_template_stats: ContextVar[Dict[str, float] | None] = ContextVar("_template_stats", default=None)
+
 
 def reset() -> None:
     """Begin a fresh measurement window for the current turn."""
@@ -59,6 +66,7 @@ def reset() -> None:
     _retrieval_stats.set({"ms": 0.0, "calls": 0})
     _mcp_stats.set({"ms": 0.0, "calls": 0})
     _guard_stats.set({"ms": 0.0, "calls": 0})
+    _template_stats.set({"ms": 0.0, "calls": 0})
 
 
 def record(elapsed_ms: float, ttft_ms: float | None = None) -> None:
@@ -141,6 +149,28 @@ def guard_snapshot() -> Dict[str, Any]:
         (int).
     """
     stats = _guard_stats.get()
+    if stats is None or stats["calls"] == 0:
+        return {"ms": None, "calls": 0}
+    return {"ms": round(stats["ms"], 1), "calls": int(stats["calls"])}
+
+
+def record_template(elapsed_ms: float) -> None:
+    """Add one deterministic response-template render to the current window."""
+    stats = _template_stats.get()
+    if stats is None:
+        return
+    stats["ms"] += elapsed_ms
+    stats["calls"] += 1
+
+
+def template_snapshot() -> Dict[str, Any]:
+    """Return deterministic response-template timings for the current turn.
+
+    Returns:
+        dict with ``ms`` (float or None when no template was attempted) and
+        ``calls`` (int).
+    """
+    stats = _template_stats.get()
     if stats is None or stats["calls"] == 0:
         return {"ms": None, "calls": 0}
     return {"ms": round(stats["ms"], 1), "calls": int(stats["calls"])}
