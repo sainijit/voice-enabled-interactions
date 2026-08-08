@@ -14,6 +14,9 @@ POST /api/v1/agent/chat
     llm_ttft_ms    float|None — cumulative prefill/time-to-first-token
     llm_calls      int        — number of LLM round-trips for the turn
     retrieval_ms   float|None — knowledge-base retrieval time for the turn
+    mcp_ms         float|None — cumulative MCP tool round-trip time for the turn
+    mcp_calls      int        — number of MCP tool round-trips for the turn
+    guard_ms       float|None — cumulative truthfulness-guard processing time
 """
 
 from __future__ import annotations
@@ -74,6 +77,26 @@ class AgentChatResponse(BaseModel):
             "None when the agent did not call knowledge_lookup."
         ),
     )
+    mcp_ms: float | None = Field(
+        default=None,
+        description=(
+            "Cumulative MCP tool round-trip time for this turn, in "
+            "milliseconds (network + kiosk-core request handling, including "
+            "its SQLite time). None when no MCP tool was called."
+        ),
+    )
+    mcp_calls: int = Field(
+        default=0,
+        description="Number of MCP tool round-trips made during this turn",
+    )
+    guard_ms: float | None = Field(
+        default=None,
+        description=(
+            "Cumulative time spent in the truthfulness guards (menu/removal/"
+            "confirm result recording and whole-reply validation), in "
+            "milliseconds. None when no guard-relevant tool ran this turn."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +147,9 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
         llm_ttft_ms=result.get("llm_ttft_ms"),
         llm_calls=result.get("llm_calls", 0),
         retrieval_ms=result.get("retrieval_ms"),
+        mcp_ms=result.get("mcp_ms"),
+        mcp_calls=result.get("mcp_calls", 0),
+        guard_ms=result.get("guard_ms"),
     )
 
 

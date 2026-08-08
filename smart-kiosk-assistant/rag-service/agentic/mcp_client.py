@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -150,6 +151,8 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     from mcp.client.streamable_http import streamablehttp_client
     from mcp import ClientSession
 
+    from agentic import llm_metrics
+
     tool = _tools.get(tool_name)
     if tool is None:
         raise ValueError(f"MCP tool not found: {tool_name}")
@@ -176,6 +179,7 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
             logger.info("[MCP] Tool=%s result=%s", tool_name, text[:200])
             return {"status": "success", "result": text or str(content)}
 
+    start = time.monotonic()
     try:
         return await asyncio.wait_for(_invoke(), timeout=server.timeout)
     except asyncio.TimeoutError:
@@ -184,6 +188,11 @@ async def call_tool(tool_name: str, arguments: dict[str, Any]) -> Any:
     except Exception as exc:
         logger.error("[MCP] Tool=%s call failed: %s", tool_name, exc)
         return {"error": str(exc)}
+    finally:
+        # Recorded for every outcome (success, timeout, transport error): a
+        # slow *failing* call is just as relevant to the "where did the 4s
+        # go" question as a slow successful one.
+        llm_metrics.record_mcp((time.monotonic() - start) * 1000)
 
 
 async def bootstrap_mcp_tools(config_path: str) -> dict[str, MCPTool]:

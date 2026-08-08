@@ -1378,9 +1378,11 @@ class OrderingAgent:
             # Record the outcome *before* compression: the menu guard needs the
             # tool's own error payload, and compression is free to reshape a
             # successful result.
+            _guard_start = time.monotonic()
             menu_guard.record_tool_result(tool_name, result)
             removal_guard.record_tool_result(tool_name, result)
             confirm_guard.record_tool_result(tool_name, result)
+            llm_metrics.record_guard((time.monotonic() - _guard_start) * 1000)
 
             # Skip the 2nd LLM call (pure narration) when this is the turn's
             # only tool call and the outcome cleanly matches an authored
@@ -1487,6 +1489,19 @@ class OrderingAgent:
                 (prefill + decode, i.e. the full round-trip).
               - ``llm_ttft_ms``: float | None — cumulative prefill time only.
               - ``llm_calls``: int — number of LLM round-trips this turn.
+              - ``retrieval_ms``: float | None — cumulative knowledge-base
+                retrieval time (None when no retrieval ran this turn).
+              - ``mcp_ms``: float | None — cumulative MCP tool round-trip
+                time (network + kiosk-core request handling; None when no
+                tool was called). This is the only vantage point rag-service
+                has on kiosk-core/SQLite time, since it never queries SQLite
+                directly.
+              - ``mcp_calls``: int — number of MCP tool round-trips this turn.
+              - ``guard_ms``: float | None — cumulative time spent in the
+                truthfulness guards (menu_guard/removal_guard/confirm_guard
+                result recording + whole-reply validation). Tracked to rule
+                guard overhead in or out as a latency contributor, since
+                these are pure in-process functions and should stay small.
         """
         if not self._bootstrapped:
             await self.bootstrap()
@@ -1690,6 +1705,7 @@ class OrderingAgent:
 
         # A draft cart is not a confirmed order. Strip any claim to the contrary
         # that no confirm tool backs — see _strip_false_confirmation.
+        _guard_start = time.monotonic()
         reply, stripped = _strip_false_confirmation(reply, tool_calls)
         if stripped:
             logger.error(
@@ -1720,9 +1736,12 @@ class OrderingAgent:
                 "| session=%s tool_calls=%s reply=%r",
                 session_id, tool_calls, reply[:160],
             )
+        llm_metrics.record_guard((time.monotonic() - _guard_start) * 1000)
 
         logger.info("[AGENT] Reply length=%d tool_calls=%s latency_ms=%.0f", len(reply), tool_calls, latency_ms)
         retrieval = llm_metrics.retrieval_snapshot()
+        mcp = llm_metrics.mcp_snapshot()
+        guard = llm_metrics.guard_snapshot()
 
         # Reconcile what was already spoken against the authoritative reply.
         # The gate is designed so that no post-hoc guard can rewrite a released
@@ -1749,6 +1768,9 @@ class OrderingAgent:
             "llm_ttft_ms": llm["ttft_ms"],
             "llm_calls": llm["calls"],
             "retrieval_ms": retrieval["ms"],
+            "mcp_ms": mcp["ms"],
+            "mcp_calls": mcp["calls"],
+            "guard_ms": guard["ms"],
             "streamed": streamed,
         }
 
