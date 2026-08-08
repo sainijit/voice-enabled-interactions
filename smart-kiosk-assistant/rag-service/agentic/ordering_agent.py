@@ -499,9 +499,11 @@ _LEAKED_DIRECTIVE_RE = re.compile(
 )
 
 
+_KNOWLEDGE_MARKER_RE = re.compile(r"\[/?knowledge\]", re.IGNORECASE)
+
+
 def _strip_leaked_directives(reply: str) -> str:
     """Remove system-prompt directives the model echoed into its reply.
-
     Args:
         reply: Model output, already stripped of markdown and tool syntax.
 
@@ -515,6 +517,37 @@ def _strip_leaked_directives(reply: str) -> str:
     cleaned = _LEAKED_DIRECTIVE_RE.sub(" ", reply)
     cleaned = _WS_RE.sub(" ", cleaned).strip()
     return cleaned if cleaned else reply
+
+
+def _strip_knowledge_markers(reply: str) -> str:
+    """Unwrap a `[knowledge]` block the model echoed instead of answering from.
+
+    Pre-grounding prefixes the user turn with a ``[knowledge] ... [/knowledge]``
+    block. The model is instructed to answer *from* that block, but a smaller
+    quantised model sometimes parrots it back verbatim, sending the literal
+    delimiters to TTS.
+
+    The markers are removed while the inner text is kept: that text was
+    retrieved from the authoritative knowledge base, so speaking it is truthful
+    and strictly better than substituting a fallback or falling silent.
+
+    Args:
+        reply: Model output.
+
+    Returns:
+        The reply with any knowledge-block delimiters removed.
+    """
+    if not reply or "[knowledge]" not in reply.lower():
+        return reply
+    cleaned = _KNOWLEDGE_MARKER_RE.sub(" ", reply)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    if cleaned:
+        logger.warning(
+            "[AGENT] Model echoed the pre-grounded knowledge block — "
+            "unwrapping markers | raw=%r", reply[:160],
+        )
+        return cleaned
+    return reply
 
 
 def _strip_tool_syntax(reply: str) -> str:
@@ -665,6 +698,12 @@ class _SentenceGate:
             return False
         # (d) Anything that would be stripped or substituted wholesale.
         if _ERROR_PAYLOAD_RE.search(sentence) or _TOOL_SYNTAX_RE.search(sentence):
+            return False
+        # (d2) A parroted pre-grounding delimiter is rewritten by
+        #      _strip_knowledge_markers(). Condition (a) already withholds
+        #      pre-grounded turns (they run no tool), but this stays explicit
+        #      so the gate keeps mirroring chat() one-for-one.
+        if _KNOWLEDGE_MARKER_RE.search(sentence):
             return False
         if _TOOL_MENTION_RE.search(sentence) or "<think" in sentence.lower():
             return False
@@ -1764,6 +1803,7 @@ class OrderingAgent:
         reply = _strip_thinking(reply)
         reply = _strip_tool_syntax(reply)
         reply = _strip_markdown(reply)
+        reply = _strip_knowledge_markers(reply)
         reply = _strip_leaked_directives(reply)
         if _ERROR_PAYLOAD_RE.search(reply):
             logger.error(

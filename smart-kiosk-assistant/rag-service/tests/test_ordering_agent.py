@@ -140,3 +140,30 @@ class _FakeRunner:
         for tool_name in tools:
             yield SimpleNamespace(tool_call=SimpleNamespace(name=tool_name), content=None)
         yield SimpleNamespace(tool_call=None, content=SimpleNamespace(parts=[SimpleNamespace(text=reply)]))
+
+
+class TestStripKnowledgeMarkers:
+    """Pre-grounding delimiters must never reach TTS."""
+
+    def test_parroted_block_is_unwrapped_keeping_content(self):
+        reply = ("[knowledge] The restaurant's name is QuickBite Express. "
+                 "The operating hours are Mon-Thu 8 AM-11 PM. [/knowledge]")
+        out = ordering_agent._strip_knowledge_markers(reply)
+        assert "[knowledge]" not in out
+        assert "[/knowledge]" not in out
+        assert "QuickBite Express" in out
+
+    def test_case_insensitive(self):
+        assert "[" not in ordering_agent._strip_knowledge_markers("[KNOWLEDGE] Hi [/Knowledge]")
+
+    def test_clean_reply_untouched(self):
+        reply = "We open at 8 AM."
+        assert ordering_agent._strip_knowledge_markers(reply) == reply
+
+    def test_marker_only_reply_falls_back_to_original(self):
+        # Nothing speakable would remain; never return empty.
+        assert ordering_agent._strip_knowledge_markers("[knowledge][/knowledge]").strip() != ""
+
+    def test_gate_withholds_sentence_containing_marker(self):
+        gate = ordering_agent._SentenceGate(message="hi", emit=None)
+        assert gate._is_safe("[knowledge] We open at 8 AM.", ["list_products"]) is False
