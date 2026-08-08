@@ -187,6 +187,38 @@ def test_no_alternatives_falls_back_to_plain_refusal() -> None:
     assert "choose an item from our menu" in corrected
 
 
+def test_garbled_reference_falls_back_to_generic_refusal() -> None:
+    """Regression for a live bug: the model passed the mangled tool argument
+    "ll the burgers to my cart" (from "add all the burgers to my cart"), and
+    the old refusal echoed it verbatim: "we don't have ll the burgers to my
+    cart on the menu at the moment" — nonsensical to a voice customer. A
+    reference containing a cart/order verb, or too many words to plausibly be
+    a dish name, must not be spoken back; use the generic refusal instead.
+    """
+    menu_guard.record_tool_result(
+        "place_order", _mcp_envelope(_off_menu_payload(ref="ll the burgers to my cart"))
+    )
+
+    corrected, changed = menu_guard.validate_reply(
+        "I've added ll the burgers to my cart to your order."
+    )
+
+    assert changed is True
+    assert "ll the burgers to my cart" not in corrected
+    assert corrected == menu_guard._REFUSAL_GENERIC
+
+
+def test_short_clean_reference_is_still_named_in_the_refusal() -> None:
+    """A genuine dish name must still be named — the fix only guards against
+    garbled/oversized references, not legitimate off-menu items."""
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_off_menu_payload(ref="sushi platter")))
+
+    corrected, changed = menu_guard.validate_reply("I've added the sushi platter to your order.")
+
+    assert changed is True
+    assert "sushi platter" in corrected
+
+
 def test_begin_turn_clears_previous_rejection() -> None:
     """A rejection must not suppress a legitimate addition on a later turn."""
     menu_guard.record_tool_result("place_order", _mcp_envelope(_off_menu_payload()))

@@ -98,6 +98,28 @@ _REFUSAL_GENERIC = (
 # reply; beyond that the customer stops retaining them.
 _MAX_ALTERNATIVES = 3
 
+# The rejected reference is whatever string the model passed as a tool
+# argument — untrusted text, not a fixed vocabulary. It is usually a clean
+# dish name ("sushi platter"), but the model can also pass a garbled fragment
+# of the whole request (observed live: asking to add "all the burgers to my
+# cart" produced the tool argument "ll the burgers to my cart", which then
+# spoke back as "we don't have ll the burgers to my cart on the menu" —
+# nonsensical and undermines the customer's confidence in every other guard).
+# A real dish name is short and never contains a cart/order verb, so anything
+# outside that shape is not echoed verbatim; the refusal falls back to the
+# generic, item-less wording instead.
+_NON_ITEM_MARKER_RE = re.compile(r"\b(?:cart|order|checkout|basket|please)\b", re.IGNORECASE)
+_MAX_ITEM_WORDS = 5
+
+
+def _looks_like_item_name(ref: str) -> bool:
+    """Return True when ``ref`` is safe to speak back to the customer verbatim."""
+    if not ref:
+        return False
+    if _NON_ITEM_MARKER_RE.search(ref):
+        return False
+    return len(ref.split()) <= _MAX_ITEM_WORDS
+
 
 @dataclass
 class _TurnState:
@@ -278,7 +300,7 @@ def build_refusal(state: _TurnState | None = None) -> str:
     """
     state = state if state is not None else _turn_state.get()
     item = next((ref for ref in state.rejected_refs if ref), "")
-    if not item:
+    if not item or not _looks_like_item_name(item):
         return _REFUSAL_GENERIC
 
     alternatives = _format_alternatives(state.alternatives)

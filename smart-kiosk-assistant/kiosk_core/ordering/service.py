@@ -94,9 +94,11 @@ class OrderingService:
           2. normalised product_id or name equality
           3. unique normalised-substring match on name
           4. unique product whose name contains every query token
-          5. closest name by difflib ratio (cutoff 0.6)
+          5. reject (return None) if two or more distinct products tie on the
+             most shared query words — see below
+          6. closest name by difflib ratio (cutoff 0.6)
 
-        Step 4 is checked before the difflib ratio (5) on purpose: a
+        Step 4 is checked before the difflib ratio (6) on purpose: a
         distinguishing word the customer actually said (e.g. "spicy" in
         "spicy chicken burger") is a precise, deliberate signal that a
         character-similarity ratio can lose to a shorter, more generic name
@@ -106,6 +108,21 @@ class OrderingService:
         every query token to be present AND the match to be unique keeps this
         step precise — it only overrides the ratio when it has a strictly
         stronger, unambiguous signal.
+
+        Step 5 guards the same failure mode one level further out: an
+        off-menu reference with no full-subset match (step 4) can still share
+        two or more words with two or more *different* real items, and
+        character ratio alone cannot tell that "chicken" vs "paneer" is
+        dietary-defining while "spicy" vs "classic" is not. Observed live:
+        "chicken tikka burger" — not on the menu — resolved to "Paneer Tikka
+        Burger" over "Classic Chicken Burger" by pure ratio (0.718 vs 0.667),
+        silently swapping a non-veg request for a veg item. When the top
+        word-overlap score (requiring at least two shared words, so a single
+        generic word like "classic" shared with an unrelated item such as
+        "Classic French Fries" cannot trigger this on its own) is shared by
+        more than one distinct product, the reference is genuinely ambiguous
+        and is rejected rather than guessed — the same "ambiguous match is
+        treated as no match" principle as step 4's uniqueness requirement.
 
         Args:
             ref: An id or name reference, e.g. "BURGER-NV-001" or "classic
@@ -141,6 +158,34 @@ class OrderingService:
         ]
         if len(token_hits) == 1:
             return token_hits[0]
+
+        # Before falling back to raw character-similarity, check for a
+        # token-overlap tie among plausible candidates. difflib's ratio does
+        # not know that a word like "chicken" vs "paneer" is dietary-defining,
+        # not stylistic like "spicy" vs "classic" — so it can rank a
+        # completely different item above the one the customer actually named
+        # just because more characters happen to line up (observed live:
+        # "chicken tikka burger" — not on the menu — resolved to "Paneer
+        # Tikka Burger" over "Classic Chicken Burger" purely on character
+        # ratio, silently swapping a non-veg request for a veg item). A tie in
+        # shared *words* between two or more distinct real products means the
+        # reference is genuinely ambiguous and must not be silently guessed —
+        # same principle as the uniqueness requirement above.
+        #
+        # The overlap must be at least 2 words before it counts as a
+        # meaningful signal: a single shared generic word ("classic" in both
+        # "Classic Chicken Burger" and "Classic French Fries") is common
+        # across unrelated categories and must not itself block a genuine
+        # single-typo match from reaching the difflib fallback below.
+        if qtokens:
+            overlap_scores = [
+                (len(qtokens & set(_normalize(p.name).split())), p) for p in products
+            ]
+            max_overlap = max((score for score, _ in overlap_scores), default=0)
+            if max_overlap >= 2:
+                top = [p for score, p in overlap_scores if score == max_overlap]
+                if len(top) > 1:
+                    return None
 
         name_map = {_normalize(p.name): p for p in products}
         close = difflib.get_close_matches(nref, list(name_map), n=1, cutoff=0.6)

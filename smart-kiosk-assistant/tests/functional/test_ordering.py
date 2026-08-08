@@ -274,6 +274,30 @@ class TestOrderingProductResolution:
         assert product is not None
         assert product.name == "Classic Chicken Burger"
 
+    @pytest.mark.tier1
+    def test_off_menu_item_sharing_words_with_multiple_products_is_unresolved(
+        self,
+        ordering_app: TestClient,
+    ):
+        """Regression for a live bug: "chicken tikka burger" is not on the
+        menu, but pure difflib ratio resolved it to "Paneer Tikka Burger" —
+        the wrong dietary category (veg instead of the non-veg item the
+        customer actually asked for) — because character similarity scored
+        it higher (0.718) than "Classic Chicken Burger" (0.667), which
+        actually shares the dietary-defining word "chicken". The reference
+        ties on word-overlap between "Classic Chicken Burger", "Spicy Chicken
+        Crunch Burger", and "Paneer Tikka Burger" (2 shared words each), so it
+        must be rejected as ambiguous rather than silently guessed.
+        """
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        import asyncio  # noqa: PLC0415
+
+        product = asyncio.run(service.resolve_product("chicken tikka burger"))
+        assert product is None
+
 
 @pytest.mark.tier1
 class TestOrderingSeed:
