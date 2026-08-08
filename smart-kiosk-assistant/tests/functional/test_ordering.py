@@ -298,6 +298,63 @@ class TestOrderingProductResolution:
         product = asyncio.run(service.resolve_product("chicken tikka burger"))
         assert product is None
 
+    @pytest.mark.tier1
+    def test_detailed_resolution_reports_match_status_and_confidence(
+        self,
+        ordering_app: TestClient,
+    ):
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+        import asyncio  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        result = asyncio.run(service.resolve_product_detailed("Classic Chicken Burger"))
+        assert result.status == "MATCH"
+        assert result.product is not None
+        assert result.product.name == "Classic Chicken Burger"
+        assert result.confidence == 1.0
+        assert result.candidates == []
+
+    @pytest.mark.tier1
+    def test_detailed_resolution_reports_ambiguous_status_with_candidates(
+        self,
+        ordering_app: TestClient,
+    ):
+        """Same scenario as
+        ``test_off_menu_item_sharing_words_with_multiple_products_is_unresolved``,
+        but asserting the richer status: ``resolve_product`` collapses this to
+        ``None``, while ``resolve_product_detailed`` must distinguish a
+        genuine tie (AMBIGUOUS) from no match at all (NOT_FOUND) so a caller
+        can offer the tied candidates back to the customer.
+        """
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+        import asyncio  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        result = asyncio.run(service.resolve_product_detailed("chicken tikka burger"))
+        assert result.status == "AMBIGUOUS"
+        assert result.product is None
+        assert len(result.candidates) >= 2
+        names = {c.name for c in result.candidates}
+        assert "Classic Chicken Burger" in names
+
+    @pytest.mark.tier1
+    def test_detailed_resolution_reports_not_found_status(
+        self,
+        ordering_app: TestClient,
+    ):
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+        import asyncio  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        result = asyncio.run(service.resolve_product_detailed("a sushi platter with eel"))
+        assert result.status == "NOT_FOUND"
+        assert result.product is None
+        assert result.candidates == []
+
+
 
 @pytest.mark.tier1
 class TestOrderingSeed:
