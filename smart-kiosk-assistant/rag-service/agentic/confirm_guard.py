@@ -26,15 +26,18 @@ siblings.
 from __future__ import annotations
 
 import contextvars
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any
 
+from agentic import action_result
+
 logger = logging.getLogger(__name__)
 
 # Only these tools' results legitimise a "your order is confirmed" claim.
-_CONFIRM_TOOLS = frozenset({"confirm_order", "confirm_active_order"})
+# Sourced from action_result.CLAIM_TOOLS — see that module for why this must
+# not be a locally redefined set.
+_CONFIRM_TOOLS = action_result.CLAIM_TOOLS[action_result.ORDER_CONFIRMED]
 
 
 @dataclass
@@ -79,29 +82,6 @@ def current_state() -> _TurnState:
     return _turn_state.get()
 
 
-def _unwrap(raw: Any) -> dict[str, Any] | None:
-    """Extract the tool's own JSON payload from an MCP response envelope.
-
-    Mirrors ``menu_guard._unwrap`` / ``removal_guard._unwrap`` — see there for
-    the envelope shape.
-    """
-    if not isinstance(raw, dict):
-        return None
-    if "error" in raw and "result" not in raw:
-        return raw
-
-    result = raw.get("result")
-    if isinstance(result, dict):
-        return result
-    if not isinstance(result, str) or not result:
-        return None
-    try:
-        decoded = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return decoded if isinstance(decoded, dict) else None
-
-
 def record_tool_result(tool_name: str, raw: Any) -> None:
     """Classify one confirm-tool result as success or failure.
 
@@ -114,23 +94,23 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
 
     state = _turn_state.get()
     state.attempted = True
-    payload = _unwrap(raw)
-    if payload is None:
+    result = action_result.classify(tool_name, raw)
+    if result.code == "UNDECODABLE":
         logger.warning(
             "[CONFIRM-GUARD] Could not decode result of %s — treating as unsuccessful",
             tool_name,
         )
         return
 
-    error = payload.get("error")
-    if error:
-        state.error_message = str(error)
+    if not result.success:
+        state.error_message = result.message
         logger.warning(
             "[CONFIRM-GUARD] %s failed | order_id=%s error=%s",
-            tool_name, payload.get("order_id"), error,
+            tool_name, result.data.get("order_id"), result.message,
         )
         return
 
+    payload = result.data
     if payload.get("status") == "confirmed" and payload.get("order_id") is not None:
         state.succeeded = True
     else:

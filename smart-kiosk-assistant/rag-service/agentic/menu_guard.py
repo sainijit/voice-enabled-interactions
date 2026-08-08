@@ -45,19 +45,20 @@ hallucinate and can be unit-tested as pure functions.
 from __future__ import annotations
 
 import contextvars
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentic import action_result
+
 logger = logging.getLogger(__name__)
 
 # Tools whose success is what legitimises a "that's in your order now" claim.
-# Kept in sync with ``ordering_agent._MUTATING_TOOLS`` — adding a new
-# cart-mutating MCP tool means adding it in both places, or this guard silently
-# stops covering it.
-_MUTATING_TOOLS = frozenset({"place_order", "update_order"})
+# Sourced from action_result.CLAIM_TOOLS — the single registry also consumed
+# by ordering_agent._SentenceGate, so a new cart-mutating tool only needs to
+# be added in one place instead of silently going unguarded here.
+_MUTATING_TOOLS = action_result.CLAIM_TOOLS[action_result.ITEM_ADDED]
 
 # Claims that an item was put into the cart. Deliberately broader than
 # ``order_claim_guard._ADDED_PATTERNS``: that guard only has to catch replies
@@ -177,38 +178,6 @@ def current_state() -> _TurnState:
     return _turn_state.get()
 
 
-def _unwrap(raw: Any) -> dict[str, Any] | None:
-    """Extract the tool's own JSON payload from an MCP response envelope.
-
-    ``mcp_client.call_tool`` returns ``{"status": "success", "result": "<json>"}``
-    on success and ``{"error": "..."}`` on a transport failure. The tool's real
-    payload — including an off-menu rejection — is the JSON *inside* ``result``.
-
-    Args:
-        raw: The value returned by ``call_tool``.
-
-    Returns:
-        The decoded tool payload, or None when there is nothing decodable.
-        A transport-level error is returned as-is so the caller can treat it
-        as "not a success" without misreading it as an off-menu rejection.
-    """
-    if not isinstance(raw, dict):
-        return None
-    if "error" in raw and "result" not in raw:
-        return raw
-
-    result = raw.get("result")
-    if isinstance(result, dict):
-        return result
-    if not isinstance(result, str) or not result:
-        return None
-    try:
-        decoded = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    return decoded if isinstance(decoded, dict) else None
-
-
 def record_tool_result(tool_name: str, raw: Any) -> None:
     """Classify one mutating tool result as success or off-menu rejection.
 
@@ -224,8 +193,8 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
         return
 
     state = _turn_state.get()
-    payload = _unwrap(raw)
-    if payload is None:
+    result = action_result.classify(tool_name, raw)
+    if result.code == "UNDECODABLE":
         # Undecodable payload: treat as not-a-success. The turn then falls back
         # to the existing name-based guards, which is the prior behaviour.
         logger.warning(
@@ -234,12 +203,12 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
         )
         return
 
-    error = payload.get("error")
-    if not error:
+    if result.success:
         state.succeeded = True
         return
 
-    ref_match = _REJECTED_REF_RE.match(str(error))
+    payload = result.data
+    ref_match = _REJECTED_REF_RE.match(result.message)
     if ref_match:
         state.rejected_refs.append(ref_match.group(1))
     else:
