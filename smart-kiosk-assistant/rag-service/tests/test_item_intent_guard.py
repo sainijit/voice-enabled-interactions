@@ -129,3 +129,46 @@ class TestCorrectedReference:
         items = [{"product_id": "", "quantity": 1}]
         result = guard.corrected_reference("place_order", items, "add a pizza")
         assert result is None
+
+
+class TestTentativeIntent:
+    """Tentative/exploratory phrases must NOT be treated as item references."""
+
+    @pytest.mark.parametrize("utterance", [
+        "I was thinking of ordering a burger.",
+        "I was thinking of ordering a classic chicken burger",
+        "I'm thinking of having a pizza",
+        "I'm considering a coffee",
+        "Maybe a fries",
+        "Maybe I could get a burger",
+        "What about a pizza?",
+        "How about a coffee?",
+        "I might want fries",
+        "I might like a burger",
+        "Possibly a pizza",
+        "I was going to get a burger",
+        "I was planning to order a coffee",
+        "Just browsing",
+        "I could try a burger",
+    ])
+    def test_tentative_returns_none(self, utterance: str):
+        """Tentative phrases must return None — not an item reference."""
+        assert guard.extract_named_item(utterance) is None, (
+            f"Expected None for tentative utterance: {utterance!r}"
+        )
+
+    @pytest.mark.parametrize("utterance", [
+        "Add a burger",
+        "I want a pizza",
+        "Order me a coffee",
+        "Get me fries please",
+        "I'd like a burger",
+        "Can I get a coffee?",
+        "I'll have a pizza",
+    ])
+    def test_direct_order_not_affected(self, utterance: str):
+        """Direct order phrases must still return an item reference."""
+        result = guard.extract_named_item(utterance)
+        assert result is not None, (
+            f"Expected non-None for direct order: {utterance!r}"
+        )

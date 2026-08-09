@@ -67,7 +67,7 @@ _NAMED_ITEM_RE = re.compile(
     r"""
     \b(?:
         add(?:ing)?|order|get\s+me|bring\s+me|
-        i(?:'d|\s+would|\s+will)?\s+(?:like|want|take|have)|
+        i(?:'d|'ll|\s+would|\s+will)?\s+(?:like|want|take|have)|
         i\s+want|can\s+i\s+(?:get|have|order)
     )\b
     \s+(?:to\s+)?(?:order\s+)?
@@ -88,6 +88,29 @@ _CONFIRMATION_ONLY_RE = re.compile(
     r"that('?s| is)\s+(?:right|correct|it)|correct"
     r")\s*[.!?]*\s*$",
     re.IGNORECASE,
+)
+
+# Tentative/exploratory phrases — the customer is browsing, not placing an
+# order. Matched against the whole utterance; when detected, extract_named_item
+# returns None so the guard never treats the embedded item as a direct order
+# reference. Examples:
+#   "I was thinking of ordering a burger"
+#   "Maybe a pizza"
+#   "I might want fries"
+#   "I'm considering a coffee"
+_TENTATIVE_RE = re.compile(
+    r"""^\s*(?:
+        i\s+(?:was|am|'m)\s+(?:thinking|considering|looking|going)\s+(?:of|about|at|to)
+        |i\s+might(?:\s+want|\s+like|\s+have|\s+get)?
+        |maybe\s+a?(?:\s+i\s+(?:could|can|would))?
+        |possibly\s+a?
+        |what\s+about\s+a?
+        |how\s+about\s+a?
+        |i\s+(?:could|can|would)\s+(?:try|have|get)\s+a?
+        |(?:just\s+)?(?:browsing|looking)
+        |i\s+was\s+(?:going\s+to|planning\s+to)\s+(?:get|order|have)
+    )""",
+    re.IGNORECASE | re.VERBOSE,
 )
 
 # Common stopwords stripped before token-overlap comparison so they never
@@ -165,6 +188,13 @@ def extract_named_item(utterance: str) -> str | None:
         product (anaphora or a bare category).
     """
     if not utterance or _CONFIRMATION_ONLY_RE.match(utterance):
+        return None
+    # Exploratory/tentative utterances ("I was thinking of ordering a burger",
+    # "maybe a pizza") are NOT order commands — the model should browse and
+    # clarify. Returning None here prevents the stale-reference guard from
+    # treating the embedded item as a confirmed item reference, which would
+    # make the guard appear to confirm a tentative statement as an order intent.
+    if _TENTATIVE_RE.match(utterance):
         return None
     match = _NAMED_ITEM_RE.search(utterance)
     if not match:
