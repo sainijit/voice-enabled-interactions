@@ -90,7 +90,32 @@ model:
   class_label: "person"           # region label attached by YoloDecoder
   class_id: 0                     # COCO person class id
   input_size: 640                 # YOLO26 square input; used for letterbox inversion
-  device: "NPU"                 # inference device. CPU=always available; GPU requires /dev/dri mount
+  # inference device. CPU=always available (no VA zero-copy possible).
+  # GPU and NPU both require /dev/dri; NPU additionally needs /dev/accel.
+  #
+  # WHY GPU REPLACED NPU
+  # ---------------------
+  # model_manager.ensure_static_ir already measured, on this exact IR/platform:
+  #   NPU: 11.6 ms/inference   GPU: 4.3 ms/inference   (~2.7x faster on GPU)
+  #
+  # NPU also does not participate in the VA (GPU) zero-copy memory path at
+  # all: decodebin's vah264dec produces VASurface (GPU) memory, but the NPU
+  # plugin has no native VA integration, so DLStreamer's `pre-process-backend`
+  # auto-selection still has to bounce every frame back to system memory for
+  # NPU inference -- paying the same CPU download+convert cost the VA path
+  # exists to avoid, on top of the slower per-inference time above. Measured
+  # live on this box: queue-service sustained ~180% CPU with device=NPU.
+  # GPU shares the same VASurface the decoder already produced, so the
+  # zero-copy path in `_resolve_va_memory` below is then genuinely zero-copy.
+  #
+  # Trade-off: GPU is shared with ovms-llm (the kiosk's LLM), which runs at
+  # PERFORMANCE_HINT=LATENCY and is the service's single most latency-critical
+  # workload. A YOLO26 forward pass at 4.3 ms is tiny next to an LLM decode
+  # step, so contention risk is low, but re-check `docker stats`/metrics-
+  # collector `/metrics` (gpu_utilization) after this change; if OVMS latency
+  # regresses, either move queue-service back to NPU or raise
+  # `inference_interval` below to shed GPU cycles.
+  device: "GPU"
   # Keep decoded frames in GPU (VA) memory through gvadetect/gvatrack/
   # gvawatermark instead of downloading them to system RAM for the CPU to
   # colour-convert. decodebin already autoplugs vah264dec, which produces VA
