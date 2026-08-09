@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agentic import ordering_agent
+from agentic import action_result, reply_templates
 from agentic.mcp_client import MCPTool
 from agentic.ordering_agent import OrderingAgent
 
@@ -34,7 +35,7 @@ def test_make_mcp_callable_invokes_mcp_tool(monkeypatch) -> None:
         {"order_id": "ORD-1", "items": [{"product_id": "coke", "quantity": 1}]},
     )
     assert fn.__name__ == "update_order"
-    assert fn.__schema__["name"] == "update_order"
+    assert fn.__doc__ == "Add items"
 
 
 def test_make_mcp_callable_infers_list_type_for_optional_anyof_items(monkeypatch) -> None:
@@ -88,9 +89,17 @@ def test_make_mcp_callable_infers_list_type_for_optional_anyof_items(monkeypatch
         ("Confirm my order", ["confirm_order"]),
     ],
 )
-def test_chat_records_scripted_adk_tool_calls(message: str, expected_tools: list[str]) -> None:
+def test_chat_records_scripted_adk_tool_calls(
+    message: str, expected_tools: list[str], monkeypatch
+) -> None:
     """Scripted ADK runner events model OVMS tool-call choices without OVMS."""
     pytest.importorskip("google.adk")
+
+    # chat() calls _refresh_mcp_tools() whenever no MCP tools are registered,
+    # which otherwise attempts a real network discovery against kiosk-core.
+    # Pretend a tool is already registered so it stays a no-op, matching this
+    # test's "model OVMS tool-call choices without OVMS" intent.
+    monkeypatch.setattr(ordering_agent, "get_all_tools", lambda: {"dummy": object()})
 
     agent = OrderingAgent()
     agent._bootstrapped = True
@@ -137,9 +146,15 @@ class _FakeRunner:
             tools = []
             reply = "How can I help?"
 
+        # Real ADK events surface tool invocations as `function_call` parts on
+        # `event.content` — it never populates a top-level `event.tool_call`
+        # (see `_run_turn`'s parsing). Mirror that shape here so this fixture
+        # actually exercises the real event-parsing path instead of a stale one.
         for tool_name in tools:
-            yield SimpleNamespace(tool_call=SimpleNamespace(name=tool_name), content=None)
-        yield SimpleNamespace(tool_call=None, content=SimpleNamespace(parts=[SimpleNamespace(text=reply)]))
+            part = SimpleNamespace(function_call=SimpleNamespace(name=tool_name), text=None)
+            yield SimpleNamespace(partial=False, content=SimpleNamespace(parts=[part]))
+        reply_part = SimpleNamespace(function_call=None, text=reply)
+        yield SimpleNamespace(partial=False, content=SimpleNamespace(parts=[reply_part]))
 
 
 class TestStripKnowledgeMarkers:
@@ -167,3 +182,331 @@ class TestStripKnowledgeMarkers:
     def test_gate_withholds_sentence_containing_marker(self):
         gate = ordering_agent._SentenceGate(message="hi", emit=None)
         assert gate._is_safe("[knowledge] We open at 8 AM.", ["list_products"]) is False
+
+    def test_truncated_closing_tag_is_trimmed(self):
+        # Generation hit its token cap mid-delimiter, leaving a dangling
+        # "[/knowledge" (no closing bracket) at the end of the reply.
+        reply = ("QuickBite Express is open Mon-Thu 8 AM-11 PM. [/knowledge")
+        out = ordering_agent._strip_knowledge_markers(reply)
+        assert "[/knowledge" not in out
+        assert "[" not in out
+        assert out.startswith("QuickBite Express")
+
+    def test_truncated_opening_tag_is_trimmed(self):
+        reply = "We are open 8 AM-11 PM. [knowledge"
+        out = ordering_agent._strip_knowledge_markers(reply)
+        assert "[knowledge" not in out
+
+    def test_truncated_tag_mid_reply_not_stripped(self):
+        # Only trim a truncated tag at the tail; a literal "[" earlier in
+        # the reply is not this failure mode and must be left alone.
+        reply = "Our hours [see menu for details] are 8 AM-11 PM."
+        assert ordering_agent._strip_knowledge_markers(reply) == reply
+
+
+class TestStripCitationMarkers:
+    """Hallucinated [N] citation markers must never reach TTS."""
+
+    def test_leading_marker_is_stripped(self):
+        reply = "[1] QuickBite Express has a shared lot adjacent to the outlet."
+        out = ordering_agent._strip_citation_markers(reply)
+        assert "[1]" not in out
+        assert out.startswith("QuickBite Express")
+
+    def test_multiple_markers_stripped(self):
+        reply = "[1] We open at 8 AM. [2] We close at 11 PM."
+        out = ordering_agent._strip_citation_markers(reply)
+        assert "[1]" not in out and "[2]" not in out
+
+    def test_clean_reply_untouched(self):
+        reply = "We open at 8 AM."
+        assert ordering_agent._strip_citation_markers(reply) == reply
+
+    def test_marker_only_reply_falls_back_to_original(self):
+        assert ordering_agent._strip_citation_markers("[1]").strip() != ""
+
+    def test_does_not_strip_order_id_like_numbers(self):
+        # Order ids are plain numbers with no brackets - must be untouched.
+        reply = "Your order id is 12345."
+        assert ordering_agent._strip_citation_markers(reply) == reply
+
+    def test_gate_withholds_sentence_containing_marker(self):
+        gate = ordering_agent._SentenceGate(message="hi", emit=None)
+        assert gate._is_safe("[1] We open at 8 AM.", ["knowledge_lookup"]) is False
+
+
+class TestDedupeRepeatedSentences:
+    """A fact echoed twice (raw block + model paraphrase) must speak once."""
+
+    def test_exact_duplicate_sentence_collapsed(self):
+        reply = (
+            "The restaurant has a seating capacity of 50 people.   "
+            "The restaurant has a seating capacity of 50 people."
+        )
+        out = ordering_agent._dedupe_repeated_sentences(reply)
+        assert out == "The restaurant has a seating capacity of 50 people."
+
+    def test_case_and_whitespace_insensitive(self):
+        reply = "We open at 8 AM. we OPEN  at 8 am."
+        out = ordering_agent._dedupe_repeated_sentences(reply)
+        assert out == "We open at 8 AM."
+
+    def test_non_duplicate_reply_untouched(self):
+        reply = "We open at 8 AM. We close at 11 PM."
+        assert ordering_agent._dedupe_repeated_sentences(reply) == reply
+
+    def test_single_sentence_untouched(self):
+        reply = "We open at 8 AM."
+        assert ordering_agent._dedupe_repeated_sentences(reply) == reply
+
+    def test_empty_reply_untouched(self):
+        assert ordering_agent._dedupe_repeated_sentences("") == ""
+
+    def test_three_way_duplicate_keeps_one(self):
+        reply = "QuickBite Express. QuickBite Express. QuickBite Express."
+        out = ordering_agent._dedupe_repeated_sentences(reply)
+        assert out == "QuickBite Express."
+
+
+class TestNeedsToolRetryHistoryQuestion:
+    """A question about a PAST order action must not force a retry/fallback.
+
+    Regression for a live bug: "What did you remove from my cart earlier?"
+    contains the bare _ORDER_ACTION_RE keyword "remove", which used to force
+    a tool-call retry and then _ORDER_CLAIM_FALLBACK even though the model's
+    original, tool-less answer ("I removed Aloo Tikki Burger from your
+    cart.") was already correct — there is no tool to answer "what did you do
+    a moment ago", only the turn's own conversation memory.
+    """
+
+    def test_history_question_about_removal_does_not_retry(self):
+        reply = "I removed Aloo Tikki Burger from your cart."
+        message = "What did you remove from my cart earlier?"
+        should_retry, _ = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is False
+
+    def test_history_question_with_leading_clause_does_not_retry(self):
+        reply = "I removed Aloo Tikki Burger from your cart."
+        message = "In this conversation, what did you remove from my cart?"
+        should_retry, _ = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is False
+
+    def test_history_question_about_adding_does_not_retry(self):
+        reply = "You ordered a Classic Chicken Burger earlier."
+        message = "What did I add to my cart before?"
+        should_retry, _ = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is False
+
+    def test_fresh_removal_request_still_retries(self):
+        # A genuine new action request must still force the tool-call retry.
+        reply = "Sure, I'll take care of that."
+        message = "Please remove the burger from my order."
+        should_retry, nudge = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is True
+        assert nudge == ordering_agent._ORDER_NUDGE
+
+    def test_fresh_confirm_request_still_retries(self):
+        reply = "Sure."
+        message = "That's all, please confirm my order."
+        should_retry, nudge = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is True
+        assert nudge == ordering_agent._ORDER_NUDGE
+
+
+class TestMutatingToolsNeverTakeTemplatingShortcut:
+    """Cart-mutating tools must never end the ADK turn via `skip_summarization`.
+
+    An earlier version of this fix used a regex to detect "compound"
+    utterances ("remove X and add Y") and only excluded those from the
+    templating shortcut. That is the wrong layer to decide this at — a
+    regex can only recognise wording someone already anticipated, and a
+    customer's real phrasing is unbounded. The correct fix is architectural:
+    the shortcut is never available for a mutating tool at all, so the model
+    always gets the tool result back and decides — using the request and the
+    tool results, not surface wording — whether another action is still
+    owed. Read-only catalogue tools keep the shortcut since a pure browse
+    has no cart side effect to lose.
+    """
+
+    def test_mutating_tools_are_excluded_from_the_shortcut(self):
+        assert action_result.MUTATING_TOOLS == frozenset({
+            "place_order", "update_order", "remove_from_order",
+            "cancel_order", "confirm_order", "confirm_active_order",
+        })
+        # A mutating tool must never be in the set the shortcut is allowed
+        # to fire for.
+        eligible_for_shortcut = (
+            reply_templates.SPEAKABLE_TOOLS - action_result.MUTATING_TOOLS
+        )
+        for tool in action_result.MUTATING_TOOLS:
+            assert tool not in eligible_for_shortcut
+
+    def test_catalogue_tools_remain_eligible_for_the_shortcut(self):
+        for tool in ("list_products", "list_categories"):
+            assert tool in reply_templates.SPEAKABLE_TOOLS
+            assert tool not in action_result.MUTATING_TOOLS
+
+    def test_remove_from_order_never_sets_skip_summarization(self, monkeypatch):
+        """End-to-end: even a single, cleanly-templatable removal must leave
+        `skip_summarization` unset so ADK always asks the model whether more
+        of the customer's request remains.
+        """
+        fake_call_tool = AsyncMock(return_value={
+            "removed": [{"product_id": "classic_chicken_burger", "name": "Classic Chicken Burger"}],
+            "not_in_cart": [],
+            "total": 438.0,
+        })
+        monkeypatch.setattr(ordering_agent, "call_tool", fake_call_tool)
+
+        counter_token = ordering_agent._tool_call_count_ctx.set(
+            ordering_agent._ToolCallCounter()
+        )
+        utterance_token = ordering_agent._utterance_ctx.set(
+            "remove classic chicken burger and add one margherita pizza instead"
+        )
+        try:
+            mcp_tool = MCPTool(name="remove_from_order", server="core", description="Remove items")
+            fn = OrderingAgent._make_mcp_callable("remove_from_order", mcp_tool)
+
+            tool_context = SimpleNamespace(actions=SimpleNamespace(skip_summarization=False))
+            result = _run(fn(
+                tool_context=tool_context,
+                user_id="anonymous",
+                items=[{"product_id": "classic_chicken_burger", "quantity": 1}],
+            ))
+        finally:
+            ordering_agent._tool_call_count_ctx.reset(counter_token)
+            ordering_agent._utterance_ctx.reset(utterance_token)
+
+        # The template WOULD have produced a clean spoken reply here (that is
+        # exactly what made the old regex-gated version wrongly skip), but
+        # the shortcut must never fire for a mutating tool regardless.
+        assert tool_context.actions.skip_summarization is False
+        assert isinstance(result, dict)
+
+
+class TestKnowledgeQueryRe:
+    """A vague "about the restaurant" question must still force knowledge_lookup.
+
+    Regression for a live bug: "Can you tell me something about the
+    restaurant?" matched no specific-fact keyword (hours/address/parking/...),
+    so no tool call was forced and the model free-hallucinated a generic
+    filler answer ("open 10 AM-10 PM", "located at 123 Main Street") that
+    matches no real knowledge-base fact.
+    """
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Can you tell me something about the restaurant",
+            "Tell me about your restaurant",
+            "Tell me something about this place",
+            "What is the restaurant name?",
+            "What are your opening hours?",
+        ],
+    )
+    def test_outlet_questions_match(self, message):
+        assert ordering_agent._KNOWLEDGE_QUERY_RE.search(message)
+
+    def test_unrelated_message_does_not_match(self):
+        assert not ordering_agent._KNOWLEDGE_QUERY_RE.search(
+            "I would like to order one burger"
+        )
+
+
+class TestCatalogueQueryRe:
+    """"Do you have <off-menu item>?" must still force list_products.
+
+    Regression for a live bug: "Do you have any sandwiches on the menu?"
+    matched the catalogue guard only because it contains "menu", but "Do you
+    have sandwiches?" alone matched nothing (no _CATALOGUE_QUERY_RE keyword
+    covers "sandwich", since the list is built from real menu categories), so
+    the model was free to hallucinate "yes we have sandwiches" — reintroducing
+    the exact off-menu-item bug the knowledge-base fix addressed.
+    """
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Do you have sandwiches?",
+            "Do you have any sandwiches on the menu?",
+            "Do you have dosa?",
+            "Do you serve pasta?",
+            "Have you got any biryani?",
+        ],
+    )
+    def test_off_menu_have_questions_match(self, message):
+        assert ordering_agent._CATALOGUE_QUERY_RE.search(message)
+
+    def test_unrelated_message_does_not_match(self):
+        assert not ordering_agent._CATALOGUE_QUERY_RE.search(
+            "What are your opening hours?"
+        )
+
+
+class TestStripContextBreadcrumb:
+    """The cosmetic "[Context: ...]" ingestion tag must be stripped in-place,
+    not treated as a leak (regression: it used to share a regex with real
+    sensitive fields, so any truthful reply that happened to start with it
+    was discarded and replaced with a refusal)."""
+
+    def test_breadcrumb_only_is_stripped_not_replaced(self):
+        reply = (
+            "[Context: QuickBite Express — Restaurant Knowledge Base] "
+            "QuickBite Express is an Indian + Continental Fusion QSR in "
+            "Chennai, South India."
+        )
+        out = ordering_agent._strip_context_breadcrumb(reply)
+        assert "[Context:" not in out
+        assert "QuickBite Express is an Indian + Continental Fusion QSR" in out
+
+    def test_clean_reply_untouched(self):
+        reply = "We have shared parking with 2-wheeler and 4-wheeler bays."
+        assert ordering_agent._strip_context_breadcrumb(reply) == reply
+
+    def test_breadcrumb_then_admin_leak_still_falls_back(self):
+        # Breadcrumb stripping runs first in the pipeline, but a real
+        # sensitive field alongside it must still trigger the hard fallback.
+        reply = (
+            "[Context: QuickBite Express — Restaurant Knowledge Base] "
+            "FSSAI License: 10015033005321"
+        )
+        stripped = ordering_agent._strip_context_breadcrumb(reply)
+        assert ordering_agent._strip_admin_leak(stripped) == ordering_agent._ADMIN_LEAK_FALLBACK
+
+
+class TestStripAdminLeak:
+    """Internal license/tax/context fields must never reach a customer."""
+
+    def test_context_tag_leak_is_replaced(self):
+        reply = (
+            "[Context: QuickBite Express — Restaurant Knowledge Base] "
+            "FSSAI License: 10015033005321 GST Registration: 33AAACQ5678G1ZM "
+            "Hours: Mon-Thu 8 AM-11 PM"
+        )
+        out = ordering_agent._strip_admin_leak(reply)
+        assert out == ordering_agent._ADMIN_LEAK_FALLBACK
+
+    def test_outlet_code_leak_is_replaced(self):
+        reply = "Our Outlet Code is QBE-CHN-001, Parent Company QuickBite India Pvt. Ltd."
+        assert ordering_agent._strip_admin_leak(reply) == ordering_agent._ADMIN_LEAK_FALLBACK
+
+    def test_clean_reply_untouched(self):
+        reply = "We have shared parking with 2-wheeler and 4-wheeler bays."
+        assert ordering_agent._strip_admin_leak(reply) == reply
+
+    def test_breadcrumb_alone_no_longer_triggers_fallback(self):
+        # Regression: "[Context: ...]" alone used to match _ADMIN_LEAK_RE and
+        # blackhole a fully truthful reply. It is cosmetic, not sensitive, and
+        # is handled separately by _strip_context_breadcrumb.
+        reply = (
+            "[Context: QuickBite Express — Restaurant Knowledge Base] "
+            "QuickBite Express is located in Chennai, South India."
+        )
+        assert ordering_agent._strip_admin_leak(reply) == reply
+
+    def test_gate_withholds_sentence_with_admin_leak(self):
+        gate = ordering_agent._SentenceGate(message="hi", emit=None)
+        assert gate._is_safe(
+            "[Context: QuickBite Express] FSSAI License: 123", ["knowledge_lookup"]
+        ) is False

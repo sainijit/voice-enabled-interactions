@@ -9,6 +9,8 @@ the customer with no indication that they had spoken and been ignored.
 These tests pin the distinction between "nobody spoke" and "somebody spoke
 and every segment was discarded".
 """
+import threading
+
 import pytest
 
 from kiosk_core import config
@@ -19,6 +21,25 @@ def _make_session(session_id: str = "test-session") -> BaseAudioSession:
     session = BaseAudioSession.__new__(BaseAudioSession)
     session.session_id = session_id
     session._rejected_speech_chunks = 0
+    return session
+
+
+def _make_finalize_ready_session(session_id: str = "test-session") -> BaseAudioSession:
+    """Build a session with just enough state to call ``_finalize_run`` for real."""
+    session = BaseAudioSession.__new__(BaseAudioSession)
+    session.session_id = session_id
+    session.agent_session_id = session_id
+    session._rejected_speech_chunks = 0
+    session.transcript_parts = []
+    session.response_parts = []
+    session._lock = threading.Lock()
+    session.error = None
+    session.status = "running"
+    session.completed_at = None
+    session.end_reason = None
+    session.on_complete = None
+    session._t_turn_start = None
+    session._synthesize_response = lambda text: session.response_parts.append(text)  # type: ignore[method-assign]
     return session
 
 
@@ -109,3 +130,43 @@ class TestFinalizePrompt:
         reply = config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT.lower()
         assert "recognise" in reply or "recognize" in reply
         assert "repeat" in reply or "again" in reply
+
+
+@pytest.mark.tier1
+class TestFinalizeRunSuppressesGreetingAfterExplicitStop:
+    """Regression: an explicit stop must never speak a greeting/retry prompt.
+
+    Observed live: the customer tapped "stop conversation" and the UI both
+    showed and spoke "How can I help you?" afterwards — as if the stop had
+    been ignored. `_finalize_run`'s empty-transcript branch used to check
+    only `final_status == "completed"`, without regard to *why* the turn
+    ended, so an explicit `stopped_by_api` end reason with no new speech hit
+    the same greeting/retry path as true silence or a rejected bystander.
+    """
+
+    def test_explicit_stop_with_no_transcript_stays_silent(self):
+        session = _make_finalize_ready_session()
+        session._finalize_run("completed", "stopped_by_api")
+        assert session.response_parts == []
+
+    def test_explicit_stop_does_not_speak_retry_prompt_either(self):
+        session = _make_finalize_ready_session()
+        session._rejected_speech_chunks = 2
+        session._finalize_run("completed", "stopped_by_api")
+        assert session.response_parts == []
+
+    def test_true_silence_timeout_still_gets_the_greeting(self):
+        session = _make_finalize_ready_session()
+        session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == [config.DEFAULT_NO_SPEECH_PROMPT]
+
+    def test_no_speech_detected_still_gets_the_greeting(self):
+        session = _make_finalize_ready_session()
+        session._finalize_run("completed", "no_speech_detected")
+        assert session.response_parts == [config.DEFAULT_NO_SPEECH_PROMPT]
+
+    def test_rejected_speech_with_non_stop_end_reason_still_gets_retry_prompt(self):
+        session = _make_finalize_ready_session()
+        session._rejected_speech_chunks = 1
+        session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == [config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT]

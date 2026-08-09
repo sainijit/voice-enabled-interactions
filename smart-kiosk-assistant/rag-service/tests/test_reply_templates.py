@@ -246,3 +246,108 @@ class TestSpeakDispatch:
         spoken = rt.speak("place_order", _envelope(payload),
                           "I would like to order one double chicken tower")
         assert spoken is not None and "Double Chicken Tower" in spoken
+
+
+class TestClassifyRootFacts:
+    """Only the two facts empirically shown to be LLM-unreliable trigger."""
+
+    def test_name_question(self):
+        assert rt.classify_root_facts(
+            "What is the restaurant name?"
+        ) == ["name"]
+
+    def test_hours_question(self):
+        assert rt.classify_root_facts(
+            "What are the timings?"
+        ) == ["hours"]
+
+    def test_combined_name_and_hours(self):
+        out = rt.classify_root_facts(
+            "Can you tell me the restaurant name and what are the timings?"
+        )
+        assert out == ["name", "hours"]
+
+    def test_breakfast_hours_question_does_not_also_fire_generic_hours(self):
+        assert rt.classify_root_facts(
+            "What are the breakfast timings?"
+        ) == ["breakfast_hours"]
+
+    def test_unrelated_question_returns_empty(self):
+        assert rt.classify_root_facts("Do you have parking?") == []
+
+    def test_empty_utterance_returns_empty(self):
+        assert rt.classify_root_facts("") == []
+
+
+class TestSpeakRootFact:
+    """Deterministic formatting must speak the source values verbatim."""
+
+    FACTS = {
+        "brand name": "QuickBite Express",
+        "hours": "Mon\u2013Thu 8 AM\u201311 PM \u00b7 Fri\u2013Sat 8 AM\u201312 AM \u00b7 Sun 9 AM\u201311 PM",
+        "breakfast hours": "8 AM\u201311 AM daily",
+    }
+
+    def test_name_only(self):
+        out = rt.speak_root_fact(["name"], self.FACTS)
+        assert out is not None
+        assert "QuickBite Express" in out
+
+    def test_hours_preserves_all_distinct_ranges(self):
+        out = rt.speak_root_fact(["hours"], self.FACTS)
+        assert out is not None
+        # All three distinct ranges must survive - the exact defect being
+        # fixed was the LLM merging Mon-Thu and Fri-Sat into one range.
+        assert "8 AM" in out and "11 PM" in out
+        assert "12 AM" in out
+        assert "9 AM" in out
+
+    def test_hours_never_mentions_public_holidays(self):
+        # Regression guard: the LLM path invented an unsupported closure.
+        out = rt.speak_root_fact(["hours"], self.FACTS)
+        assert "holiday" not in out.lower()
+
+    def test_combined_name_and_hours(self):
+        out = rt.speak_root_fact(["name", "hours"], self.FACTS)
+        assert out is not None
+        assert "QuickBite Express" in out
+        assert "12 AM" in out
+
+    def test_breakfast_hours(self):
+        out = rt.speak_root_fact(["breakfast_hours"], self.FACTS)
+        assert out is not None
+        assert "8 AM" in out and "11 AM" in out
+
+    def test_missing_field_falls_back_to_none(self):
+        # Caller must fall back to the LLM path rather than speak a partial
+        # or empty answer when the source data lacks the requested field.
+        assert rt.speak_root_fact(["name"], {}) is None
+        assert rt.speak_root_fact(["hours"], {"brand name": "X"}) is None
+
+    def test_empty_facts_wanted_returns_none(self):
+        assert rt.speak_root_fact([], self.FACTS) is None
+
+
+class TestClassifyRootFactsCompoundQuestions:
+    """Regression: a compound question must never be silently under-answered."""
+
+    def test_opening_and_closing_phrasing_is_recognised(self):
+        out = rt.classify_root_facts(
+            "what are the opening and closing of the restaurant? "
+            "what is the restaurant name"
+        )
+        assert "name" in out
+        assert "hours" in out
+
+    def test_open_and_close_phrasing_is_recognised(self):
+        out = rt.classify_root_facts("What time do you open and close?")
+        assert "hours" in out
+
+    def test_unrecognised_hours_phrasing_abstains_entirely(self):
+        # A hint word ("hour"/"open"/"clos") present but no confident phrase
+        # match must abstain from the WHOLE fast path, including any "name"
+        # match already found, rather than answer only part of the question.
+        out = rt.classify_root_facts(
+            "tell me when you usually close for the evening and also the restaurant name"
+        )
+        assert out == []

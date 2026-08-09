@@ -52,3 +52,28 @@ def reset_mcp_state() -> None:
     mcp_client._servers.clear()
     mcp_client._tools.clear()
     mcp_client._session_ids.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_guard_turn_state() -> None:
+    """Reset menu/removal/confirm-guard turn state before every test.
+
+    Each guard tracks its per-turn tool outcomes in a ``contextvars.ContextVar``
+    that ``OrderingAgent.chat()`` resets via ``begin_turn()`` at the start of
+    every real conversation turn. Pytest does not give each test its own
+    ``contextvars`` context, so a value set with ``.set()`` (e.g. any test that
+    calls ``begin_turn()`` or ``record_tool_result()`` directly) otherwise
+    persists into every test that runs afterwards in the same process —
+    observed live: a test in ``test_menu_guard.py`` that recorded an off-menu
+    rejection left ``menu_guard.current_state().has_rejection`` true for the
+    rest of the suite, which made an unrelated, later test in
+    ``test_removal_guard.py`` fail because ``_SentenceGate._is_safe()`` checks
+    ``menu_guard.current_state()`` too. Calling ``begin_turn()`` here — the
+    same reset every real turn gets — guarantees every test starts from a
+    clean, unshared state regardless of run order.
+    """
+    from agentic import confirm_guard, menu_guard, removal_guard
+
+    menu_guard.begin_turn()
+    removal_guard.begin_turn()
+    confirm_guard.begin_turn()

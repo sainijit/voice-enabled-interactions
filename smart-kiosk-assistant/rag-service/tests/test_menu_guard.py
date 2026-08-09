@@ -266,3 +266,148 @@ def test_sentence_gate_releases_backed_addition_claim() -> None:
     gate.feed("I've added the Veg Crunch Wrap to your order. ", ["place_order"])
 
     assert spoken == ["I've added the Veg Crunch Wrap to your order."]
+
+
+# ---------------------------------------------------------------------------
+# Partial success: some items added, one refused, in the SAME tool call
+# ---------------------------------------------------------------------------
+#
+# Reproduces a live defect: a customer asked to order "all pizza available"
+# (4 items). kiosk-core's per-item resolution (mcp_server._resolve_items)
+# added 3 real pizzas and refused one fabricated product_id in the same
+# place_order call, returning both "just_added" and "unavailable_items" on
+# one successful payload. action_result.classify only checks for a top-level
+# "error" key, so this used to short-circuit straight past every guard: the
+# model's reply implied all 4 pizzas were added (or simply announced the
+# total and moved to upsell/confirm) without ever mentioning the refusal.
+
+
+def _partial_success_payload() -> dict:
+    """A place_order result where 3 of 4 requested items were actually added."""
+    return {
+        "order_id": 381,
+        "status": "draft",
+        "total": 667.0,
+        "items": [
+            {"product_id": "PIZZA-VEG-001", "product_name": "Margherita Pizza (Regular)",
+             "quantity": 1, "price": 179.0},
+            {"product_id": "PIZZA-VEG-002", "product_name": "Paneer Makhani Pizza (Regular)",
+             "quantity": 1, "price": 219.0},
+            {"product_id": "PIZZA-NV-002", "product_name": "Pepperoni-Style Chicken Pizza (Regular)",
+             "quantity": 1, "price": 269.0},
+        ],
+        "just_added": [
+            {"name": "Margherita Pizza (Regular)", "quantity": 1},
+            {"name": "Paneer Makhani Pizza (Regular)", "quantity": 1},
+            {"name": "Pepperoni-Style Chicken Pizza (Regular)", "quantity": 1},
+        ],
+        "unavailable_items": ["CHICKEN_BEEF_PIZZA"],
+        "unavailable_message": (
+            "'CHICKEN_BEEF_PIZZA' is not on the menu. Do not invent it and do not "
+            "ask the customer to try again. Tell them it is unavailable and offer "
+            "these real alternatives instead: Chicken BBQ Pizza (Regular) (249)."
+        ),
+        "available_products": [
+            {"product_id": "PIZZA-NV-001", "name": "Chicken BBQ Pizza (Regular)", "price": 249.0},
+        ],
+    }
+
+
+def test_partial_success_is_recorded_without_flipping_succeeded_false() -> None:
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_success_payload()))
+
+    state = menu_guard.current_state()
+    assert state.succeeded is True
+    assert state.has_partial_rejection is True
+    assert state.partial_refs == ["CHICKEN_BEEF_PIZZA"]
+    assert state.partial_alternatives == [{"name": "Chicken BBQ Pizza (Regular)", "price": 249.0}]
+    # The full-failure fields are untouched by a partial success.
+    assert state.rejected_refs == []
+    assert state.has_rejection is False
+
+
+def test_overclaiming_all_items_added_gets_disclosure_appended() -> None:
+    """The reported live bug: reply implies all 4 pizzas were added."""
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_success_payload()))
+    reply = (
+        "I've added Margherita, Paneer Makhani, Pepperoni-Style Chicken, and "
+        "Chicken BBQ Pizza to your order. Your total is now ₹667. "
+        "Would you like anything else?"
+    )
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is True
+    # The true parts of the reply are preserved, not wholesale-replaced.
+    assert corrected.startswith(reply)
+    assert "Chicken BBQ Pizza" in corrected  # named as the real alternative
+    assert "isn't on our menu" in corrected or "not on our menu" in corrected
+
+
+def test_terse_reply_that_omits_the_refusal_gets_disclosure_appended() -> None:
+    """Reproduces the exact live reply: total + upsell, no mention of the miss."""
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_success_payload()))
+    reply = "Total: ₹667. Would you like to add a Pepsi (330 ml) (₹59)?"
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is True
+    assert corrected.startswith(reply)
+    assert "Chicken BBQ Pizza" in corrected
+
+
+def test_reply_that_already_discloses_the_refusal_is_left_alone() -> None:
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_success_payload()))
+    reply = (
+        "I've added Margherita, Paneer Makhani, and Pepperoni-Style Chicken pizzas. "
+        "Chicken BBQ Pizza wasn't added — it's not on the menu. Total is ₹667."
+    )
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is False
+    assert corrected == reply
+
+
+def test_garbled_reference_is_not_echoed_in_the_disclosure() -> None:
+    """Same safety net build_refusal already has for non-item-shaped refs."""
+    payload = _partial_success_payload()
+    payload["unavailable_items"] = ["ll the burgers to my cart"]
+    menu_guard.record_tool_result("place_order", _mcp_envelope(payload))
+    reply = "Total: ₹667."
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is True
+    assert "ll the burgers to my cart" not in corrected
+    assert "one of those isn't on our menu" in corrected
+
+
+def test_sequential_full_failure_then_clean_success_is_still_left_alone() -> None:
+    """Pre-existing behaviour: an EARLIER call's total failure, followed by a
+    LATER call's clean (non-partial) success, must not trigger a disclosure —
+    only a single call that itself mixes success and rejection should.
+    """
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_off_menu_payload()))
+    menu_guard.record_tool_result("update_order", _mcp_envelope(_success_payload()))
+
+    reply = "I've added the Veg Crunch Wrap to your order."
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is False
+    assert corrected == reply
+
+
+def test_sentence_gate_withholds_sentences_on_partial_success_turn() -> None:
+    """Speech cannot be recalled — no sentence may release before the
+    disclosure requirement is known to be satisfied or not.
+    """
+    from agentic.ordering_agent import _SentenceGate
+
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_success_payload()))
+    spoken: list[str] = []
+    gate = _SentenceGate("order all pizza available", spoken.append)
+
+    gate.feed("I've added all the pizzas to your order. ", ["place_order"])
+
+    assert spoken == []
