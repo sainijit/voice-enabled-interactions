@@ -82,10 +82,10 @@ _IDENTITY_PROFILE  = $(if $(_IDENTITY_ON),--profile identity,)
 _IDENTITY_SVC      = $(if $(_IDENTITY_ON),identity-service,)
 export KIOSK_CORE_IDENTITY_ENABLED = $(if $(_IDENTITY_ON),true,false)
 
-# audio-analyzer and text-to-speech live in a separate repository
-# (edge-ai-libraries) and have no local build context here — they are always
-# pulled pre-built from Docker Hub, using the tags pinned in docker-compose.yml.
-REGISTRY_ONLY_SERVICES := audio-analyzer text-to-speech
+# audio-analyzer and text-to-speech live in the edge-ai-libraries repository
+# at /home/intel/sainijit/edge-ai-libraries/microservices/. Build contexts are
+# wired in docker-compose.yml so they are always built from source locally.
+EDGE_AI_SERVICES := audio-analyzer text-to-speech
 
 # Colors
 RED    := \033[0;31m
@@ -352,8 +352,8 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 			REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build identity-service; \
 		fi; \
 	fi; \
-	echo "$(YELLOW)  Pulling audio-analyzer, text-to-speech from Docker Hub (edge-ai-libraries — separate repo, no local build)...$(NC)"; \
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull $(REGISTRY_ONLY_SERVICES)
+	echo "$(YELLOW)  Building audio-analyzer, text-to-speech from edge-ai-libraries source...$(NC)"; \
+	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build $(EDGE_AI_SERVICES)
 	@echo "$(GREEN)✓ Images ready$(NC)"
 
 # =============================================================================
