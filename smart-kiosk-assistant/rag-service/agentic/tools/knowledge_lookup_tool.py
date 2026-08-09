@@ -79,6 +79,21 @@ _PIN_ROOT_SECTION = os.getenv("RAG_PIN_ROOT_SECTION", "true").strip().lower() in
 _PIN_MAX_CHARS = int(os.getenv("RAG_PIN_MAX_CHARS", "1300"))
 _ROOT_SECTION_RE = re.compile(r"^\[Context:\s*([^\]]*)\]")
 
+# Administrative / regulatory fields that must never reach the model.
+# Stripped from the pinned root section at build time so the model cannot
+# echo them (which triggers the _ADMIN_LEAK_RE guard and substitutes a
+# fallback, causing the "I don't have that detail" regression).
+#
+# Pattern strips field segments at three granularities:
+#  - inline in blockquote: "· Outlet Code: QBE-CHN-001 ·" or "· Outlet Code: QBE-CHN-001"
+#  - bullet sub-field: "| **FSSAI License**: 10015033005321"
+#  - whole bullet: "- **GST Registration**: 33AAACQ5678G1ZM"
+_ADMIN_PIN_FIELD_RE = re.compile(
+    r"(?:(?:\s*[|·]\s*)?(?:\*\*)?(?:Outlet Code|FSSAI License|GST Registration|Parent Company)"
+    r"(?:\*\*)?\s*:?[^|·\n]*(?:[|·])?)",
+    re.IGNORECASE,
+)
+
 _pinned_context: str | None = None
 _root_facts_cache: dict[str, str] | None = None
 
@@ -171,10 +186,20 @@ def _root_section(pipeline) -> str:
                 roots.append(text)
         if roots:
             # Prefer the densest root block when a corpus has several docs.
-            _pinned_context = max(roots, key=len)[:_PIN_MAX_CHARS]
+            raw = max(roots, key=len)[:_PIN_MAX_CHARS]
+            # Strip admin/regulatory fields before the model sees the context.
+            cleaned = _ADMIN_PIN_FIELD_RE.sub("", raw)
+            # Drop lines that became empty after stripping (e.g. a bullet that
+            # held only the GST registration).
+            lines = [
+                ln for ln in cleaned.splitlines()
+                if ln.strip() and ln.strip() not in {"-", "·", "|"}
+            ]
+            _pinned_context = "\n".join(lines)
             logger.info(
-                "[TOOL:knowledge_lookup] Pinned root section (%d chars)",
+                "[TOOL:knowledge_lookup] Pinned root section (%d chars, %d stripped)",
                 len(_pinned_context),
+                len(raw) - len(_pinned_context),
             )
         else:
             logger.warning(
