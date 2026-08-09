@@ -29,8 +29,10 @@ export default function App() {
     partialAssistant,
     statusText,
     playbackState,
-    start,
-    stop,
+    conversationMode,
+    startConversation,
+    endConversation,
+    interruptSpeaking,
   } = useVoiceSession({ deviceId: selectedId, enabled: !ingestBusy, onTurnComplete });
 
   const orderActive = phase === 'listening' || phase === 'processing' || playbackState !== 'idle';
@@ -91,7 +93,15 @@ export default function App() {
             <div className="shrink-0 border-t border-gray-200 bg-gray-50/80 px-4 sm:px-6 py-3 sm:py-4">
               <div className="flex flex-col items-center gap-2 sm:gap-3">
                 <AssistantIndicator phase={phase} playbackState={playbackState} />
-                <MicButton phase={phase} locked={ingestBusy} onStart={start} onStop={stop} />
+                <MicButton
+                  phase={phase}
+                  playbackState={playbackState}
+                  locked={ingestBusy}
+                  conversationMode={conversationMode}
+                  onStart={startConversation}
+                  onStop={endConversation}
+                  onInterrupt={interruptSpeaking}
+                />
                 <p className="text-xs text-kiosk-textlo text-center min-h-[1rem] max-w-sm">
                   {statusText}
                 </p>

@@ -109,8 +109,18 @@ export function CustomerApp() {
     // extra to refresh here (unlike the operator screen there are no KPIs).
   }, []);
 
-  const { phase, messages, partialUser, partialAssistant, statusText, playbackState, start, stop } =
-    useVoiceSession({ deviceId: selectedId, enabled: true, onTurnComplete });
+  const {
+    phase,
+    messages,
+    partialUser,
+    partialAssistant,
+    statusText,
+    playbackState,
+    conversationMode,
+    startConversation,
+    endConversation,
+    interruptSpeaking,
+  } = useVoiceSession({ deviceId: selectedId, enabled: true, onTurnComplete });
 
   const cartActive = phase === 'listening' || phase === 'processing' || playbackState !== 'idle';
 
@@ -148,8 +158,10 @@ export function CustomerApp() {
         partialUser={partialUser}
         partialAssistant={partialAssistant}
         messages={messages}
-        onStart={start}
-        onStop={stop}
+        conversationMode={conversationMode}
+        onStart={startConversation}
+        onStop={endConversation}
+        onInterrupt={interruptSpeaking}
       />
     </div>
   );

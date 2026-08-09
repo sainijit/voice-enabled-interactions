@@ -26,11 +26,31 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
   const [partialAssistant, setPartialAssistant] = useState('');
   const [statusText, setStatusText] = useState('Tap the mic and ask a question');
   const [error, setError] = useState<string | null>(null);
+  // Hands-free "continuous conversation" mode: once on, a completed turn
+  // automatically re-arms the mic instead of returning to idle. Exposed as
+  // state (not just a ref) purely so the UI can show "listening…"/"End
+  // conversation" instead of the push-to-talk labels.
+  const [conversationMode, setConversationMode] = useState(false);
+  const conversationModeRef = useRef(false);
+  // How many consecutive turns in a row produced no speech at all — guards
+  // against an empty room looping forever on ambient noise/silence.
+  const noSpeechStreakRef = useRef(0);
+
+  // `start` is defined further down (it needs `audioQueue`, `pollLoop`, etc.)
+  // but `audioQueue`'s onAllDone callback needs to call it to auto-resume
+  // listening once TTS finishes. A ref breaks that circular dependency.
+  const startRef = useRef<(() => Promise<void>) | null>(null);
 
   const audioQueue = useAudioQueue({
     onAllDone: () => {
       // After the assistant finishes speaking, allow a KPI/order refresh.
       onTurnComplete?.();
+      // Hands-free loop: the mic was torn down before TTS started (see the
+      // completion branch in pollLoop), so there is no echo risk in resuming
+      // now that playback has finished.
+      if (conversationModeRef.current) {
+        void startRef.current?.();
+      }
     },
   });
 
@@ -141,18 +161,31 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
     }
 
     // Status text mirrors the Gradio state machine.
-    if (eosRef.current) {
+    if (eosRef.current || (conversationModeRef.current && !running)) {
       if (segs.length) setStatusText(`🔊 Speaking… (${segs.length})`);
       else if (response) setStatusText('💬 Generating response…');
       else if (transcript) setStatusText('📝 Querying knowledge base…');
       else setStatusText('⏳ Processing speech…');
     }
 
-    // Completion: EOS signalled and the backend has finished.
-    if (eosRef.current && !running) {
+    // Completion: either the frontend explicitly ended the stream (manual
+    // push-to-talk), or the backend's own silence-timeout VAD ended the turn
+    // on its own (hands-free conversation mode never calls endAudioStream —
+    // see startConversation). Either way, once the session is no longer
+    // running the turn is done and must be finalised the same way.
+    if (!running && (eosRef.current || conversationModeRef.current)) {
       stopPolling();
+      // The backend may have ended this turn on its own (silence-timeout VAD)
+      // without the frontend ever calling `stop()` — the mic/AudioContext/
+      // worklet are still live and `recordingRef` is still true in that case.
+      // Tear them down now so the next `start()` (manual or auto-resume) is
+      // not silently ignored by its `recordingRef.current` guard, and so the
+      // browser doesn't keep sending frames into a session that's already gone.
+      recordingRef.current = false;
+      teardownCapture();
       const finalTranscript = transcript;
       const finalResponse = response;
+      const hadSpeech = Boolean(finalTranscript);
       setMessages((prev) => {
         const next = [...prev];
         if (finalTranscript) next.push({ role: 'user', text: finalTranscript });
@@ -164,7 +197,31 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       sessionIdRef.current = null;
       eosRef.current = false;
       setPhase('idle');
-      setStatusText('✓ Done — tap 🎤 for another question');
+
+      if (conversationModeRef.current) {
+        // Guard against looping forever on an empty room: if several turns in
+        // a row captured no speech at all, drop out of conversation mode
+        // instead of silently polling/re-listening indefinitely.
+        noSpeechStreakRef.current = hadSpeech ? 0 : noSpeechStreakRef.current + 1;
+        if (noSpeechStreakRef.current >= 3) {
+          conversationModeRef.current = false;
+          setConversationMode(false);
+          setStatusText('No speech detected — conversation ended. Tap to start again.');
+        } else if (segs.length > 0) {
+          // Wait for TTS playback — resumed from audioQueue's onAllDone so the
+          // mic never re-arms while the kiosk's own voice is still playing.
+          setStatusText('🔊 Speaking…');
+        } else {
+          // Nothing to play back (e.g. a silent/no-speech turn) — nothing will
+          // fire onAllDone, so re-arm the mic directly after a short pause.
+          setStatusText(hadSpeech ? '💬 …' : '🎧 Listening…');
+          window.setTimeout(() => {
+            if (conversationModeRef.current) void startRef.current?.();
+          }, 300);
+        }
+      } else {
+        setStatusText('✓ Done — tap 🎤 for another question');
+      }
       // onTurnComplete also fires when TTS finishes (onAllDone); fire here too
       // in case there was no audio to play.
       if (segs.length === 0) onTurnComplete?.();
@@ -172,7 +229,7 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
     }
 
     pollTimerRef.current = window.setTimeout(pollLoop, tuning.pollIntervalMs);
-  }, [audioQueue, onTurnComplete, stopPolling]);
+  }, [audioQueue, onTurnComplete, stopPolling, teardownCapture]);
 
   // ── Public: start recording ───────────────────────────────────────────────
   const start = useCallback(async () => {
@@ -292,9 +349,59 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
     // The poll loop (already running) will detect completion.
   }, [flushChunk, teardownCapture]);
 
+  // startRef must stay pointed at the latest `start` closure so the
+  // conversation-mode auto-resume paths (audioQueue.onAllDone, the no-TTS
+  // setTimeout above) always call a `start` that sees the current `phase`.
+  startRef.current = start;
+
+  // ── Public: hands-free conversation mode ──────────────────────────────────
+  // Turns the mic button into a "start conversation" control: one tap begins
+  // listening, and every subsequent turn (silence-timeout end → reply → TTS)
+  // automatically re-arms the mic with no further taps, until endConversation
+  // is called. The mic is fully torn down before each reply is spoken (see
+  // `stop`/finalisation above) and only re-created after playback finishes,
+  // so there is no acoustic echo risk from the kiosk hearing its own voice.
+  const startConversation = useCallback(() => {
+    conversationModeRef.current = true;
+    setConversationMode(true);
+    noSpeechStreakRef.current = 0;
+    void start();
+  }, [start]);
+
+  const endConversation = useCallback(() => {
+    conversationModeRef.current = false;
+    setConversationMode(false);
+    // Barge-in may have left TTS playing (see interruptSpeaking); a full exit
+    // should always fall silent immediately rather than let the reply finish.
+    audioQueue.stop();
+    if (recordingRef.current) {
+      // Finalise the in-flight utterance normally (customer may be mid-order);
+      // it just won't loop again once the reply/TTS for this turn are done.
+      void stop();
+    } else if (phase === 'idle') {
+      setStatusText('Tap the mic and ask a question');
+    }
+  }, [audioQueue, phase, stop]);
+
+  // ── Public: barge-in — stop the kiosk speaking and listen immediately ─────
+  // Lets the customer interrupt a reply mid-playback ("stop, I want to ask
+  // something else") without leaving conversation mode. This is a manual tap
+  // gesture, not open-mic-during-playback: the mic stays off until this
+  // fires, so there is no risk of the kiosk hearing its own voice. Silences
+  // the current + any queued TTS segments, then re-arms the mic right away
+  // instead of waiting for onAllDone (which audioQueue.stop() deliberately
+  // does not fire, to avoid a double-resume race with this call).
+  const interruptSpeaking = useCallback(() => {
+    audioQueue.stop();
+    if (!recordingRef.current && phase === 'idle') {
+      void startRef.current?.();
+    }
+  }, [audioQueue, phase]);
+
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
+      conversationModeRef.current = false;
       stopPolling();
       teardownCapture();
       audioQueue.stop();
@@ -310,7 +417,11 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
     statusText,
     error,
     playbackState: audioQueue.state,
+    conversationMode,
     start,
     stop,
+    startConversation,
+    endConversation,
+    interruptSpeaking,
   };
 }

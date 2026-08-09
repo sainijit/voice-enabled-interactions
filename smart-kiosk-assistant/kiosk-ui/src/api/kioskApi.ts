@@ -24,7 +24,7 @@ export async function startStreamSession(
     body: JSON.stringify({
       sample_rate: sampleRate,
       chunk_seconds: tuning.chunkSeconds,
-      silence_timeout_seconds: 2.0,
+      silence_timeout_seconds: 2.5,
       max_session_seconds: 60.0,
       silence_threshold: 900,
       language: 'en',
