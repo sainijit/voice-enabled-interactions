@@ -787,6 +787,7 @@ class BaseAudioSession:
                 diarization=config.DEFAULT_DIARIZATION_ENABLED,
                 session_id=self._analyzer_session_id,
                 speaker_scope_id=self.agent_session_id,
+                prompt=config.DEFAULT_ASR_PROMPT or None,
             )
             # Accumulate genuine ASR time. Chunks are transcribed as they are
             # flushed during capture, long before _finalize_run runs, so this

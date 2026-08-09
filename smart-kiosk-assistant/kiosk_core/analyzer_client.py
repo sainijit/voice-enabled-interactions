@@ -18,6 +18,7 @@ class AnalyzerClient:
         diarization: bool = False,
         session_id: str | None = None,
         speaker_scope_id: str | None = None,
+        prompt: str | None = None,
     ) -> dict:
         """POST an audio file to the transcription endpoint.
 
@@ -49,6 +50,8 @@ class AnalyzerClient:
             data["session_id"] = session_id
         if speaker_scope_id:
             data["speaker_scope_id"] = speaker_scope_id
+        if prompt:
+            data["prompt"] = prompt
 
         with path.open("rb") as audio_file:
             with httpx.Client(timeout=self.timeout_seconds, trust_env=False) as client:

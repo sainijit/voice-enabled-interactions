@@ -255,7 +255,14 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
         throw new Error('Microphone access requires HTTPS or localhost.');
       }
       const constraints: MediaStreamConstraints = {
-        audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+        audio: deviceId
+          ? {
+              deviceId: { exact: deviceId },
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;

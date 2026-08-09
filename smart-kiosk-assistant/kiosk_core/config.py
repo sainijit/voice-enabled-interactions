@@ -23,6 +23,19 @@ DEFAULT_TTS_LANGUAGE = os.getenv("KIOSK_CORE_TTS_LANGUAGE", "English")
 # Forcing "en" cut word error rate from 11.0% to 7.0% on CPU, GPU and NPU
 # alike. Set to an empty string to restore auto-detection.
 DEFAULT_ASR_LANGUAGE = os.getenv("KIOSK_CORE_ASR_LANGUAGE", "en") or None
+# Whisper prompt injected with every transcription request. Primes the model
+# with restaurant/menu vocabulary so it prefers domain-specific spellings over
+# phonetically similar common words (e.g. "Classic Chicken Burger" over
+# "classic senses price", "Do you serve burgers" over "Are you sir burgers?").
+# The prompt is NOT instruction text — Whisper treats it as prior transcript
+# context, so it should read like natural speech, not a list.
+DEFAULT_ASR_PROMPT = os.getenv(
+    "KIOSK_CORE_ASR_PROMPT",
+    "QuickBite Express restaurant. Classic Chicken Burger, Classic French Fries,"
+    " Margherita Pizza, Mango Lassi, Cold Coffee, Fresh Lime Soda, Pepsi, 7UP."
+    " Peri Peri Fries, Chocolate Lava Cake."
+    " Menu, order, remove, add, confirm, cancel.",
+)
 DEFAULT_TTS_INSTRUCTIONS = os.getenv("KIOSK_CORE_TTS_INSTRUCTIONS")
 DEFAULT_SAMPLE_RATE = int(os.getenv("KIOSK_CORE_SAMPLE_RATE", "16000"))
 

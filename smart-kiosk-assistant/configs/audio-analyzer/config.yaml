@@ -140,9 +140,12 @@ models:
     # speech for the full TTL — every turn dropped, agent stuck on its generic
     # greeting. After this many consecutive fully-rejected chunks the reference
     # is judged unreliable, discarded, and re-derived from current audio.
-    # Keep low: at a kiosk the customer is nearly always the one speaking, so a
-    # genuine all-rejected streak is rare. 0 disables recovery.
-    max_consecutive_rejections: 2
+    # Raised from 2→4: with browser echo-cancellation off, TTS playback echo
+    # or a bystander "Thank you" can trigger re-enrollment on just 2 chunks,
+    # poisoning the enrolled voice and silencing the customer for the rest of
+    # the conversation. 4 chunks requires sustained evidence of a bad reference
+    # before trusting a re-enrollment. 0 disables recovery.
+    max_consecutive_rejections: 4
     # Exponential-moving-average weight folded into the reference on a
     # confident match, so a reference enrolled from a couple of seconds tracks
     # the speaker's drifting level/distance instead of staying frozen.
