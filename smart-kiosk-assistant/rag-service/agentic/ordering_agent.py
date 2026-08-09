@@ -53,6 +53,33 @@ _dietary_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "dietary_ctx", default=None
 )
 
+# The current turn's customer user_id — injected into MCP tool calls that
+# accept it so the model never needs to generate "user_id":"anonymous" in
+# every tool-call JSON.  Removing user_id from the tool schema saves ~8
+# tokens per call (~444ms at 18 tps) and up to 19 tokens for confirm/cancel
+# (~1,050ms) where user_id was the *only* argument.
+_user_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "user_id_ctx", default="anonymous"
+)
+
+# Tools that accept user_id and have it injected server-side.  user_id is
+# stripped from their ADK schema so the model never generates it.
+_USER_ID_INJECTED_TOOLS = frozenset({
+    "place_order",
+    "remove_from_order",
+    "cancel_order",
+    "confirm_active_order",
+    "get_current_order",
+})
+
+# Tools where dietary is always injected server-side from _dietary_ctx and
+# stripped from the model-visible schema.  Without stripping, the model fills
+# the optional dietary field with hallucinated values (e.g. "vegetarian" for a
+# chicken burger), wasting 5–7 decode tokens per call.  Dietary preferences are
+# expressed by the user in natural language, stored in _dietary_prefs by the
+# extraction layer, and injected here — the model never needs to generate them.
+_DIETARY_INJECTED_TOOLS = frozenset({"place_order", "update_order"})
+
 # The current turn's raw customer utterance (untouched by the
 # ``[customer_name=...]``/``[dietary=...]`` tag prefixes), read by ``_mcp_fn``
 # so it can catch a stale item reference in a single-item place_order/
@@ -1569,6 +1596,11 @@ class OrderingAgent:
 
         async def _mcp_fn(tool_context: ToolContext | None = None, **kwargs: Any) -> Any:
             cart_state = _cart_state_ctx.get()
+            # Inject user_id from turn context — it is stripped from the
+            # model-visible schema so the model never generates it, saving
+            # 8–19 tokens per call at 18 tps (~444–1,050ms).
+            if tool_name in _USER_ID_INJECTED_TOOLS:
+                kwargs["user_id"] = _user_id_ctx.get() or "anonymous"
             if tool_name in ("place_order", "update_order"):
                 # Overwrite rather than merge: this is the deterministically
                 # captured preference, always more trustworthy than anything
@@ -1750,6 +1782,17 @@ class OrderingAgent:
         ]
         annotations: dict[str, Any] = {"tool_context": ToolContext}
         for pname, pspec in properties.items():
+            # user_id is injected server-side from _user_id_ctx for the tools
+            # in _USER_ID_INJECTED_TOOLS — strip it from the model-visible
+            # schema so the model never generates it, saving 8–19 decode
+            # tokens per call (444–1,050ms at 18 tps on iGPU).
+            if pname == "user_id" and tool_name in _USER_ID_INJECTED_TOOLS:
+                continue
+            # dietary is injected server-side from _dietary_ctx for
+            # place_order/update_order — strip it to prevent the model from
+            # hallucinating dietary values (e.g. "vegetarian" for chicken).
+            if pname == "dietary" and tool_name in _DIETARY_INJECTED_TOOLS:
+                continue
             pytype = _infer_json_type(pspec or {})
             annotations[pname] = pytype
             if pname in required:
@@ -1874,6 +1917,10 @@ class OrderingAgent:
         # Read by _mcp_fn this turn so place_order/update_order get the
         # preference without the LLM having to supply it as a tool argument.
         dietary_token = _dietary_ctx.set(known_diet)
+        # Read by _mcp_fn to inject user_id into every tool that accepts it,
+        # removing it from the model-visible schema so the model never wastes
+        # tokens generating "user_id":"anonymous" (saves 8–19 tokens / call).
+        user_id_token = _user_id_ctx.set(user_id or "anonymous")
         # Read by _mcp_fn this turn to catch a stale item reference against
         # what the customer actually just said. The raw ``message`` (not the
         # tag-prefixed ``full_message``) is used deliberately — the tags are
@@ -1918,6 +1965,7 @@ class OrderingAgent:
                     session_id, facts_wanted,
                 )
                 _dietary_ctx.reset(dietary_token)
+                _user_id_ctx.reset(user_id_token)
                 _utterance_ctx.reset(utterance_token)
                 _cart_state_ctx.reset(cart_state_token)
                 return {

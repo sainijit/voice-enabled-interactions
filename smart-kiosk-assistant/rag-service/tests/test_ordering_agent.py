@@ -71,9 +71,11 @@ def test_make_mcp_callable_infers_list_type_for_optional_anyof_items(monkeypatch
     fn = OrderingAgent._make_mcp_callable("remove_from_order", mcp_tool)
 
     assert fn.__annotations__["items"] is list
-    assert fn.__annotations__["user_id"] is str
+    # user_id is stripped from the model-visible schema and injected
+    # server-side by _mcp_fn from _user_id_ctx (defaults to "anonymous").
+    assert "user_id" not in fn.__annotations__
 
-    _run(fn(user_id="anonymous", items=[{"product_id": "coke", "quantity": 1}]))
+    _run(fn(items=[{"product_id": "coke", "quantity": 1}]))
     fake_call_tool.assert_awaited_once_with(
         "remove_from_order",
         {"user_id": "anonymous", "items": [{"product_id": "coke", "quantity": 1}]},
