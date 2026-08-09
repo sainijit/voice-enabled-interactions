@@ -367,6 +367,21 @@ _ROOT_FACT_HOURS_RE = re.compile(
     r"(?:are you|is it) open|\btimings?\b)\b",
     re.IGNORECASE,
 )
+# General "about the restaurant" overview questions — handled via a curated
+# structured reply (no LLM) so the model cannot echo raw KB markdown verbatim.
+_ROOT_FACT_OVERVIEW_RE = re.compile(
+    r"\b(?:"
+    r"tell (?:me|us) (?:something |a bit |more )?about (?:the|this|your)|"
+    r"(?:something|anything) about (?:the|this|your)|"
+    r"about (?:the|this|your) (?:restaurant|place|outlet|kiosk)|"
+    r"what (?:are|is) (?:this|the) (?:restaurant|place|outlet)|"
+    r"what (?:kind of|type of) (?:restaurant|place)|"
+    r"introduce (?:yourself|the restaurant)|"
+    r"(?:give|can you give) (?:me |us )?(?:an? )?(?:overview|introduction|summary)|"
+    r"describe (?:this|the) (?:restaurant|place|outlet)"
+    r")\b",
+    re.IGNORECASE,
+)
 # Hours/timing-ish words that don't match the strict phrases above. If one of
 # these appears, the utterance IS asking about hours but in a paraphrase this
 # classifier does not recognise confidently. Observed live: "what are the
@@ -386,15 +401,19 @@ def classify_root_facts(utterance: str) -> list[str]:
         utterance: The customer's raw message.
 
     Returns:
-        A list drawn from ``{"name", "hours", "breakfast_hours"}`` in the
-        order a spoken reply should cover them. Empty when the utterance does
-        not ask for any of these three specific facts, OR when it hints at
+        A list drawn from ``{"name", "hours", "breakfast_hours", "overview"}``
+        in the order a spoken reply should cover them. Empty when the utterance
+        does not ask for any of these specific facts, OR when it hints at
         hours/timing without matching a known phrase confidently — in both
         cases the caller must fall back to the normal (pre-grounded LLM) path
         rather than risk answering only part of a compound question.
     """
     if not utterance:
         return []
+    # General overview questions take priority — they absorb the whole reply
+    # so there is no need to check individual fact patterns.
+    if _ROOT_FACT_OVERVIEW_RE.search(utterance):
+        return ["overview"]
     facts: list[str] = []
     if _ROOT_FACT_NAME_RE.search(utterance):
         facts.append("name")
@@ -404,7 +423,6 @@ def classify_root_facts(utterance: str) -> list[str]:
         facts.append("hours")
     elif _HOURS_HINT_RE.search(utterance):
         return []
-    return facts
     return facts
 
 
@@ -423,7 +441,27 @@ def speak_root_fact(facts_wanted: list[str], root_facts: dict[str, str]) -> str 
     """
     parts: list[str] = []
     for fact in facts_wanted:
-        if fact == "name":
+        if fact == "overview":
+            name = root_facts.get("brand name", "").strip().rstrip(".")
+            cuisine = root_facts.get("cuisine", "").strip().rstrip(".")
+            hours = root_facts.get("hours", "").strip()
+            delivery = root_facts.get("delivery", "").strip()
+            if not name:
+                return None
+            intro = f"Welcome to {name}"
+            if cuisine:
+                intro += f", a {cuisine} restaurant"
+            intro += "."
+            sentences = [intro]
+            if hours:
+                spoken = hours.replace(chr(0xB7), ",").replace(" ,", ",")
+                sentences.append(f"We're open {spoken}.")
+            if delivery:
+                sentences.append(
+                    "We offer dine-in, takeaway, and delivery via Swiggy, Zomato, and our app."
+                )
+            parts.append(" ".join(sentences))
+        elif fact == "name":
             name = root_facts.get("brand name")
             if not name:
                 return None
