@@ -58,8 +58,8 @@ class _TurnState:
     error_message: str = ""
 
 
-_turn_state: contextvars.ContextVar[_TurnState] = contextvars.ContextVar(
-    "confirm_guard_turn_state", default=_TurnState()
+_turn_state: contextvars.ContextVar[_TurnState | None] = contextvars.ContextVar(
+    "confirm_guard_turn_state", default=None
 )
 
 
@@ -78,8 +78,20 @@ def begin_turn() -> _TurnState:
 
 
 def current_state() -> _TurnState:
-    """Return the confirm-tool-outcome state for the turn running in this context."""
-    return _turn_state.get()
+    """Return the confirm-tool-outcome state for the turn running in this context.
+
+    ``contextvars.ContextVar`` only accepts one shared default object, not a
+    per-context factory — using a single ``_TurnState()`` instance as that
+    default (the previous implementation) meant every context that never
+    called ``begin_turn()`` mutated that *same* shared object, leaking one
+    context's success/failure flags into every other context that also fell
+    through to the default. A fresh state is materialised here instead.
+    """
+    state = _turn_state.get()
+    if state is None:
+        state = _TurnState()
+        _turn_state.set(state)
+    return state
 
 
 def record_tool_result(tool_name: str, raw: Any) -> None:
@@ -92,7 +104,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
     if tool_name not in _CONFIRM_TOOLS:
         return
 
-    state = _turn_state.get()
+    state = current_state()
     state.attempted = True
     result = action_result.classify(tool_name, raw)
     if result.code == "UNDECODABLE":

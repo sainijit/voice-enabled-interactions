@@ -107,8 +107,8 @@ class _TurnState:
         return bool(self.rejected_refs)
 
 
-_turn_state: contextvars.ContextVar[_TurnState] = contextvars.ContextVar(
-    "removal_guard_turn_state", default=_TurnState()
+_turn_state: contextvars.ContextVar[_TurnState | None] = contextvars.ContextVar(
+    "removal_guard_turn_state", default=None
 )
 
 
@@ -127,8 +127,20 @@ def begin_turn() -> _TurnState:
 
 
 def current_state() -> _TurnState:
-    """Return the tool-outcome state for the turn running in this context."""
-    return _turn_state.get()
+    """Return the tool-outcome state for the turn running in this context.
+
+    ``contextvars.ContextVar`` only accepts one shared default object, not a
+    per-context factory — using a single ``_TurnState()`` instance as that
+    default (the previous implementation) meant every context that never
+    called ``begin_turn()`` mutated that *same* shared object, leaking one
+    context's rejection/success flags into every other context that also
+    fell through to the default. A fresh state is materialised here instead.
+    """
+    state = _turn_state.get()
+    if state is None:
+        state = _TurnState()
+        _turn_state.set(state)
+    return state
 
 
 def record_tool_result(tool_name: str, raw: Any) -> None:
@@ -142,7 +154,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
     if tool_name not in _REMOVAL_TOOLS:
         return
 
-    state = _turn_state.get()
+    state = current_state()
     state.attempted = True
     payload = action_result.unwrap(raw)
     if payload is None:
@@ -227,7 +239,7 @@ def build_refusal(state: _TurnState | None = None) -> str:
     Returns:
         A short, markup-free sentence naming only real cart items.
     """
-    state = state if state is not None else _turn_state.get()
+    state = state if state is not None else current_state()
     if state.no_open_order:
         return _REFUSAL_NO_OPEN_ORDER
     item = next((ref for ref in state.rejected_refs if ref), "")
@@ -254,7 +266,7 @@ def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bo
     if not reply:
         return reply, False
 
-    state = state if state is not None else _turn_state.get()
+    state = state if state is not None else current_state()
     if state.succeeded or not claims_removal(reply):
         return reply, False
 

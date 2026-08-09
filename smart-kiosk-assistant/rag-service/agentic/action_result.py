@@ -70,7 +70,7 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
     tool for tools in CLAIM_TOOLS.values() for tool in tools
 )
 
-ORDER_TOOLS: frozenset[str] = MUTATING_TOOLS | frozenset({"get_order"})
+ORDER_TOOLS: frozenset[str] = MUTATING_TOOLS | frozenset({"get_order", "get_current_order"})
 
 
 def unwrap(raw: Any) -> dict[str, Any] | None:

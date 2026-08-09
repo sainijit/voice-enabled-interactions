@@ -29,6 +29,7 @@ import time
 from typing import Any
 
 from agentic import action_result
+from agentic import cart_state_guard
 from agentic import config as agent_cfg
 from agentic import confirm_guard
 from agentic import item_intent_guard
@@ -60,6 +61,41 @@ _dietary_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _utterance_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
     "utterance_ctx", default=""
 )
+
+
+class _CartState:
+    """Per-session cart/upsell memory, read and written by ``_mcp_fn``.
+
+    Unlike ``_dietary_ctx``/``_utterance_ctx`` (reset every turn), this must
+    survive *across* turns for the same conversation — see
+    ``agentic/cart_state_guard.py`` for why: catching a place_order/
+    update_order call that silently restates an already-cart-resident item
+    or auto-accepts an unconfirmed upsell suggestion requires knowing what
+    was in the cart, and what was last offered, *before* this turn's call.
+
+    One instance is kept per ``session_id`` in ``OrderingAgent._cart_states``
+    and handed to ``_mcp_fn`` via ``_cart_state_ctx`` (a ContextVar bound to
+    the same mutable object each turn, not a fresh one) — the same
+    shared-mutable-object technique ``_ToolCallCounter`` uses to cross the
+    ADK sibling-task boundary, applied here to cross the turn boundary
+    instead.
+    """
+
+    __slots__ = ("known_items", "pending_upsell")
+
+    def __init__(self) -> None:
+        self.known_items: list[dict[str, Any]] = []
+        self.pending_upsell: dict[str, Any] | None = None
+
+
+# The current session's cart/upsell memory (see _CartState above), read and
+# updated by ``_mcp_fn`` around each place_order/update_order/remove_from_order
+# call. Bound once per turn in ``chat()`` to the same per-session ``_CartState``
+# object every time, so mutations persist to the next turn.
+_cart_state_ctx: contextvars.ContextVar[_CartState | None] = contextvars.ContextVar(
+    "cart_state_ctx", default=None
+)
+
 
 class _ToolCallCounter:
     """Mutable per-turn counter, shared across a turn's parallel tool calls.
@@ -151,7 +187,10 @@ _KNOWLEDGE_QUERY_RE = re.compile(
     r"restaurant name|name of (?:the|your) restaurant|address|located?|location|"
     r"parking|deliver(?:y|ies)?|takeaway|dine[- ]?in|wifi|contact|phone|"
     r"halal|vegetarian|vegan|allergen|gluten|ingredient|spicy|"
-    r"payment|upi|card|cash|policy|refund)\b",
+    r"payment|upi|card|cash|policy|refund|"
+    r"(?:tell|know|hear|learn) (?:me )?(?:something |anything )?about "
+    r"(?:the|your|this) (?:restaurant|outlet|place|kiosk)|"
+    r"about (?:the|your|this) (?:restaurant|outlet|place))\b",
     re.IGNORECASE,
 )
 
@@ -173,7 +212,9 @@ _CATALOGUE_QUERY_RE = re.compile(
     r"\b(?:menu|item|items|dish|dishes|serve|serves|offer|offers|available|"
     r"option|options|price|prices|cost|costs|how much|rate|rates|"
     r"burger|burgers|pizza|pizzas|wrap|wraps|side|sides|dessert|desserts|"
-    r"desert|deserts|sweet|sweets|beverage|beverages|drink|drinks|combo|combos)\b",
+    r"desert|deserts|sweet|sweets|beverage|beverages|drink|drinks|combo|combos|"
+    r"(?:do|does) you (?:have|serve|sell|offer|carry|make|got)|"
+    r"have you got|any (?:sandwiches?|food|snacks?))\b",
     re.IGNORECASE,
 )
 
@@ -204,11 +245,32 @@ _ORDER_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A question about a PAST order action ("what did you remove earlier?", "in
+# this conversation what did you remove?") — a WH-question with "you"/"I" as
+# subject and an order verb as a past participle. This is a read-only recall
+# from the model's own conversation history, not a fresh action request, even
+# though it contains an _ORDER_ACTION_RE keyword like "remove".
+#
+# Observed live: "What did you remove from my cart earlier?" matched
+# _ORDER_ACTION_RE (bare "remove") in _needs_tool_retry, forcing a retry and
+# then _ORDER_CLAIM_FALLBACK, which replaced an already-correct, truthful
+# answer ("I removed Aloo Tikki Burger from your cart.") with "Sorry, I could
+# not complete that just now" — a wrong answer to a question the model had
+# already answered correctly, because no tool exists (or is needed) to answer
+# "what did you do a moment ago"; that's just the turn's own memory.
+_HISTORY_QUERY_RE = re.compile(
+    r"\bwhat\b[^.?!]{0,30}\b(?:did|have|has)\b[^.?!]{0,15}\b(?:you|i)\b[^.?!]{0,20}"
+    r"\b(?:remove|removed|add|added|order|ordered|place|placed|confirm|confirmed|"
+    r"cancel|cancelled)\b",
+    re.IGNORECASE,
+)
+
 # Tools that actually finalise an order. Only these make a "your order is
 # confirmed" sentence true. Sourced from action_result.CLAIM_TOOLS — the
 # single registry also consumed by confirm_guard.py and menu/removal guards,
 # so a new confirm-type tool only needs to be added in one place.
 _CONFIRM_TOOLS = action_result.CLAIM_TOOLS[action_result.ORDER_CONFIRMED]
+
 
 # A claim that the order is *finalised*, as opposed to merely added to. This is
 # narrower than _ORDER_CLAIM_RE: adding an item legitimately mentions the order,
@@ -296,7 +358,8 @@ _ORDER_NUDGE = (
     "You described a change to the order without calling a tool, so nothing was "
     "actually recorded and any order id or total you stated is invented. Call the "
     "correct tool now — confirm_active_order to confirm (or confirm_order if you have the id), update_order to change items, "
-    "get_order to read the current order — and reply using ONLY its result. "
+    "get_current_order to read the current order (never guess an order_id for this) "
+    "— and reply using ONLY its result. "
     "Never list an upsell suggestion as if the customer had ordered it."
 )
 
@@ -365,7 +428,9 @@ def _needs_tool_retry(reply: str, message: str) -> tuple[bool, str]:
     # Most specific signal first: the model named a tool but never called it.
     if _TOOL_MENTION_RE.search(reply):
         return True, _TOOL_SYNTAX_NUDGE
-    if _ORDER_ACTION_RE.search(message) or _ORDER_CLAIM_RE.search(reply):
+    if (
+        _ORDER_ACTION_RE.search(message) and not _HISTORY_QUERY_RE.search(message)
+    ) or _ORDER_CLAIM_RE.search(reply):
         return True, _ORDER_NUDGE
     if _CATALOGUE_QUERY_RE.search(message):
         return True, _CATALOGUE_NUDGE
@@ -408,6 +473,7 @@ _TOOL_NAMES = (
     "place_order",
     "update_order",
     "get_order",
+    "get_current_order",
     "confirm_order",
     "confirm_active_order",
     "remove_from_order",
@@ -501,6 +567,117 @@ _LEAKED_DIRECTIVE_RE = re.compile(
 
 _KNOWLEDGE_MARKER_RE = re.compile(r"\[/?knowledge\]", re.IGNORECASE)
 
+# Generation is token-capped, and the model occasionally hits that cap right
+# as it starts echoing the "[/knowledge]" closing delimiter, leaving a
+# dangling "[/knowledge" (no closing bracket) as the very last thing in the
+# reply. `_KNOWLEDGE_MARKER_RE` requires the closing "]" so it never matches
+# this truncated fragment. It only ever appears at the tail of the reply, so
+# it is safe to trim unconditionally once detected there.
+_TRUNCATED_KNOWLEDGE_TAIL_RE = re.compile(r"\s*\[/?knowledge\b[^\]]*$", re.IGNORECASE)
+
+# knowledge_lookup's docstring (and the system prompt) tell the model the
+# retrieved excerpts are numbered "[1]", "[2]" and warn it never to speak that
+# numbering aloud — but a smaller quantised model imitates the citation
+# *style* even on turns where the pinned block (which carries no numbering)
+# is the only source, hallucinating a leading "[1]" it never actually saw.
+_CITATION_MARKER_RE = re.compile(r"\[\d{1,2}\]\s*")
+
+
+def _strip_citation_markers(reply: str) -> str:
+    """Remove hallucinated ``[1]``/``[2]``-style citation markers.
+
+    Args:
+        reply: Model output.
+
+    Returns:
+        The reply with any leading numeric citation markers removed. Falls
+        back to the original text if stripping would leave nothing speakable.
+    """
+    if not reply or not _CITATION_MARKER_RE.search(reply):
+        return reply
+    cleaned = _CITATION_MARKER_RE.sub("", reply)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    if cleaned:
+        logger.warning(
+            "[AGENT] Reply carried a hallucinated citation marker — "
+            "stripping | raw=%r", reply[:160],
+        )
+        return cleaned
+    return reply
+
+
+# The "[Context: ...]" tag is a document-structure breadcrumb every chunk
+# gets during ingestion (see ingestion_service/chunker) — it is not sensitive,
+# just a citation/section-path label. A small quantised model frequently
+# parrots it back verbatim as the first token of an otherwise perfectly
+# truthful, on-topic answer. It must be stripped in-place like the
+# `[knowledge]`/citation markers, never treated as a leak on its own: doing so
+# previously blackholed every reply that happened to echo it (observed live:
+# "Can you tell me something about the restaurant?" -> a fully truthful,
+# accurate answer -> discarded and replaced with a refusal, purely because it
+# began with "[Context: QuickBite Express — Restaurant Knowledge Base]").
+_CONTEXT_BREADCRUMB_RE = re.compile(r"\[Context:[^\]]*\]", re.IGNORECASE)
+
+
+def _strip_context_breadcrumb(reply: str) -> str:
+    """Remove the ingestion "[Context: ...]" breadcrumb tag the model echoed.
+
+    Args:
+        reply: Model output.
+
+    Returns:
+        The reply with any breadcrumb tag removed. Falls back to the
+        original text if stripping would leave nothing speakable.
+    """
+    if not reply or "[context:" not in reply.lower():
+        return reply
+    cleaned = _CONTEXT_BREADCRUMB_RE.sub(" ", reply)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    return cleaned if cleaned else reply
+
+
+# Internal/administrative fields from the knowledge-base root section
+# (FSSAI food-safety license, GST tax registration, internal outlet code,
+# parent-company legal name) that must NEVER be read to a customer regardless
+# of what question triggered them. Observed live: a "where can I find
+# parking" question pre-grounded with the pinned root section, and the model
+# echoed almost the entire raw block back verbatim — license numbers, tax
+# registration, and all — instead of answering only about parking. A partial
+# paraphrase failure is recoverable by rephrasing; reading out a food-safety
+# license or tax ID to a customer is not, so this is a hard substitution, not
+# a strip-in-place. (The "[Context: ...]" breadcrumb tag is handled
+# separately by `_strip_context_breadcrumb` — it is cosmetic, not sensitive.)
+_ADMIN_LEAK_RE = re.compile(
+    r"FSSAI License|GST Registration|Outlet Code|Parent Company",
+    re.IGNORECASE,
+)
+_ADMIN_LEAK_FALLBACK = (
+    "I don't have that detail phrased simply right now — could you ask again?"
+)
+
+
+def _strip_admin_leak(reply: str) -> str:
+    """Replace a reply that leaked raw internal/administrative KB fields.
+
+    Args:
+        reply: Model output, already stripped of markdown/tool syntax and the
+            "[Context: ...]" breadcrumb (see `_strip_context_breadcrumb`).
+
+    Returns:
+        ``reply`` unchanged, or ``_ADMIN_LEAK_FALLBACK`` when it contains a
+        license number, tax registration, or internal outlet code — these
+        must never reach a customer, and removing only the offending
+        fragment would still leave the rest of an un-paraphrased document
+        dump.
+    """
+    if not reply or not _ADMIN_LEAK_RE.search(reply):
+        return reply
+    logger.error(
+        "[AGENT] Reply leaked raw internal/administrative KB fields — "
+        "substituting fallback | raw=%r", reply[:200],
+    )
+    return _ADMIN_LEAK_FALLBACK
+
 
 def _strip_leaked_directives(reply: str) -> str:
     """Remove system-prompt directives the model echoed into its reply.
@@ -537,9 +714,15 @@ def _strip_knowledge_markers(reply: str) -> str:
     Returns:
         The reply with any knowledge-block delimiters removed.
     """
-    if not reply or "[knowledge]" not in reply.lower():
+    if not reply:
+        return reply
+    lowered = reply.lower()
+    has_full_marker = "[knowledge]" in lowered or "[/knowledge]" in lowered
+    has_truncated_tail = bool(_TRUNCATED_KNOWLEDGE_TAIL_RE.search(reply))
+    if not has_full_marker and not has_truncated_tail:
         return reply
     cleaned = _KNOWLEDGE_MARKER_RE.sub(" ", reply)
+    cleaned = _TRUNCATED_KNOWLEDGE_TAIL_RE.sub("", cleaned)
     cleaned = _WS_RE.sub(" ", cleaned).strip()
     if cleaned:
         logger.warning(
@@ -548,6 +731,56 @@ def _strip_knowledge_markers(reply: str) -> str:
         )
         return cleaned
     return reply
+
+
+def _dedupe_repeated_sentences(reply: str) -> str:
+    """Collapse a fact the model stated twice in the same reply.
+
+    Observed live on knowledge/pre-grounding turns: the model both echoes the
+    ``[knowledge]...[/knowledge]`` block verbatim (unwrapped in-place by
+    ``_strip_knowledge_markers``/``_strip_citation_markers``, which keep the
+    inner text) *and* separately paraphrases the same fact in its own words,
+    e.g. "The restaurant has a seating capacity of 50 people. The restaurant
+    has a seating capacity of 50 people." Both halves are truthful — they came
+    from the same grounded source — so the fix is to keep exactly one
+    occurrence, never fall back to silence or a generic refusal.
+
+    This only needs to run on the buffered whole-reply path, not mirrored into
+    ``_SentenceGate._is_safe()``: a duplicate requires at least two sentences
+    to compare, and every turn that can produce this pattern (a knowledge
+    answer that never calls a tool) is unconditionally withheld from early
+    release by gate condition (a) — ``_is_safe`` returns False until a tool has
+    run, so these turns always reach the buffered path where this runs.
+
+    Args:
+        reply: Model output, already stripped of thinking/markdown/knowledge/
+            citation markers.
+
+    Returns:
+        ``reply`` with exact-duplicate sentences (compared case/whitespace
+        insensitively) collapsed to their first occurrence. Returns ``reply``
+        unchanged when nothing was duplicated.
+    """
+    if not reply:
+        return reply
+    sentences = [s.strip() for s in _SENTENCE_END_RE.split(reply) if s.strip()]
+    if len(sentences) < 2:
+        return reply
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for sentence in sentences:
+        norm = re.sub(r"\s+", " ", sentence).strip().lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        deduped.append(sentence)
+    if len(deduped) == len(sentences):
+        return reply
+    logger.warning(
+        "[AGENT] Reply repeated the same sentence — collapsing duplicates | "
+        "raw=%r", reply[:200],
+    )
+    return " ".join(deduped)
 
 
 def _strip_tool_syntax(reply: str) -> str:
@@ -677,18 +910,22 @@ class _SentenceGate:
         #      guards against post-hoc. See agentic/confirm_guard.py.
         if _CONFIRM_CLAIM_RE.search(sentence) and not confirm_guard.current_state().succeeded:
             return False
-        # (c3) menu_guard.validate_reply() can still replace the *whole* reply
-        #      whenever this turn had an off-menu/ambiguous rejection and no
-        #      mutating tool succeeded — either because a sentence falsely
-        #      claims an addition, or because the reply never surfaces the
-        #      real alternatives the tool provided (see _mentions_alternative
-        #      in menu_guard.py). Since either condition can only be known
-        #      once the full reply is assembled, no sentence from a rejected
-        #      turn may be released early.
+        # (c3) menu_guard.validate_reply() can still rewrite the reply whenever
+        #      this turn had an off-menu/ambiguous rejection — either because
+        #      a sentence falsely claims an addition, because the reply never
+        #      surfaces the real alternatives the tool provided (see
+        #      _mentions_alternative in menu_guard.py), or because a
+        #      *partial* success (some items added, one refused) never
+        #      discloses the refusal (see _reconcile_partial_success). All
+        #      three can only be known once the full reply is assembled, so
+        #      no sentence from a turn with ANY rejection — full or partial —
+        #      may be released early: a partial success is corrected by
+        #      appending a disclosure the customer must still hear before any
+        #      of the turn's sentences are considered final.
         #      Tool results are already recorded by this point: ADK emits every
         #      function_call part, and _mcp_fn awaits the call, before text streams.
         _menu_state = menu_guard.current_state()
-        if _menu_state.has_rejection and not _menu_state.succeeded:
+        if _menu_state.has_rejection or _menu_state.has_partial_rejection:
             return False
         # (c4) A removal claim is only true if remove_from_order actually took
         #      something off the cart. chat() replaces the whole reply
@@ -704,6 +941,15 @@ class _SentenceGate:
         #      pre-grounded turns (they run no tool), but this stays explicit
         #      so the gate keeps mirroring chat() one-for-one.
         if _KNOWLEDGE_MARKER_RE.search(sentence):
+            return False
+        # (d3) A hallucinated citation marker is rewritten by
+        #      _strip_citation_markers(); same reasoning as (d2).
+        if _CITATION_MARKER_RE.search(sentence):
+            return False
+        # (d4) A leaked license/tax/internal field is substituted wholesale
+        #      by _strip_admin_leak(); a partial sentence containing it must
+        #      never be released early.
+        if _ADMIN_LEAK_RE.search(sentence):
             return False
         if _TOOL_MENTION_RE.search(sentence) or "<think" in sentence.lower():
             return False
@@ -852,7 +1098,7 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                         for p in data
                     ]
 
-        elif tool_name in ("place_order", "update_order", "get_order"):
+        elif tool_name in ("place_order", "update_order", "get_order", "get_current_order"):
             if isinstance(data, dict):
                 items = [
                     {
@@ -1057,6 +1303,32 @@ question directly, or saying "let me look that up", wastes the customer's turn:
 there is no second chance to speak, so the lookup must happen NOW, in this turn,
 before you reply.
 
+## MULTI-ACTION REQUESTS
+
+A customer turn can contain multiple actions.
+
+Examples:
+
+- "Add a burger and fries."
+- "Remove the fries and add a burger."
+- "Take off the Coke and get me a juice instead."
+- "Remove the burger, add fries, and show my order."
+
+Complete every requested action.
+
+After a tool result, check the customer's original request and the latest
+tool result. If another requested action remains, call the appropriate tool.
+Do not stop merely because the first tool succeeded.
+
+If multiple independent tool calls can be made in the same model turn, make
+them together when supported.
+
+Only give the final spoken response after all requested actions are
+complete.
+
+Do not use the customer's wording or a regex-like rule to decide whether
+another action exists. Determine it from the request and the tool results.
+
 ## Rules (check in order)
 0. GENERAL "what do you serve / what's on the menu / show me the menu" (no food
    type named) — call list_categories and answer from its result.
@@ -1110,7 +1382,12 @@ before you reply.
    If a catalogue tool ever comes back empty, that is a system fault, not an empty
    restaurant: say you are having trouble reading the menu and ask them to try again.
    NEVER tell a customer we have no items.
-5. MANAGE — "show my order" → get_order; "confirm/place it/that's all/yes" →
+5. MANAGE — "show my order", "what's in my cart", "what's my total", "what did
+   I order/remove" → call get_current_order(user_id) — it finds the customer's
+   open order without needing an id. NEVER call get_order with a guessed or
+   remembered order_id for these questions (including a placeholder like
+   `12345`): a wrong id silently returns nothing and forces you to falsely
+   tell the customer their cart is empty. "confirm/place it/that's all/yes" →
    confirm_order. Only after confirm_order returns successfully, tell the
    customer the order is confirmed and read back the `order_id` exactly as the
    tool returned it (it is a plain number), then wish them well. Never invent,
@@ -1125,8 +1402,14 @@ before you reply.
    - Report back using the tool result only. Say what `removed` lists, then the
      new `total`. If `not_in_cart` is non-empty, say those items were not in the
      order — never claim to have removed something that is not in `removed`.
-   - If `cart_empty` is true, say the cart is now empty and ask what they would
-     like instead. Do NOT call confirm_order on an empty cart.
+   - If `cart_empty` is true AND the customer did not also ask to add
+     something else this turn, say the cart is now empty and ask what they
+     would like instead. Do NOT call confirm_order on an empty cart.
+   - If `cart_empty` is true BUT the customer's turn also named a replacement
+     item ("remove X and add Y", "swap X for Y") — see rule 6c — do NOT stop
+     and ask what they'd like instead: an empty cart is not a reason to pause,
+     it is simply the state right before you call place_order for Y in this
+     same turn.
    - Never use update_order to remove something: it only adds.
 6b. CANCEL THE WHOLE ORDER — "cancel my order", "cancel my whole/entire/complete
    order", "cancel everything", "start over", "scrap my order" — call
@@ -1141,6 +1424,33 @@ before you reply.
    - A request naming specific items ("cancel the fries") is a REMOVE (rule 6),
      not a whole-order cancellation — only "my order"/"everything"/"whole
      order" phrasing means cancel_order.
+6c. REMOVE-AND-ADD IN ONE TURN — "remove X and add Y", "remove X and order Y
+   instead", "swap X for Y" — see MULTI-ACTION REQUESTS above: call
+   remove_from_order for X, then ALSO call place_order (or update_order if an
+   order is already open) for Y, in the same turn if possible. Do not stop
+   after the removal call and wait to be asked again. If Y is not on the
+   menu, still complete the removal, then say Y is not available using the
+   catalogue-lookup failure result, exactly as rule 1 describes for a single
+   add.
+   - X and Y are two separate tool calls to two different tools. NEVER put Y
+     (the item being added) inside the remove_from_order items list — that
+     tool only removes; an entry for Y there will be reported as "not in your
+     cart" and Y will never actually be added. remove_from_order's items list
+     must contain ONLY the item(s) being removed.
+   - Worked example — customer says "remove classic chicken burger and add
+     one margherita pizza instead":
+       1. Call remove_from_order(items=[{"product_id": "classic chicken
+          burger"}]). Suppose it returns cart_empty=true.
+       2. Do NOT reply yet and do NOT ask "would you like to add it?" — the
+          customer already said to add it. In the SAME turn, call
+          place_order(items=[{"product_id": "margherita pizza", "quantity":
+          1}]).
+       3. Only once place_order has also returned, speak ONE reply covering
+          both results, e.g. "Removed the Classic Chicken Burger and added
+          Margherita Pizza (₹179). Your total is ₹179."
+     Stopping after step 1 and asking a question is wrong: it leaves a
+     requested action undone and makes the customer repeat themselves.
+
 
 ## The `[knowledge]` block
 A turn may begin with a `[knowledge] ... [/knowledge]` block. That is the
@@ -1276,6 +1586,9 @@ class OrderingAgent:
         # Stated dietary preference ("vegetarian"/"vegan") per conversation,
         # same lifecycle/rationale as _customer_names above.
         self._dietary_prefs: dict[str, str] = {}
+        # Cart/upsell memory per conversation, same lifecycle/rationale as
+        # _customer_names above — see cart_state_guard.py and _CartState.
+        self._cart_states: dict[str, _CartState] = {}
 
     async def bootstrap(self) -> None:
         """Initialise the ADK model, MCP tools, and runner.
@@ -1420,6 +1733,7 @@ class OrderingAgent:
         from google.adk.tools import ToolContext
 
         async def _mcp_fn(tool_context: ToolContext | None = None, **kwargs: Any) -> Any:
+            cart_state = _cart_state_ctx.get()
             if tool_name in ("place_order", "update_order"):
                 # Overwrite rather than merge: this is the deterministically
                 # captured preference, always more trustworthy than anything
@@ -1439,6 +1753,23 @@ class OrderingAgent:
                     kwargs["items"][0]["product_id"] = corrected
                     kwargs["items"][0].pop("name", None)
                     kwargs["items"][0].pop("product", None)
+                # Drop any item in a *multi*-item call that silently restates
+                # something already in the cart (e.g. re-adding the burger
+                # the customer already has) or auto-accepts an upsell
+                # suggestion the customer never confirmed — both are real,
+                # additive DB writes the customer never asked for this turn.
+                # See agentic/cart_state_guard.py for the full rationale and
+                # why this is deliberately narrower than item_intent_guard.
+                items_arg = kwargs.get("items")
+                if cart_state is not None and isinstance(items_arg, list):
+                    filtered = cart_state_guard.filter_stale_and_unconfirmed_items(
+                        items_arg,
+                        _utterance_ctx.get(),
+                        cart_state.known_items,
+                        cart_state.pending_upsell,
+                    )
+                    if len(filtered) != len(items_arg):
+                        kwargs["items"] = filtered
             logger.info("[AGENT→MCP] tool=%s args=%s", tool_name, kwargs)
             result = await call_tool(tool_name, kwargs)
             # Record the outcome *before* compression: the menu guard needs the
@@ -1450,6 +1781,40 @@ class OrderingAgent:
             confirm_guard.record_tool_result(tool_name, result)
             llm_metrics.record_guard((time.monotonic() - _guard_start) * 1000)
 
+            # Refresh this session's cart/upsell memory from whatever the
+            # tool actually returned — the ground truth for the *next* turn's
+            # cart_state_guard check above. Read after menu_guard/etc. so a
+            # failed/off-menu call (no ``items``) simply leaves prior state
+            # untouched rather than wiping it. ``remove_from_order`` updates
+            # the known cart but leaves ``pending_upsell`` alone — it carries
+            # no upsell suggestions of its own, and a removal doesn't resolve
+            # (accept or decline) whatever was previously offered.
+            if cart_state is not None and tool_name in (
+                "place_order", "update_order", "remove_from_order",
+            ):
+                payload = action_result.unwrap(result)
+                if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+                    cart_state.known_items = payload["items"]
+                    if tool_name != "remove_from_order":
+                        upsell = payload.get("upsell_suggestions") or []
+                        cart_state.pending_upsell = (
+                            upsell[0].get("product")
+                            if upsell and isinstance(upsell[0], dict)
+                            else None
+                        )
+            elif cart_state is not None and tool_name in (
+                "confirm_order", "confirm_active_order",
+            ):
+                # A confirmed order is closed; place_order's own docstring
+                # says a *new* draft opens for whatever comes next, so this
+                # session's known cart must not keep matching against a
+                # finished order.
+                payload = action_result.unwrap(result)
+                if isinstance(payload, dict) and payload.get("status") == "confirmed":
+                    cart_state.known_items = []
+                    cart_state.pending_upsell = None
+
+
             # Skip the 2nd LLM call (pure narration) when this is the turn's
             # only tool call and the outcome cleanly matches an authored
             # template — see agentic/reply_templates.py for why templating
@@ -1457,6 +1822,32 @@ class OrderingAgent:
             # less. Any turn that calls a 2nd tool, or whose outcome doesn't
             # cleanly match (partial success, unexpected shape), falls
             # through unchanged to today's LLM-narrated path.
+            #
+            # Cart-mutating tools (``action_result.MUTATING_TOOLS`` —
+            # place_order, update_order, remove_from_order, cancel_order,
+            # confirm_order, confirm_active_order) are NEVER eligible for this
+            # shortcut, full stop, regardless of what the customer said.
+            # Templating here sets `skip_summarization = True`, which ends the
+            # ADK turn immediately instead of feeding the tool result back to
+            # the model — and that feedback step is the model's ONLY chance to
+            # notice the turn isn't finished and call a second tool.
+            #
+            # An earlier version of this gate tried to detect a "compound"
+            # utterance ("remove X and add Y") with a regex before deciding
+            # whether to skip — that is exactly the wrong layer to make this
+            # decision at: it can only recognise phrasings someone already
+            # thought to write down, and a customer's real words are
+            # infinitely more varied than any fixed pattern. The single
+            # observed bug (`remove classic chicken burger and add one
+            # margherita pizza instead` silently dropping the pizza) is one of
+            # unbounded many possible phrasings for the same intent. Removing
+            # the shortcut unconditionally for every mutating tool means the
+            # model — which has the full conversation and every tool result —
+            # always gets to decide whether another action is still owed,
+            # using the request and the tool results, never surface wording.
+            # Read-only catalogue tools (list_products/list_categories) keep
+            # the shortcut: a pure browse has no cart side effect to lose if
+            # the turn ends right after it.
             #
             # ``tool_context`` is only absent when this function is invoked
             # directly (e.g. unit tests bypassing ADK) — there's no
@@ -1468,6 +1859,7 @@ class OrderingAgent:
                 tool_context is not None
                 and calls_this_turn == 1
                 and tool_name in reply_templates.SPEAKABLE_TOOLS
+                and tool_name not in action_result.MUTATING_TOOLS
             ):
                 _tpl_start = time.monotonic()
                 spoken = reply_templates.speak(tool_name, result, _utterance_ctx.get())
@@ -1635,6 +2027,64 @@ class OrderingAgent:
         # tag-prefixed ``full_message``) is used deliberately — the tags are
         # not something the customer said and would only add noise here.
         utterance_token = _utterance_ctx.set(message)
+        # Bound to the same per-session _CartState object every turn (not a
+        # fresh one) so place_order/update_order results recorded by _mcp_fn
+        # persist into the next turn — see _CartState docstring.
+        cart_state_token = _cart_state_ctx.set(
+            self._cart_states.setdefault(session_id, _CartState())
+        )
+
+        # ── Structured root-fact fast path ──────────────────────────────
+        # Restaurant name and hours are answered directly from the parsed
+        # knowledge-base root section — zero LLM calls — rather than via
+        # pre-grounded narration below. See reply_templates.speak_root_fact
+        # for why: narration measurably merges distinct hour ranges and
+        # invents unsupported details even at temperature=0.0, which is
+        # unacceptable for a restaurant's own operating hours.
+        facts_wanted = (
+            reply_templates.classify_root_facts(message)
+            if not _CATALOGUE_QUERY_RE.search(message)
+            and not _ORDER_ACTION_RE.search(message)
+            else []
+        )
+        if facts_wanted:
+            _tpl_start = time.monotonic()
+            try:
+                facts = knowledge_tool.root_facts()
+            except Exception:  # noqa: BLE001 — fast path is best-effort
+                logger.exception(
+                    "[AGENT] Structured root-fact lookup failed | session=%s", session_id
+                )
+                facts = {}
+            spoken = reply_templates.speak_root_fact(facts_wanted, facts)
+            if spoken:
+                llm_metrics.reset()
+                llm_metrics.record_template((time.monotonic() - _tpl_start) * 1000)
+                template = llm_metrics.template_snapshot()
+                logger.info(
+                    "[AGENT] Structured root-fact reply | session=%s facts=%s",
+                    session_id, facts_wanted,
+                )
+                _dietary_ctx.reset(dietary_token)
+                _utterance_ctx.reset(utterance_token)
+                _cart_state_ctx.reset(cart_state_token)
+                return {
+                    "reply": spoken,
+                    "tool_calls": [],
+                    "llm_ms": None,
+                    "llm_ttft_ms": None,
+                    "llm_calls": 0,
+                    "retrieval_ms": None,
+                    "mcp_ms": None,
+                    "mcp_calls": 0,
+                    "guard_ms": None,
+                    "template_ms": template["ms"],
+                    "templated": True,
+                    "streamed": "",
+                }
+            # A requested fact was missing from the parsed data (e.g. pin
+            # unavailable) — fall through to the normal pre-grounded path
+            # below rather than speak an incomplete answer.
 
         # ── Pre-grounding ────────────────────────────────────────────────
         # For an unambiguous outlet question, retrieve the facts BEFORE the
@@ -1804,6 +2254,10 @@ class OrderingAgent:
         reply = _strip_tool_syntax(reply)
         reply = _strip_markdown(reply)
         reply = _strip_knowledge_markers(reply)
+        reply = _strip_citation_markers(reply)
+        reply = _strip_context_breadcrumb(reply)
+        reply = _dedupe_repeated_sentences(reply)
+        reply = _strip_admin_leak(reply)
         reply = _strip_leaked_directives(reply)
         if _ERROR_PAYLOAD_RE.search(reply):
             logger.error(
@@ -2106,6 +2560,7 @@ class OrderingAgent:
         self._runner = create_runner(self._agent, self._session_service)
         self._customer_names.clear()
         self._dietary_prefs.clear()
+        self._cart_states.clear()
         logger.info("[AGENT] Conversation sessions reset — knowledge base changed")
 
     def forget_conversation(self, session_id: str) -> None:
@@ -2118,6 +2573,7 @@ class OrderingAgent:
             logger.info("[AGENT] Cleared customer name for session=%s", session_id)
         if self._dietary_prefs.pop(session_id, None) is not None:
             logger.info("[AGENT] Cleared dietary preference for session=%s", session_id)
+        self._cart_states.pop(session_id, None)
 
     async def _ensure_session(
         self,

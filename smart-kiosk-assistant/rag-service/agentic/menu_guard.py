@@ -129,25 +129,49 @@ class _TurnState:
     Attributes:
         succeeded: True once any mutating tool returned a real order payload,
             which makes an "added" claim truthful.
-        rejected_refs: Product references kiosk-core refused because they are
-            not in the catalogue, in the order they were rejected.
-        alternatives: Grounded ``{name, price}`` rows taken from the tool's
-            ``available_products``. Only these may be offered back to the
-            customer — anything else would be invented.
+        rejected_refs: Product references from a call that resolved **no**
+            items at all (a fully-failed call), in the order they were
+            rejected. Deliberately separate from ``partial_refs`` below: a
+            turn where an earlier call fails outright and a *later* call
+            fully succeeds is treated as resolved by that later success (see
+            ``has_rejection`` / the full-refusal path in ``validate_reply``),
+            whereas a call that ADDS some items and refuses others in the
+            very same result must always be disclosed, regardless of what
+            any other call in the turn did.
+        alternatives: Grounded ``{name, price}`` rows for ``rejected_refs``,
+            taken from the tool's ``available_products``.
+        partial_refs: Product references refused by a call that also
+            resolved and added at least one other item in the *same* call
+            (kiosk-core's ``_resolve_items`` is per-item — see
+            ``mcp_server.py`` — so ``place_order``/``update_order`` can
+            return both ``just_added`` and ``unavailable_items`` on one
+            success). Observed live: a customer asked to order "all pizza
+            available", one fabricated id among four was refused, three
+            pizzas were genuinely added, and the model's reply implied all
+            four were added without ever mentioning the refusal.
+        partial_alternatives: Grounded ``{name, price}`` rows for
+            ``partial_refs``.
     """
 
     succeeded: bool = False
     rejected_refs: list[str] = field(default_factory=list)
     alternatives: list[dict[str, Any]] = field(default_factory=list)
+    partial_refs: list[str] = field(default_factory=list)
+    partial_alternatives: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_rejection(self) -> bool:
-        """True when at least one item was refused as off-menu this turn."""
+        """True when a fully-failed call refused an item this turn."""
         return bool(self.rejected_refs)
 
+    @property
+    def has_partial_rejection(self) -> bool:
+        """True when an otherwise-successful call also refused an item."""
+        return bool(self.partial_refs)
 
-_turn_state: contextvars.ContextVar[_TurnState] = contextvars.ContextVar(
-    "menu_guard_turn_state", default=_TurnState()
+
+_turn_state: contextvars.ContextVar[_TurnState | None] = contextvars.ContextVar(
+    "menu_guard_turn_state", default=None
 )
 
 # Pulls the offending reference out of the kiosk-core error sentence, which is
@@ -174,8 +198,24 @@ def begin_turn() -> _TurnState:
 
 
 def current_state() -> _TurnState:
-    """Return the tool-outcome state for the turn running in this context."""
-    return _turn_state.get()
+    """Return the tool-outcome state for the turn running in this context.
+
+    ``contextvars.ContextVar`` can only be given one shared default object,
+    not a per-context factory — using a single ``_TurnState()`` instance as
+    that default (the previous implementation) meant every context that never
+    called ``begin_turn()`` (e.g. a request whose context didn't propagate, or
+    a test that calls ``record_tool_result`` directly) mutated that *same*
+    shared object, permanently leaking one context's rejection/success flags
+    into every other context that also fell through to the default —
+    including, in production, unrelated concurrent requests. A fresh state is
+    materialised here instead, so "no ``begin_turn()`` yet" always means an
+    empty, unshared state.
+    """
+    state = _turn_state.get()
+    if state is None:
+        state = _TurnState()
+        _turn_state.set(state)
+    return state
 
 
 def record_tool_result(tool_name: str, raw: Any) -> None:
@@ -192,7 +232,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
     if tool_name not in _MUTATING_TOOLS:
         return
 
-    state = _turn_state.get()
+    state = current_state()
     result = action_result.classify(tool_name, raw)
     if result.code == "UNDECODABLE":
         # Undecodable payload: treat as not-a-success. The turn then falls back
@@ -205,6 +245,26 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
 
     if result.success:
         state.succeeded = True
+        # A multi-item place_order/update_order call resolves items
+        # independently (see mcp_server._resolve_items): one fabricated
+        # reference alongside otherwise-valid ones does NOT fail the whole
+        # call — kiosk-core writes the valid items and reports the rest in
+        # ``unavailable_items``/``unavailable_message`` on the *same*,
+        # overall-successful payload. ``action_result.classify`` only checks
+        # for a top-level ``error`` key, so this partial-rejection detail was
+        # previously silently dropped: ``state.succeeded`` short-circuited
+        # ``validate_reply`` and nothing ever checked whether the model's
+        # narration disclosed the dropped item. Observed live: a customer
+        # asked to order "all pizza available" (4 items), one fabricated
+        # product_id was refused, only 3 were actually added, and the model's
+        # reply implied all 4 were added (or simply announced the total and
+        # jumped straight to upsell/confirm) without ever mentioning the
+        # refusal. Recording the rejection here — without flipping
+        # ``succeeded`` back to False, since some items really were added —
+        # lets ``validate_reply`` require that partial outcome to be
+        # disclosed.
+        payload = result.data if isinstance(result.data, dict) else {}
+        _record_rejection(state, payload.get("unavailable_items"), payload.get("available_products"))
         return
 
     payload = result.data
@@ -217,19 +277,57 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
         # naming an item we did not parse would be a guess.
         state.rejected_refs.append("")
 
-    for product in payload.get("available_products") or []:
-        if not isinstance(product, dict):
-            continue
-        name = product.get("name")
-        if not name or any(a.get("name") == name for a in state.alternatives):
-            continue
-        state.alternatives.append({"name": name, "price": product.get("price")})
+    _record_alternatives(state.alternatives, payload.get("available_products"))
 
     logger.warning(
         "[MENU-GUARD] Off-menu item refused by %s | ref=%r alternatives=%s",
         tool_name,
         state.rejected_refs[-1],
         [a["name"] for a in state.alternatives],
+    )
+
+
+def _record_alternatives(target: list[dict[str, Any]], available_products: Any) -> None:
+    """Merge ``available_products`` rows into ``target`` (deduped by name)."""
+    for product in available_products or []:
+        if not isinstance(product, dict):
+            continue
+        name = product.get("name")
+        if not name or any(a.get("name") == name for a in target):
+            continue
+        target.append({"name": name, "price": product.get("price")})
+
+
+def _record_rejection(
+    state: _TurnState, unavailable_items: Any, available_products: Any
+) -> None:
+    """Record a partial rejection alongside an otherwise-successful mutation.
+
+    Populates ``state.partial_refs``/``partial_alternatives`` — kept separate
+    from ``rejected_refs``/``alternatives`` (used for calls that resolved NO
+    items) so that a later, cleanly-successful call in the same turn does not
+    erase a genuine partial-rejection disclosure requirement, while a
+    fully-failed call followed by an unrelated clean success still resolves
+    as before (see the ``_TurnState`` docstring).
+
+    Args:
+        state: The current turn's tool-outcome state.
+        unavailable_items: ``payload["unavailable_items"]`` — the raw
+            references kiosk-core could not resolve, if any.
+        available_products: ``payload["available_products"]`` — grounded
+            substitutes for the unresolved references, if any.
+    """
+    if not unavailable_items:
+        return
+    for ref in unavailable_items:
+        state.partial_refs.append(str(ref) if ref else "")
+    _record_alternatives(state.partial_alternatives, available_products)
+    logger.warning(
+        "[MENU-GUARD] Partial success: mutating call also refused %d item(s) as "
+        "off-menu | refused=%s alternatives=%s",
+        len(unavailable_items),
+        unavailable_items,
+        [a["name"] for a in state.partial_alternatives],
     )
 
 
@@ -267,7 +365,7 @@ def build_refusal(state: _TurnState | None = None) -> str:
     Returns:
         A short, markup-free sentence naming only real catalogue items.
     """
-    state = state if state is not None else _turn_state.get()
+    state = state if state is not None else current_state()
     item = next((ref for ref in state.rejected_refs if ref), "")
     if not item or not _looks_like_item_name(item):
         return _REFUSAL_GENERIC
@@ -295,10 +393,82 @@ def _mentions_alternative(reply: str, state: _TurnState) -> bool:
     )
 
 
+# Phrases that tell the customer *something* was not added — used only to
+# decide whether a PARTIAL success (some items added, one refused) already
+# disclosed the refusal. Deliberately broader/looser than ``claims_addition``:
+# here we want to avoid appending a redundant disclosure, so a false negative
+# (missing a real disclosure) is the safe direction, not a false positive.
+_DISCLOSURE_HINT_RE = re.compile(
+    r"\b(?:unavailable|not available|don'?t have|do\s+not\s+have|"
+    r"not\s+on\s+(?:the\s+)?menu|could\s?n'?t\s+(?:add|find)|"
+    r"can'?t\s+add|wasn'?t\s+added|weren'?t\s+added|not\s+added)\b",
+    re.IGNORECASE,
+)
+
+
+def _partial_success_disclosed(reply: str, state: _TurnState) -> bool:
+    """True when ``reply`` already tells the customer about the dropped item."""
+    return bool(_DISCLOSURE_HINT_RE.search(reply))
+
+
+def _format_partial_disclosure(state: _TurnState) -> str:
+    """Compose a short spoken sentence disclosing a partially-rejected item.
+
+    Only echoes the raw fabricated reference when it reads like a real dish
+    name (see ``_looks_like_item_name`` — the same guard ``build_refusal``
+    uses), since the reference is untrusted model-authored text and can be a
+    garbled fragment rather than a clean item name.
+    """
+    item = next((ref for ref in state.partial_refs if ref and _looks_like_item_name(ref)), "")
+    alternatives = _format_alternatives(state.partial_alternatives)
+    if item and alternatives:
+        return (
+            f"One note: {item} isn't on our menu, so it wasn't added — "
+            f"we do have {alternatives} if you'd like that instead."
+        )
+    if alternatives:
+        return (
+            f"One note: one of those isn't on our menu, so it wasn't added — "
+            f"we do have {alternatives} if you'd like that instead."
+        )
+    return "One note: one of those isn't on our menu, so it wasn't added."
+
+
+def _reconcile_partial_success(reply: str, state: _TurnState) -> tuple[str, bool]:
+    """Append a disclosure to a reply that hid a partial off-menu rejection.
+
+    Some items in a multi-item ``place_order``/``update_order`` call really
+    were added; at least one other was refused as off-menu in that same call
+    (``state.has_partial_rejection``). Observed live: the model's reply named
+    the successful items (or simply announced a total and moved on to
+    upsell/confirmation) without ever mentioning the one that was refused —
+    implying more was ordered than actually was. The reply's claims about
+    what *did* succeed are left untouched (they are true); only the missing
+    disclosure is appended.
+
+    Args:
+        reply: The assistant's drafted reply, after the other text guards.
+        state: Turn state to read.
+
+    Returns:
+        ``(reply, corrected)``.
+    """
+    if _partial_success_disclosed(reply, state):
+        return reply, False
+    disclosure = _format_partial_disclosure(state)
+    logger.warning(
+        "[MENU-GUARD] Reply after a PARTIAL success did not disclose the refused "
+        "item(s) (refs=%s) — appending disclosure to: %r",
+        state.partial_refs,
+        reply[:160],
+    )
+    return f"{reply.rstrip()} {disclosure}", True
+
+
 def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bool]:
     """Reconcile a reply against a real off-menu/ambiguous-item rejection.
 
-    Two failure shapes are corrected, both stemming from the same root cause
+    Three failure shapes are corrected, all stemming from the same root cause
     (the model narrating a turn it did not fully understand):
 
     1. A false "added"/"confirmed" claim after every mutating call was
@@ -307,10 +477,12 @@ def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bo
     2. A reply that makes no false claim but also drops the real
        ``available_products`` alternatives the tool provided, leaving a
        voice customer with no path forward (see ``_mentions_alternative``).
-
-    The whole reply is replaced rather than edited sentence-by-sentence in
-    both cases, for the same reason: the text was built around a premise
-    (success, or "nothing to offer") that a grounded refusal fully replaces.
+    3. A **partial** success: some items in a multi-item request really were
+       added, but at least one other was refused as off-menu in the same
+       call, and the reply never discloses that — implying the whole request
+       succeeded. Unlike (1) and (2), the reply is not wholesale-replaced
+       here (its claims about what *did* succeed are true); only the missing
+       disclosure is appended (see ``_reconcile_partial_success``).
 
     Args:
         reply: The assistant's drafted reply, after the other text guards.
@@ -323,7 +495,9 @@ def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bo
     if not reply:
         return reply, False
 
-    state = state if state is not None else _turn_state.get()
+    state = state if state is not None else current_state()
+    if state.has_partial_rejection:
+        return _reconcile_partial_success(reply, state)
     if state.succeeded or not state.has_rejection:
         return reply, False
 

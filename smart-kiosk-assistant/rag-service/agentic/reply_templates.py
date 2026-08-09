@@ -332,3 +332,113 @@ def speak(tool_name: str, raw_result: Any, utterance: str = "") -> str | None:
     if payload is None:
         return None
     return template(payload)
+
+
+# ── Structured root-fact answers ─────────────────────────────────────────
+#
+# Restaurant name and operating hours are answered by having the LLM
+# paraphrase the pinned knowledge-base root section (see
+# agentic/tools/knowledge_lookup_tool.py). Measured live, that paraphrase is
+# not reliable even at temperature=0.0: two identical requests to the same
+# quantised model produced "8 AM to 11 PM Monday through Saturday" and later
+# "8 AM to 12 AM on weekdays", both merging the source's genuinely distinct
+# Mon-Thu/Fri-Sat/Sun ranges into one, and the second additionally invented
+# an unsupported "closed on public holidays" claim. For a restaurant's own
+# hours, a wrong answer is a worse defect than an unstyled one, so these two
+# facts are spoken directly from the parsed structured value — no LLM call,
+# no paraphrase, no possibility of merging or inventing.
+#
+# Deliberately narrow: only the two facts empirically shown to be unreliable.
+# Every other root-level fact (parking, wifi, delivery, ...) keeps using the
+# existing pre-grounded LLM narration path, since simple string facts like
+# "shared parking lot" carry little risk of being merged or hallucinated.
+_ROOT_FACT_NAME_RE = re.compile(
+    r"\b(?:restaurant'?s? name|name of (?:the|this) (?:restaurant|outlet|place)|"
+    r"what(?:'s| is) (?:the|this) (?:restaurant|outlet|place)(?:'s)? (?:called|name)|"
+    r"what(?:'s| is) the name of)\b",
+    re.IGNORECASE,
+)
+_ROOT_FACT_BREAKFAST_RE = re.compile(r"\bbreakfast (?:hours?|timings?)\b", re.IGNORECASE)
+_ROOT_FACT_HOURS_RE = re.compile(
+    r"\b(?:opening hours?|closing hours?|operating hours?|business hours?|"
+    r"open(?:ing)?\s+and\s+clos(?:e|ing)(?:\s+(?:hours?|time))?|"
+    r"open\s+and\s+close|opens?\s+and\s+closes?|"
+    r"what time (?:do|does) (?:you|it|the restaurant|the outlet).{0,10}(?:open|close)|"
+    r"(?:are you|is it) open|\btimings?\b)\b",
+    re.IGNORECASE,
+)
+# Hours/timing-ish words that don't match the strict phrases above. If one of
+# these appears, the utterance IS asking about hours but in a paraphrase this
+# classifier does not recognise confidently. Observed live: "what are the
+# opening and closing of the restaurant? what is the restaurant name" matched
+# only _ROOT_FACT_NAME_RE, so the fast path answered the name and silently
+# dropped the hours half of the question — an incomplete answer is worse than
+# a slow one. When this hint fires without a confident phrase match, abstain
+# from the ENTIRE fast path (not just the unmatched fact) so the full
+# pre-grounded LLM path sees and answers the whole question.
+_HOURS_HINT_RE = re.compile(r"\b(?:hours?|timing\w*|open(?:ing)?|clos(?:e|ing|ed))\b", re.IGNORECASE)
+
+
+def classify_root_facts(utterance: str) -> list[str]:
+    """Return which structured root facts ``utterance`` is asking for.
+
+    Args:
+        utterance: The customer's raw message.
+
+    Returns:
+        A list drawn from ``{"name", "hours", "breakfast_hours"}`` in the
+        order a spoken reply should cover them. Empty when the utterance does
+        not ask for any of these three specific facts, OR when it hints at
+        hours/timing without matching a known phrase confidently — in both
+        cases the caller must fall back to the normal (pre-grounded LLM) path
+        rather than risk answering only part of a compound question.
+    """
+    if not utterance:
+        return []
+    facts: list[str] = []
+    if _ROOT_FACT_NAME_RE.search(utterance):
+        facts.append("name")
+    if _ROOT_FACT_BREAKFAST_RE.search(utterance):
+        facts.append("breakfast_hours")
+    elif _ROOT_FACT_HOURS_RE.search(utterance):
+        facts.append("hours")
+    elif _HOURS_HINT_RE.search(utterance):
+        return []
+    return facts
+    return facts
+
+
+def speak_root_fact(facts_wanted: list[str], root_facts: dict[str, str]) -> str | None:
+    """Deterministically format a reply for the facts in ``facts_wanted``.
+
+    Args:
+        facts_wanted: Output of ``classify_root_facts`` — non-empty.
+        root_facts: Output of ``knowledge_lookup_tool.root_facts()``.
+
+    Returns:
+        A ready-to-speak sentence, or ``None`` when a requested fact is not
+        present in ``root_facts`` (e.g. the knowledge base lacks that field,
+        or the pin failed) — the caller must fall back to the LLM path rather
+        than speak an incomplete answer.
+    """
+    parts: list[str] = []
+    for fact in facts_wanted:
+        if fact == "name":
+            name = root_facts.get("brand name")
+            if not name:
+                return None
+            parts.append(f"We're called {name}.")
+        elif fact == "hours":
+            hours = root_facts.get("hours")
+            if not hours:
+                return None
+            spoken_hours = hours.replace(chr(0xB7), ",").replace(" ,", ",")
+            parts.append(f"Our hours are {spoken_hours}.")
+        elif fact == "breakfast_hours":
+            hours = root_facts.get("breakfast hours")
+            if not hours:
+                return None
+            parts.append(f"Breakfast is served {hours}.")
+    if not parts:
+        return None
+    return " ".join(parts) + " Would you like to know anything else?"

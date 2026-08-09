@@ -80,6 +80,11 @@ _PIN_MAX_CHARS = int(os.getenv("RAG_PIN_MAX_CHARS", "1300"))
 _ROOT_SECTION_RE = re.compile(r"^\[Context:\s*([^\]]*)\]")
 
 _pinned_context: str | None = None
+_root_facts_cache: dict[str, str] | None = None
+
+# Parses "- **Field Name**: value" bullets out of the pinned root section.
+# Several fields may share one markdown bullet, separated by " | ".
+_ROOT_FIELD_RE = re.compile(r"\*\*([^*]+)\*\*:\s*([^|\n]+)")
 
 
 def reset_pinned_context() -> None:
@@ -91,10 +96,51 @@ def reset_pinned_context() -> None:
     (restaurant name, opening hours) as authoritative — the customer is told
     the old restaurant's details with full confidence.
     """
-    global _pinned_context
+    global _pinned_context, _root_facts_cache
     if _pinned_context:
         logger.info("[TOOL:knowledge_lookup] Knowledge base changed — clearing pinned root section")
     _pinned_context = None
+    _root_facts_cache = None
+
+
+def root_facts(pipeline=None) -> dict[str, str]:
+    """Return venue-level facts parsed out of the pinned root section.
+
+    The root section (see ``_root_section``) is markdown bullets of the form
+    ``- **Field**: value``. Parsing it into a dict lets simple, single-value
+    facts (restaurant name, hours, breakfast hours) be spoken back verbatim
+    without an LLM paraphrasing them — see ``reply_templates.speak_root_fact``
+    for why that matters: a quantised model measurably merges distinct hour
+    ranges and invents details (e.g. a public-holiday closure) that are not in
+    the source text.
+
+    Args:
+        pipeline: The shared ``RagPipeline``, or ``None`` to fetch it lazily
+            (avoids importing ``pipeline`` at module load for tests).
+
+    Returns:
+        A dict keyed by lower-cased, stripped field name (e.g. ``"hours"``,
+        ``"brand name"``, ``"breakfast hours"``). Empty when no root section
+        was found — callers must treat that as "fall back to the LLM path".
+    """
+    global _root_facts_cache
+    if _root_facts_cache is not None:
+        return _root_facts_cache
+
+    if pipeline is None:
+        from pipeline import get_shared_pipeline  # rag-service module
+
+        pipeline = get_shared_pipeline()
+
+    text = _root_section(pipeline)
+    facts: dict[str, str] = {}
+    for match in _ROOT_FIELD_RE.finditer(text):
+        key = match.group(1).strip().lower()
+        value = match.group(2).strip().rstrip(".")
+        if key and value:
+            facts[key] = value
+    _root_facts_cache = facts
+    return facts
 
 
 def _root_section(pipeline) -> str:
@@ -173,6 +219,30 @@ _USE_LIST_PRODUCTS = (
     "from memory."
 )
 
+# Questions fully answered by the pinned root section (see _root_section
+# above): the same ~14 venue-level facts the root chunk covers in one block.
+# Retrieval scores are not a reliable relevance signal at this corpus size —
+# measured live, an unrelated "Breakfast Menu > Veg Breakfast" chunk (Poha,
+# Upma prices) scored -6.84, just inside the -7.0 rerank threshold, and was
+# appended to a "restaurant name and opening hours" question the pinned
+# section already answered in full. Supplementary retrieval adds noise, not
+# coverage, for these questions, so it is skipped outright rather than tuned
+# via a corpus-dependent threshold.
+_ROOT_ONLY_QUERY_RE = re.compile(
+    r"\b(?:restaurant('?s)? name|name of (?:the|this) (?:restaurant|outlet|place)|"
+    r"(?:what|which).{0,20}(?:restaurant|outlet|place).{0,10}(?:called|name)|"
+    r"opening hours?|closing hours?|operating hours?|business hours?|"
+    r"what time (?:do|does) (?:you|it|the restaurant|the outlet).{0,10}(?:open|close)|"
+    r"(?:open|close|working|business) (?:on|hours?)|"
+    r"breakfast (?:hours?|timings?)|kitchen clos\w*|last order\w*|"
+    r"parking|wi-?fi\b|wifi\b|delivery (?:radius|available|options?|area)|"
+    r"take.?away|dine.?in|seating capacity|loyalty program|"
+    r"catering|bulk orders?|outlet code|fssai|gst\b|"
+    r"(?:restaurant|outlet) address|(?:your|the) address|location\b|"
+    r"phone number|contact (?:number|details)|payment methods?)\b",
+    re.IGNORECASE,
+)
+
 
 def _format_sources(records, budget: int = _MAX_CONTEXT_CHARS) -> str:
     """Render retrieval records into a compact, numbered context block."""
@@ -236,7 +306,19 @@ async def knowledge_lookup(question: str) -> str:
 
         pipeline = get_shared_pipeline()
         pinned = _root_section(pipeline)
-        records = pipeline.retrieve(question)
+
+        root_only = bool(pinned) and bool(_ROOT_ONLY_QUERY_RE.search(question))
+        if root_only:
+            # The pinned block already answers this question in full — skip
+            # retrieval entirely rather than risk a marginal-score, off-topic
+            # chunk (e.g. a menu item) being appended as if it were relevant.
+            records = []
+            logger.info(
+                "[TOOL:knowledge_lookup] Root-covered question — skipping "
+                "supplementary retrieval: %r", question[:120],
+            )
+        else:
+            records = pipeline.retrieve(question)
 
         # The root section is frequently also returned by retrieval. Paying
         # for it twice would evict the question-specific chunk that retrieval
