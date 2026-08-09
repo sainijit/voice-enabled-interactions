@@ -115,7 +115,7 @@ model:
   # collector `/metrics` (gpu_utilization) after this change; if OVMS latency
   # regresses, either move queue-service back to NPU or raise
   # `inference_interval` below to shed GPU cycles.
-  device: "GPU"
+  device: "NPU"
   # Keep decoded frames in GPU (VA) memory through gvadetect/gvatrack/
   # gvawatermark instead of downloading them to system RAM for the CPU to
   # colour-convert. decodebin already autoplugs vah264dec, which produces VA
@@ -133,7 +133,11 @@ model:
   #   auto  -> enable when a /dev/dri render node exists and device != CPU
   #   true  -> force on (still refuses if no render node, to avoid a crash loop)
   #   false -> keep the original system-memory path
-  va_memory: "auto"
+  # NOTE: va_memory disabled for NPU — NPU does not participate in the VA
+  # (GPU) zero-copy memory path. Enabling it would still download frames to
+  # system memory before NPU inference (DLStreamer logs the warning above),
+  # so there is no benefit and it increases CPU copy cost.
+  va_memory: "false"
   # YOLO26 separates people from clutter by a wide confidence margin, so this
   # is now a real filter rather than the "pass everything down" setting that
   # retail-0013 required.
