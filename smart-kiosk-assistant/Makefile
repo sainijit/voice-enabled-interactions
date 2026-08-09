@@ -63,7 +63,7 @@ _RTSP_CAMERA_DEVICE    = $(if $(_RTSP_LIVE_ON),$(_CAMERA_DEVICE_RAW),/dev/null)
 COMPOSE_BASE           = RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) docker compose -f $(COMPOSE_FILE)
 
 # Services with fully local build contexts
-LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui queue-service rtsp-streamer
+LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui rtsp-streamer
 
 # Identity feature (profile-gated). Driven by KIOSK_CORE_IDENTITY_ENABLED in
 # .env by default — set it to true there to build/start the identity-service
@@ -85,7 +85,7 @@ export KIOSK_CORE_IDENTITY_ENABLED = $(if $(_IDENTITY_ON),true,false)
 # audio-analyzer and text-to-speech live in the edge-ai-libraries repository
 # at /home/intel/sainijit/edge-ai-libraries/microservices/. Build contexts are
 # wired in docker-compose.yml so they are always built from source locally.
-EDGE_AI_SERVICES := audio-analyzer text-to-speech
+EDGE_AI_SERVICES := audio-analyzer text-to-speech queue-service
 
 # Colors
 RED    := \033[0;31m
