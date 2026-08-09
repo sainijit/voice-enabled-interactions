@@ -293,13 +293,16 @@ class BaseAudioSession:
                 # contain only silence frames (effectively empty), keeping
                 # critical-path ASR cost near-zero.
                 # Only fire once per silence run; reset when speech resumes.
+                # Minimum 0.5s chunk: Whisper has a fixed per-call overhead
+                # (~1.2s on CPU, ~150ms on GPU) that dominates sub-0.5s inputs
+                # — sending near-empty frames wastes more time than it saves.
                 if (
                     adaptive_pause > 0
                     and not _adaptive_flushed
                     and silence_run_seconds >= adaptive_pause
                     and silence_run_seconds < self.request.silence_timeout_seconds
                     and chunk_frames
-                    and self._chunk_duration_seconds(chunk_frames) > adaptive_pause
+                    and self._chunk_duration_seconds(chunk_frames) >= 0.5
                 ):
                     logger.debug(
                         "[CHUNK] session=%s | adaptive flush at %.2fs pause (%.2fs of audio)",
