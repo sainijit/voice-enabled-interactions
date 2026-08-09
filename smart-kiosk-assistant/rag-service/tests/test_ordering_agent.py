@@ -510,3 +510,37 @@ class TestStripAdminLeak:
         assert gate._is_safe(
             "[Context: QuickBite Express] FSSAI License: 123", ["knowledge_lookup"]
         ) is False
+
+
+class TestIsSingleAddUtterance:
+    """_is_single_add_utterance must be conservative — only True for provably single adds."""
+
+
+    @pytest.mark.parametrize("utt", [
+        "I want a classic chicken burger.",
+        "Add a burger please.",
+        "Order me a coffee.",
+        "I'd like the veg burger.",
+        "Get me one pizza.",
+        "I'll have a coke.",
+        "Can I get the fries?",
+    ])
+    def test_single_add_returns_true(self, utt):
+        from agentic.ordering_agent import _is_single_add_utterance
+        assert _is_single_add_utterance(utt) is True, f"Expected True for: {utt!r}"
+
+    @pytest.mark.parametrize("utt", [
+        "Remove the burger and add a pizza.",
+        "Take off the fries and get me a coke.",
+        "Swap the burger for a pizza.",
+        "Add a burger and a coke.",
+        "I want a burger and also fries.",
+        "Add a pizza plus a coke.",
+        "I don't want the fries, give me a burger.",
+        "Cancel the burger and order a pizza instead.",
+        "Remove chicken and add paneer.",
+        "No more fries, I want a burger.",
+    ])
+    def test_compound_returns_false(self, utt):
+        from agentic.ordering_agent import _is_single_add_utterance
+        assert _is_single_add_utterance(utt) is False, f"Expected False for: {utt!r}"
