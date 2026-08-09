@@ -7,7 +7,8 @@ app:
 models:
   asr:
     provider: openvino # openai | openvino | whispercpp
-    name: whisper-base  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
+    name: whisper-small  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
+                        # whisper-small OpenVINO IR (INT8) converted to models/openvino/whisper-small__ov/
                         # whisper-base OpenVINO IR is pre-converted at models/openvino/whisper-base__ov/
                         # Use whisper-base on GPU (iGPU Arc) — measured RTF on CPU was ~0.61-1.3x (1.2-3.5s/chunk);
                         # OpenVINO GPU target: <300ms for typical 1-2s kiosk commands.
