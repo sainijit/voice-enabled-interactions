@@ -14,6 +14,18 @@ class SessionStartRequest(BaseModel):
         gt=0.2,
         le=10,
     )
+    # Mid-utterance adaptive flush: when silence reaches this threshold *before*
+    # silence_timeout_seconds, flush the accumulated speech to the background ASR
+    # worker immediately. When the customer then stops speaking and
+    # silence_timeout_seconds is reached, the tail chunk is only the audio since
+    # the last adaptive flush (~silence_timeout - adaptive_flush_pause seconds of
+    # silence frames), so critical-path ASR cost is minimised.
+    # Set to 0 to disable (flush only at chunk_seconds or silence_timeout).
+    adaptive_flush_pause_seconds: float = Field(
+        default=config.DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS,
+        ge=0.0,
+        le=5.0,
+    )
     max_session_seconds: float = Field(default=config.DEFAULT_MAX_SESSION_SECONDS, gt=1, le=300)
     silence_threshold: int = Field(default=config.DEFAULT_SILENCE_THRESHOLD, ge=1, le=32767)
     language: str | None = config.DEFAULT_ASR_LANGUAGE

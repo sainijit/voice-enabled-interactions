@@ -234,6 +234,14 @@ class BaseAudioSession:
         final_status = "completed"
         end_reason = self.end_reason or "completed"
 
+        # Adaptive flush threshold: flush accumulated speech to the background
+        # ASR worker as soon as a natural pause appears, so the tail chunk at
+        # true endpoint (silence_timeout_seconds) is as short as possible.
+        # Only fires when the chunk has genuine speech content (avoids flushing
+        # near-empty buffers) and when adaptive_flush_pause_seconds > 0.
+        adaptive_pause = self.request.adaptive_flush_pause_seconds
+        _adaptive_flushed = False  # guard: only one adaptive flush per silence run
+
         try:
             for frame in frame_iterator:
                 if self._stop_event.is_set():
@@ -262,9 +270,11 @@ class BaseAudioSession:
 
                 if is_speech:
                     silence_run_seconds = 0.0
+                    _adaptive_flushed = False  # new speech: allow adaptive flush again
                 else:
                     silence_run_seconds += self._frame_duration_seconds
 
+                # ── Timed chunk flush (max chunk size cap) ──────────────────
                 if self._chunk_duration_seconds(chunk_frames) >= self.request.chunk_seconds:
                     # Enqueue for the background flush worker instead of
                     # transcribing inline — see the _flush_queue docstring in
@@ -272,7 +282,38 @@ class BaseAudioSession:
                     self._flush_queue.put(chunk_frames)
                     chunk_frames = []
                     silence_run_seconds = 0.0
+                    _adaptive_flushed = False
+                    continue
 
+                # ── Adaptive pause flush ────────────────────────────────────
+                # When the speaker pauses for adaptive_flush_pause_seconds
+                # (default 300ms) — but hasn't reached the endpoint yet —
+                # flush the current speech to the background worker now so ASR
+                # starts immediately. The tail chunk at endpoint will then
+                # contain only silence frames (effectively empty), keeping
+                # critical-path ASR cost near-zero.
+                # Only fire once per silence run; reset when speech resumes.
+                if (
+                    adaptive_pause > 0
+                    and not _adaptive_flushed
+                    and silence_run_seconds >= adaptive_pause
+                    and silence_run_seconds < self.request.silence_timeout_seconds
+                    and chunk_frames
+                    and self._chunk_duration_seconds(chunk_frames) > adaptive_pause
+                ):
+                    logger.debug(
+                        "[CHUNK] session=%s | adaptive flush at %.2fs pause (%.2fs of audio)",
+                        self.session_id,
+                        silence_run_seconds,
+                        self._chunk_duration_seconds(chunk_frames),
+                    )
+                    self._flush_queue.put(chunk_frames)
+                    chunk_frames = []
+                    _adaptive_flushed = True
+                    # Do NOT reset silence_run_seconds — we're still in silence,
+                    # the endpoint counter keeps running toward silence_timeout_seconds.
+
+                # ── Endpoint (trailing silence) ─────────────────────────────
                 if silence_run_seconds >= self.request.silence_timeout_seconds:
                     end_reason = "silence_timeout"
                     break

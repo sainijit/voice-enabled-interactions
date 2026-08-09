@@ -72,8 +72,14 @@ METRICS_COLLECTOR_URL = os.getenv(
     "KIOSK_CORE_METRICS_URL",
     "http://metrics-collector:9000",
 )
-DEFAULT_CHUNK_SECONDS = float(os.getenv("KIOSK_CORE_CHUNK_SECONDS", "5.0"))
-DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SECONDS", "1.5"))
+DEFAULT_CHUNK_SECONDS = float(os.getenv("KIOSK_CORE_CHUNK_SECONDS", "2.5"))
+DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SECONDS", "0.65"))
+# Adaptive mid-utterance flush: when silence reaches this threshold but hasn't
+# yet hit silence_timeout_seconds, flush the accumulated chunk to the background
+# ASR worker so processing starts immediately. The tail chunk at true endpoint
+# will then be short (only the frames since the last adaptive flush), cutting
+# critical-path ASR from up to chunk_seconds down to ~0.3-0.5s of audio.
+DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.30"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))
 DEFAULT_BLOCK_DURATION_SECONDS = float(os.getenv("KIOSK_CORE_BLOCK_DURATION_SECONDS", "0.1"))

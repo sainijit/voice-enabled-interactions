@@ -43,7 +43,8 @@ export const endpoints = {
 
 // Tuning constants (mirror kiosk_core config defaults).
 export const tuning = {
-  chunkSeconds: 5.0,
+  chunkSeconds: 2.5,         // max chunk size; adaptive flush fires earlier at ~300ms pause
+  silenceTimeoutSeconds: 0.65, // trailing silence before endpoint (was 2.5s)
   sampleRate: 16000,
   pollIntervalMs: 350,
   perfRefreshMs: 10000,
