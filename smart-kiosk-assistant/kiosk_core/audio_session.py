@@ -131,6 +131,32 @@ class BaseAudioSession:
         self._stop_event = threading.Event()
         self._audio_queue: Queue[np.ndarray] = Queue()
         self._thread = threading.Thread(target=self._run, name=f"mic-session-{self.session_id}", daemon=True)
+        # ── ASR chunk-flush worker ──────────────────────────────────────────
+        # Chunk transcription is a blocking HTTP round-trip to audio-analyzer
+        # (whisper-small on CPU: ~1.5-4.7s depending on chunk duration). It
+        # used to run inline in the frame-reading loop (_process_frame_stream),
+        # which meant a mid-utterance chunk flush blocked silence-timeout
+        # detection and frame ingestion for its entire duration — that
+        # latency then serialised on top of the final tail-chunk flush,
+        # roughly doubling the delay the customer felt after they stopped
+        # talking (observed live: ~5-6s total instead of ~1-1.5s for
+        # utterances long enough to trigger a mid-stream flush).
+        #
+        # A single dedicated worker thread now owns every _flush_chunk() call
+        # instead. The main frame-reading loop just enqueues each chunk's
+        # frames and keeps consuming new audio / evaluating silence in real
+        # time; the worker drains the queue FIFO (one HTTP call at a time,
+        # matching audio-analyzer's own one-request-at-a-time model cache),
+        # which preserves both transcript_parts ordering and the analyzer's
+        # cumulative-segment cursor (_last_analyzer_segment_end) exactly as
+        # before. Only the *final* chunk's flush latency remains in the
+        # customer-perceived critical path — _finalize_run explicitly waits
+        # for the queue to drain (see the join() in _process_frame_stream)
+        # before reading the completed transcript.
+        self._flush_queue: Queue[list[np.ndarray] | None] = Queue()
+        self._flush_thread = threading.Thread(
+            target=self._flush_worker, name=f"asr-flush-{self.session_id}", daemon=True,
+        )
         self._speech_started = False
         self._captured_samples = 0
         self._source_kind = "audio"
@@ -162,6 +188,7 @@ class BaseAudioSession:
                 raise ValueError("Session already started")
             self.status = "running"
             self.started_at = datetime.now(UTC)
+        self._flush_thread.start()
         self._thread.start()
 
     def stop(self, reason: str = "stopped_by_api") -> None:
@@ -239,7 +266,10 @@ class BaseAudioSession:
                     silence_run_seconds += self._frame_duration_seconds
 
                 if self._chunk_duration_seconds(chunk_frames) >= self.request.chunk_seconds:
-                    self._flush_chunk(chunk_frames)
+                    # Enqueue for the background flush worker instead of
+                    # transcribing inline — see the _flush_queue docstring in
+                    # __init__ for why this must not block this loop.
+                    self._flush_queue.put(chunk_frames)
                     chunk_frames = []
                     silence_run_seconds = 0.0
 
@@ -258,20 +288,55 @@ class BaseAudioSession:
                 self.error = str(exc)
             logger.exception("Audio session %s failed", self.session_id)
 
-        # Final flush is intentionally outside the main try/except so that a
-        # transient ASR error at the very end doesn't flip final_status to
-        # "failed" and cause _finalize_run to skip RAG for an otherwise good
-        # transcript.  Errors here are logged but treated as non-fatal.
+        # The final chunk is enqueued the same way as every mid-stream chunk —
+        # the worker's own exception handling (see _flush_worker) already
+        # treats any single chunk's ASR failure as non-fatal, so there is
+        # nothing left for this call site to catch.
         if chunk_frames and self._speech_started:
-            try:
-                self._flush_chunk(chunk_frames)
-            except Exception as exc:
-                logger.warning(
-                    "Audio session %s: final flush failed (non-fatal): %s",
-                    self.session_id, exc,
-                )
+            self._flush_queue.put(chunk_frames)
+
+        # Signal the worker to stop after draining everything queued so far,
+        # then block until it has actually finished — _finalize_run (called
+        # right after this returns) needs the complete transcript, and the
+        # worker is what now owns every transcript_parts append. This is the
+        # only wait left in the critical path: just the last chunk's ASR
+        # latency, no longer serialised behind an earlier chunk's.
+        self._flush_queue.put(None)
+        self._flush_queue.join()
 
         return final_status, end_reason
+
+    def _flush_worker(self) -> None:
+        """Background worker that transcribes queued chunks one at a time.
+
+        Runs on its own thread so the frame-reading loop in
+        ``_process_frame_stream`` is never blocked waiting on an
+        audio-analyzer round-trip. A single worker draining a FIFO queue
+        guarantees chunks are still flushed in capture order, which
+        ``_flush_chunk`` depends on for both ``transcript_parts`` ordering and
+        the analyzer's cumulative-segment cursor (``_last_analyzer_segment_end``).
+
+        A ``None`` item is the stop sentinel (queued once, after the last real
+        chunk, by ``_process_frame_stream``). Any exception from an individual
+        chunk's ``_flush_chunk`` call is caught and logged here rather than
+        propagated, so one bad chunk can never lose the rest of an otherwise
+        good utterance — the same reasoning the previous synchronous code
+        already applied to the final chunk only; this now applies uniformly
+        to every chunk.
+        """
+        while True:
+            item = self._flush_queue.get()
+            try:
+                if item is None:
+                    break
+                try:
+                    self._flush_chunk(item)
+                except Exception:
+                    logger.exception(
+                        "Audio session %s: chunk flush failed (non-fatal)", self.session_id,
+                    )
+            finally:
+                self._flush_queue.task_done()
 
     def _finalize_run(self, final_status: str, end_reason: str) -> None:
         # Attempt RAG whenever there is a transcript, even if the session
@@ -286,11 +351,19 @@ class BaseAudioSession:
                 with self._lock:
                     self.error = str(exc)
                 logger.exception("RAG query failed for session %s", self.session_id)
-        elif final_status == "completed":
+        elif final_status == "completed" and end_reason != "stopped_by_api":
             # An empty transcript has two very different causes. If speech was
             # captured but the speaker filter rejected every segment, telling
             # the customer "How can I help you?" hides the fact that they were
             # ignored and gives them no reason to retry.
+            #
+            # A THIRD case is excluded above: the customer explicitly stopped
+            # the conversation (end_reason == "stopped_by_api") before
+            # speaking again. Speaking either prompt here would be actively
+            # wrong — the UI/TTS would greet or ask the customer to repeat
+            # *after* they already asked to end the session, which looks like
+            # the stop button didn't work. An explicit stop with no new
+            # transcript should end silently.
             if self._rejected_speech_chunks:
                 logger.info(
                     "Session %s: %d chunk(s) of speech were rejected by the speaker "

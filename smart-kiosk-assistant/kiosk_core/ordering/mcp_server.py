@@ -553,6 +553,36 @@ async def get_order(order_id: int) -> dict[str, Any] | None:
 
 
 @mcp.tool()
+async def get_current_order(user_id: str = "anonymous") -> dict[str, Any] | None:
+    """Get the customer's current open (draft) order without needing its id.
+
+    Use this for ANY "what's in my cart / what's my total / what did I order"
+    style question, and for "show my order". Never call ``get_order`` with a
+    guessed or remembered order_id for these questions — if the id is wrong
+    (including any placeholder like ``12345``) the lookup silently returns
+    nothing and forces you to falsely tell the customer their cart is empty.
+    This tool resolves the order the same way ``remove_from_order`` and
+    ``confirm_active_order`` already do, so it always finds the real cart.
+
+    Args:
+        user_id: The customer whose cart to look up. Defaults to "anonymous".
+
+    Returns:
+        The current draft order with items/total/status, or null if the
+        customer genuinely has no open order yet.
+    """
+    order = await _svc().get_current_order(user_id)
+    if order is None:
+        logger.info("[MCP-SERVER] get_current_order user=%s has no draft order", user_id)
+        return None
+    logger.info(
+        "[MCP-SERVER] get_current_order user=%s order_id=%d status=%s total=%.2f",
+        user_id, order.order_id, order.status, order.total,
+    )
+    return order.model_dump(mode="json")
+
+
+@mcp.tool()
 async def confirm_active_order(user_id: str = "anonymous") -> dict[str, Any]:
     """Confirm the customer's current draft order without needing its id.
 
