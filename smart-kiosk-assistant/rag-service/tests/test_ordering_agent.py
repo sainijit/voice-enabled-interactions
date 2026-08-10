@@ -165,21 +165,45 @@ class TestStripKnowledgeMarkers:
     def test_parroted_block_is_unwrapped_keeping_content(self):
         reply = ("[knowledge] The restaurant's name is QuickBite Express. "
                  "The operating hours are Mon-Thu 8 AM-11 PM. [/knowledge]")
-        out = ordering_agent._strip_knowledge_markers(reply)
+        out, forged = ordering_agent._strip_knowledge_markers(reply, pregrounded=True)
         assert "[knowledge]" not in out
         assert "[/knowledge]" not in out
         assert "QuickBite Express" in out
+        assert forged is False
 
     def test_case_insensitive(self):
-        assert "[" not in ordering_agent._strip_knowledge_markers("[KNOWLEDGE] Hi [/Knowledge]")
+        out, _ = ordering_agent._strip_knowledge_markers(
+            "[KNOWLEDGE] Hi [/Knowledge]", pregrounded=True)
+        assert "[" not in out
 
     def test_clean_reply_untouched(self):
         reply = "We open at 8 AM."
-        assert ordering_agent._strip_knowledge_markers(reply) == reply
+        assert ordering_agent._strip_knowledge_markers(
+            reply, pregrounded=True) == (reply, False)
+
+    def test_clean_reply_untouched_without_pregrounding(self):
+        # No markers means nothing was claimed, so an ordinary reply on an
+        # ungrounded turn is not itself a forgery.
+        reply = "Would you like anything else?"
+        assert ordering_agent._strip_knowledge_markers(
+            reply, pregrounded=False) == (reply, False)
 
     def test_marker_only_reply_falls_back_to_original(self):
         # Nothing speakable would remain; never return empty.
-        assert ordering_agent._strip_knowledge_markers("[knowledge][/knowledge]").strip() != ""
+        out, _ = ordering_agent._strip_knowledge_markers(
+            "[knowledge][/knowledge]", pregrounded=True)
+        assert out.strip() != ""
+
+    def test_forged_block_without_pregrounding_is_reported(self):
+        # Live regression: on a turn with no retrieval and no tool call the
+        # model wrapped its own parametric memory in [knowledge] markers, and
+        # the unconditional unwrap laundered it into a grounded-looking answer.
+        # A marker is not grounding.
+        reply = ("[knowledge] The President of India is Droupadi Murmu. "
+                 "She took office on 17 July 2022. [/knowledge]")
+        out, forged = ordering_agent._strip_knowledge_markers(reply, pregrounded=False)
+        assert forged is True
+        assert "[knowledge]" not in out
 
     def test_gate_withholds_sentence_containing_marker(self):
         gate = ordering_agent._SentenceGate(message="hi", emit=None)
@@ -189,21 +213,96 @@ class TestStripKnowledgeMarkers:
         # Generation hit its token cap mid-delimiter, leaving a dangling
         # "[/knowledge" (no closing bracket) at the end of the reply.
         reply = ("QuickBite Express is open Mon-Thu 8 AM-11 PM. [/knowledge")
-        out = ordering_agent._strip_knowledge_markers(reply)
+        out, _ = ordering_agent._strip_knowledge_markers(reply, pregrounded=True)
         assert "[/knowledge" not in out
         assert "[" not in out
         assert out.startswith("QuickBite Express")
 
     def test_truncated_opening_tag_is_trimmed(self):
         reply = "We are open 8 AM-11 PM. [knowledge"
-        out = ordering_agent._strip_knowledge_markers(reply)
+        out, _ = ordering_agent._strip_knowledge_markers(reply, pregrounded=True)
         assert "[knowledge" not in out
 
     def test_truncated_tag_mid_reply_not_stripped(self):
         # Only trim a truncated tag at the tail; a literal "[" earlier in
         # the reply is not this failure mode and must be left alone.
         reply = "Our hours [see menu for details] are 8 AM-11 PM."
-        assert ordering_agent._strip_knowledge_markers(reply) == reply
+        assert ordering_agent._strip_knowledge_markers(
+            reply, pregrounded=True) == (reply, False)
+
+
+class TestIsOutOfScope:
+    """The kiosk may not answer questions outside its remit from memory.
+
+    Every other recovery guard is intent-keyed, so a question matching no
+    intent regex reached the customer with no grounding check at all. These
+    cases are the live regressions that exposed the gap, plus the in-domain
+    turns that must keep working exactly as before.
+    """
+
+    @pytest.mark.parametrize("message", [
+        "Can you tell me who is the president of India?",
+        "Can you tell me the size of football player? the ground.",
+        "What is the capital of France?",
+        "Who won the world cup?",
+    ])
+    def test_world_knowledge_questions_are_out_of_scope(self, message):
+        assert ordering_agent._is_out_of_scope(message) is True
+
+    @pytest.mark.parametrize("message", [
+        "What are the burger options?",
+        "Can you suggest something to drink?",
+        "What did I order?",
+        "How much is the classic chicken burger?",
+        "What are your opening hours?",
+        "Can you remove the pizza from my order?",
+        "Do you have parking?",
+        "What is on the menu?",
+        "Tell me something about the restaurant.",
+    ])
+    def test_kiosk_questions_are_in_scope(self, message):
+        assert ordering_agent._is_out_of_scope(message) is False
+
+    @pytest.mark.parametrize("message", [
+        "hi",
+        "Hello there",
+        "how are you?",
+        "thanks",
+        "yes",
+        "ok",
+        "bye",
+    ])
+    def test_smalltalk_is_not_refused(self, message):
+        assert ordering_agent._is_out_of_scope(message) is False
+
+    @pytest.mark.parametrize("message", [
+        "my name is Ravi",
+        "I am really hungry today",
+        "",
+    ])
+    def test_statements_are_never_out_of_scope(self, message):
+        # A statement wants a conversational reply, not a scope refusal.
+        assert ordering_agent._is_out_of_scope(message) is False
+
+    @pytest.mark.parametrize("message", [
+        "what else?",
+        "which one?",
+        "and then?",
+        "how many?",
+    ])
+    def test_short_followups_are_not_refused(self, message):
+        # These inherit their subject from the previous turn. Refusing them
+        # would break ordinary conversation, and they are far shorter than any
+        # world-knowledge question, which always names its subject.
+        assert ordering_agent._is_out_of_scope(message) is False
+
+    def test_gate_withholds_everything_until_a_tool_runs(self):
+        # The grounding guard only fires when `not tool_calls`, so gate
+        # condition (a) is its complete mirror: no sentence from a tool-less
+        # turn may be spoken before the guard can replace the reply.
+        gate = ordering_agent._SentenceGate(
+            message="Can you tell me who is the president of India?", emit=None)
+        assert gate._is_safe("The President of India is Droupadi Murmu.", []) is False
 
 
 class TestStripCitationMarkers:

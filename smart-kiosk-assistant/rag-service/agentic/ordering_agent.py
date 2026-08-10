@@ -318,6 +318,103 @@ _ORDER_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ---------------------------------------------------------------------------
+# Scope guard
+# ---------------------------------------------------------------------------
+# Every recovery guard above is *intent-keyed*: the missing-tool retry,
+# _force_knowledge and _force_catalogue only fire when the message matches one
+# of the intent regexes. A question matching none of them therefore reaches the
+# customer with no grounding check whatsoever, straight from the model's
+# parametric memory. Observed live on a kiosk turn with tool_calls=[] and no
+# pre-grounding: "who is the president of India?" was answered in full
+# ("Droupadi Murmu... took office on 17 July 2022"), as was "what is the size
+# of a football player?". Both are confident and entirely unverifiable. A kiosk
+# that will state arbitrary world facts cannot be trusted on the facts that
+# matter — prices, allergens, what is in the cart.
+#
+# The test is deliberately *positive*: a turn stays on the existing path when
+# the customer's words touch the kiosk's world at all. Only a question with no
+# such connection is routed through a real knowledge lookup and refused when
+# the knowledge base cannot support it. Parametric memory is never spoken.
+_QUESTION_RE = re.compile(
+    r"\?|\b(?:who|what|when|where|why|which|whose|whom)\b|"
+    r"^\s*(?:can|could|do|does|did|is|are|was|were|will|would|should|tell)\b",
+    re.IGNORECASE,
+)
+
+# Vocabulary marking a turn as belonging to the kiosk's world. Kept broad on
+# purpose: classifying a turn in-domain merely leaves it on today's path, while
+# classifying it out-of-domain refuses it. The asymmetry is resolved in the
+# customer's favour, so this list errs towards inclusion.
+_IN_DOMAIN_RE = re.compile(
+    r"\b(?:order|orders|cart|bill|total|checkout|pay|payment|price|cost|"
+    r"menu|item|items|food|eat|drink|drinks|meal|combo|snack|"
+    r"restaurant|outlet|kiosk|store|shop|kitchen|staff|table|seat|seating|"
+    r"add|added|remove|cancel|confirm|serve|serves|recommend|suggest|"
+    r"veg|vegan|vegetarian|halal|allergen|gluten|spicy|calorie|calories|"
+    r"burger|burgers|pizza|pizzas|wrap|wraps|fries|dessert|desserts|"
+    r"beverage|beverages|coffee|lassi|soda|pepsi|roll|rolls|"
+    r"open|opening|close|closing|hours?|timing|address|location|parking|"
+    r"wifi|delivery|takeaway|offer|offers|discount|"
+    r"washroom|restroom|toilet|water|napkin|straw|takeout|parcel)\b",
+    re.IGNORECASE,
+)
+
+# A contextual follow-up ("what else?", "which one?") carries no domain
+# vocabulary of its own — it inherits it from the previous turn. Refusing those
+# would break ordinary conversation, and they are far too short to be the
+# world-knowledge questions this guard exists to catch, which always name their
+# subject ("who is the president of India"). Four words is comfortably below
+# the shortest such question and comfortably above the longest follow-up.
+_MIN_OUT_OF_SCOPE_WORDS = 4
+
+# Short social turns are not questions to be grounded — refusing "how are you?"
+# with a scope message would be brusque and pointless. The bounded tail keeps
+# this to genuinely short utterances so it cannot swallow a real question that
+# merely opens with "ok" or "sorry".
+_SMALLTALK_RE = re.compile(
+    r"^\s*(?:hi|hey|hello|good (?:morning|afternoon|evening)|"
+    r"how (?:are|r) (?:you|u)|how(?:'s| is) it going|what(?:'s| is) up|"
+    r"thanks|thank you|thankyou|cheers|bye|goodbye|see you|"
+    r"ok|okay|yes|no|yeah|yep|nope|sure|please|sorry)\b.{0,24}$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_OUT_OF_SCOPE_FALLBACK = (
+    "I'm the ordering assistant for this restaurant, so I can only help with "
+    "our menu and your order. Would you like to hear what we serve?"
+)
+
+
+def _is_out_of_scope(message: str) -> bool:
+    """Report whether a customer turn falls outside the kiosk's remit.
+
+    A turn is out of scope when it *asks* something but contains no vocabulary
+    connecting it to the restaurant, its menu, or an order. Statements are
+    never out of scope: "my name is Ravi" wants a conversational reply, not a
+    refusal.
+
+    Args:
+        message: The customer's utterance.
+
+    Returns:
+        ``True`` when the turn must be grounded or refused rather than answered
+        from the model's own memory.
+    """
+    if not message or _SMALLTALK_RE.match(message):
+        return False
+    if len(re.findall(r"[A-Za-z']+", message)) < _MIN_OUT_OF_SCOPE_WORDS:
+        return False
+    if (
+        _IN_DOMAIN_RE.search(message)
+        or _KNOWLEDGE_QUERY_RE.search(message)
+        or _CATALOGUE_QUERY_RE.search(message)
+        or _ORDER_ACTION_RE.search(message)
+    ):
+        return False
+    return bool(_QUESTION_RE.search(message))
+
+
 _ORDER_CLAIM_RE = re.compile(
     r"(?:order (?:is |has been )?(?:confirmed|placed)|"
     r"confirmed your order|order id|order number|order #)",
@@ -473,9 +570,13 @@ _CATEGORY_KEYWORDS = (
     "burger", "pizza", "wrap", "side", "beverage", "drink", "dessert", "fries",
 )
 
+# Deliberately excludes ambiguous phrases like "that's it" / "that's all" /
+# "I'm done" — those are commonly used to decline an upsell, not to confirm
+# an order.  Only phrases that unambiguously express a desire to place/confirm
+# the order are kept here, to prevent _force_confirm() from firing when the
+# customer is merely wrapping up a browse turn.
 _CONFIRM_INTENT_RE = re.compile(
-    r"\b(?:confirm|confirmed|checkout|check out|finali[sz]e|place (?:the |my )?order|"
-    r"that(?:'s| is) all|that(?:'s| is) it|i(?:'m| am) done)\b",
+    r"\b(?:confirm|confirmed|checkout|check out|finali[sz]e|place (?:the |my )?order)\b",
     re.IGNORECASE,
 )
 
@@ -775,7 +876,7 @@ def _strip_leaked_directives(reply: str) -> str:
     return cleaned if cleaned else reply
 
 
-def _strip_knowledge_markers(reply: str) -> str:
+def _strip_knowledge_markers(reply: str, *, pregrounded: bool) -> tuple[str, bool]:
     """Unwrap a `[knowledge]` block the model echoed instead of answering from.
 
     Pre-grounding prefixes the user turn with a ``[knowledge] ... [/knowledge]``
@@ -783,33 +884,52 @@ def _strip_knowledge_markers(reply: str) -> str:
     quantised model sometimes parrots it back verbatim, sending the literal
     delimiters to TTS.
 
-    The markers are removed while the inner text is kept: that text was
-    retrieved from the authoritative knowledge base, so speaking it is truthful
-    and strictly better than substituting a fallback or falling silent.
+    When the turn really was pre-grounded the markers are removed and the inner
+    text kept: that text came from the authoritative knowledge base, so speaking
+    it is truthful and strictly better than substituting a fallback.
+
+    **That premise only holds when a block was actually injected.** This
+    function previously unwrapped unconditionally, which let the model forge its
+    own grounding certificate: on a turn with no retrieval at all it emitted
+    ``[knowledge] The President of India is Droupadi Murmu...`` and the unwrap
+    laundered pure parametric memory into a clean, confident, grounded-looking
+    answer. This is the same failure class the menu and confirm guards exist to
+    prevent — there, *invocation is not success*; here, **a marker is not
+    grounding**. So the caller is told, and replaces the reply.
 
     Args:
         reply: Model output.
+        pregrounded: Whether a real ``[knowledge]`` block was injected into this
+            turn's prompt.
 
     Returns:
-        The reply with any knowledge-block delimiters removed.
+        ``(cleaned_reply, forged)``. ``forged`` is ``True`` when markers were
+        present on a turn that was never pre-grounded, meaning the cleaned text
+        is ungrounded and must not be spoken as-is.
     """
     if not reply:
-        return reply
+        return reply, False
     lowered = reply.lower()
     has_full_marker = "[knowledge]" in lowered or "[/knowledge]" in lowered
     has_truncated_tail = bool(_TRUNCATED_KNOWLEDGE_TAIL_RE.search(reply))
     if not has_full_marker and not has_truncated_tail:
-        return reply
+        return reply, False
     cleaned = _KNOWLEDGE_MARKER_RE.sub(" ", reply)
     cleaned = _TRUNCATED_KNOWLEDGE_TAIL_RE.sub("", cleaned)
     cleaned = _WS_RE.sub(" ", cleaned).strip()
+    if not pregrounded:
+        logger.error(
+            "[AGENT] Model forged a [knowledge] block on a turn with no "
+            "pre-grounding — content is ungrounded | raw=%r", reply[:160],
+        )
+        return (cleaned or reply), True
     if cleaned:
         logger.warning(
             "[AGENT] Model echoed the pre-grounded knowledge block — "
             "unwrapping markers | raw=%r", reply[:160],
         )
-        return cleaned
-    return reply
+        return cleaned, False
+    return reply, False
 
 
 def _dedupe_repeated_sentences(reply: str) -> str:
@@ -965,6 +1085,10 @@ class _SentenceGate:
         """Return True when no post-hoc guard in chat() can rewrite ``sentence``."""
         # (a) Every recovery path in chat() is gated on `not tool_calls`.
         #     Until a tool has run, any of them may still replace the reply.
+        #     This is also the mirror for the grounding guard (forged
+        #     [knowledge] markers / out-of-scope questions): it likewise only
+        #     fires when `not tool_calls`, so a sentence it would replace can
+        #     never have been released early.
         if not tool_calls:
             return False
         # (b) _force_confirm() replaces the reply on confirm-intent turns.
@@ -2153,7 +2277,7 @@ class OrderingAgent:
         reply = _strip_thinking(reply)
         reply = _strip_tool_syntax(reply)
         reply = _strip_markdown(reply)
-        reply = _strip_knowledge_markers(reply)
+        reply, forged_knowledge = _strip_knowledge_markers(reply, pregrounded=pregrounded)
         reply = _strip_citation_markers(reply)
         reply = _strip_context_breadcrumb(reply)
         reply = _dedupe_repeated_sentences(reply)
@@ -2165,6 +2289,50 @@ class OrderingAgent:
                 "fallback | session=%s raw=%r", session_id, reply[:160],
             )
             reply = _TOOL_SYNTAX_FALLBACK
+
+        # Grounding guard: nothing may be spoken from the model's own memory.
+        # A reply arrives here ungrounded in one of two ways:
+        #   * the model wrapped its answer in [knowledge] markers on a turn
+        #     where no block was ever injected — a forged grounding
+        #     certificate (see _strip_knowledge_markers), or
+        #   * the customer asked something outside the kiosk's remit, which
+        #     matches none of the intent regexes and therefore triggers none of
+        #     the intent-keyed recovery guards above (see _is_out_of_scope).
+        # Both are resolved identically: attempt a real knowledge lookup, and
+        # refuse honestly when the knowledge base cannot support an answer.
+        # Requiring `not tool_calls` keeps this off every grounded turn, and is
+        # also what makes _SentenceGate condition (a) a complete mirror of this
+        # guard — a tool-less turn releases no sentence early.
+        if not tool_calls and not pregrounded and (
+            forged_knowledge or _is_out_of_scope(message)
+        ):
+            logger.error(
+                "[AGENT] Ungrounded reply — no tool call and no pre-grounding | "
+                "session=%s forged_knowledge=%s message=%r reply=%r",
+                session_id, forged_knowledge, message[:80], reply[:160],
+            )
+            # An out-of-scope question is refused outright rather than sent to
+            # _force_knowledge. That path delegates to the RAG pipeline, which
+            # answers with its own LLM and is equally free to speak from
+            # parametric memory: asked "who is the president of India?" it
+            # replied "Droupadi Murmu, took office 7 July 2022" with an empty
+            # knowledge base behind it. Routing an out-of-domain question there
+            # relocates the hallucination instead of removing it.
+            #
+            # A forged [knowledge] block is different: the turn is usually
+            # in-domain and the knowledge base plausibly covers it, so a real
+            # lookup is worth attempting before refusing.
+            grounded = ""
+            if forged_knowledge and not _is_out_of_scope(message):
+                grounded = await self._force_knowledge(message, session_id)
+            if grounded:
+                reply, tool_calls = grounded, ["knowledge_lookup"]
+            else:
+                logger.error(
+                    "[AGENT] Nothing grounds this turn — refusing out of scope "
+                    "| session=%s", session_id,
+                )
+                reply = _OUT_OF_SCOPE_FALLBACK
 
         # A draft cart is not a confirmed order. Strip any claim to the contrary
         # that no confirm tool backs — see _strip_false_confirmation.

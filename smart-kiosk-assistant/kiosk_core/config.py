@@ -29,13 +29,62 @@ DEFAULT_ASR_LANGUAGE = os.getenv("KIOSK_CORE_ASR_LANGUAGE", "en") or None
 # "classic senses price", "Do you serve burgers" over "Are you sir burgers?").
 # The prompt is NOT instruction text — Whisper treats it as prior transcript
 # context, so it should read like natural speech, not a list.
-DEFAULT_ASR_PROMPT = os.getenv(
-    "KIOSK_CORE_ASR_PROMPT",
+#
+# Built from the live product catalogue rather than hardcoded: a hand-written
+# list silently drifts from the menu. It previously omitted every
+# Indian-origin item, which are exactly the names an English-forced Whisper
+# mishears — "Aloo Tikki Burger" was transcribed as "and 2,000" and the item
+# never reached the agent.
+#
+# Whisper's prompt window is 224 tokens; the catalogue is well inside that.
+# Falls back to a static list when the YAML is unreadable (e.g. CI) so ASR is
+# never broken by a missing seed file.
+_ASR_PROMPT_FALLBACK = (
     "QuickBite Express restaurant. Classic Chicken Burger, Classic French Fries,"
     " Margherita Pizza, Mango Lassi, Cold Coffee, Fresh Lime Soda, Pepsi, 7UP."
     " Peri Peri Fries, Chocolate Lava Cake."
-    " Menu, order, remove, add, confirm, cancel.",
+    " Menu, order, remove, add, confirm, cancel."
 )
+
+
+def _build_asr_prompt() -> str:
+    """Compose the Whisper priming prompt from the product catalogue.
+
+    Returns:
+        Natural-language prompt naming every menu item, or a static fallback
+        when the catalogue cannot be read.
+    """
+    try:
+        import yaml  # local import: keeps config importable without PyYAML
+
+        path = os.getenv(
+            "KIOSK_CORE_PRODUCTS_YAML", "./configs/ordering/products.yaml"
+        )
+        with open(path, "r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        raw = data.get("products") if isinstance(data, dict) else data
+        names: list[str] = []
+        for product in raw or []:
+            name = str(product.get("name", "")).strip()
+            if not name:
+                continue
+            # Drop size/qty parentheticals ("(330 ml)", "(Regular)") — they are
+            # packaging metadata, not words the customer says.
+            name = name.split("(")[0].strip()
+            if name and name not in names:
+                names.append(name)
+        if not names:
+            return _ASR_PROMPT_FALLBACK
+        return (
+            "QuickBite Express restaurant. "
+            + ", ".join(names)
+            + ". Menu, order, remove, add, confirm, cancel."
+        )
+    except Exception:
+        return _ASR_PROMPT_FALLBACK
+
+
+DEFAULT_ASR_PROMPT = os.getenv("KIOSK_CORE_ASR_PROMPT") or _build_asr_prompt()
 DEFAULT_TTS_INSTRUCTIONS = os.getenv("KIOSK_CORE_TTS_INSTRUCTIONS")
 DEFAULT_SAMPLE_RATE = int(os.getenv("KIOSK_CORE_SAMPLE_RATE", "16000"))
 
@@ -85,8 +134,46 @@ METRICS_COLLECTOR_URL = os.getenv(
     "KIOSK_CORE_METRICS_URL",
     "http://metrics-collector:9000",
 )
-DEFAULT_CHUNK_SECONDS = float(os.getenv("KIOSK_CORE_CHUNK_SECONDS", "2.5"))
-DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SECONDS", "1.2"))
+# Hard cap on how much audio accumulates before a chunk is force-flushed.
+#
+# Raised 2.5 → 6.0s. At 2.5s this cap fired mid-utterance on almost every turn,
+# because a typical kiosk request ("Can you suggest something to drink") is
+# 2.5-4s of *continuous* speech with no pause long enough to trigger the
+# adaptive flush. Two distinct defects followed from that:
+#
+#   1. ASR quality — the cut landed mid-word, so Whisper saw fragments.
+#      Observed verbatim in production logs: "something" was split into
+#      "Can you suggest some" + "thing to drink." This is the same failure the
+#      adaptive_flush_pause 0.30 → 0.70 change fixed, arriving via a different
+#      path.
+#   2. Speaker identity — the severed tail is a 0.5-1.5s fragment. Speaker
+#      embeddings computed over such a short span are unreliable, so the
+#      analyzer clustered the tail as a *different* speaker and the
+#      diarization filter discarded the customer's own words.
+#
+# 6.0s lets a normal single utterance complete inside one chunk. The adaptive
+# pause flush (0.70s) still cuts at natural boundaries, so latency for ordinary
+# speech is unchanged — this cap now only bites on genuinely continuous speech,
+# where a longer chunk also yields better ASR context and a more reliable
+# speaker embedding.
+DEFAULT_CHUNK_SECONDS = float(os.getenv("KIOSK_CORE_CHUNK_SECONDS", "6.0"))
+# Trailing silence that ends a turn.
+#
+# INVARIANT: must be strictly greater than DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS.
+# If it is not, the endpoint fires before the adaptive flush can ever run (its
+# guard requires silence_run < silence_timeout) and the pre-warm optimisation
+# below is silently dead. The kiosk-ui previously sent 0.65s while the flush
+# pause was 0.70s, which is exactly what happened.
+#
+# Note the browser UI overrides this per session via silence_timeout_seconds
+# (kiosk-ui/src/constants.ts), so that constant governs the kiosk; this default
+# applies to microphone and file sessions.
+#
+# 1.5s: at 0.65s a customer pausing to read the menu was cut off mid-sentence,
+# so Whisper only ever received 1.8-2.5s of truncated audio and had to guess
+# the item name. A genuine end-of-turn pause is ~1.0-1.5s, so this tolerates
+# hesitation while keeping the reply prompt.
+DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SECONDS", "1.5"))
 # Adaptive mid-utterance flush: when silence reaches this threshold but hasn't
 # yet hit silence_timeout_seconds, flush the accumulated chunk to the background
 # ASR worker so processing starts immediately. The tail chunk at true endpoint
@@ -98,6 +185,9 @@ DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SE
 # hallucinated ("chip" for "chicken") or misread the isolated tail ("Kin Burger"
 # for "burger").  0.70s is still well below a genuine inter-utterance pause
 # (~1.0-1.5s) but avoids splitting mid-sentence breathing pauses.
+# Kept at 0.70 (not lowered) when the endpoint moved to 1.5s: 0.70 is the value
+# proven to avoid the mid-word splits above, and it only became effective again
+# because the endpoint is now longer than it. See the INVARIANT note above.
 DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.70"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))

@@ -411,3 +411,51 @@ def test_sentence_gate_withholds_sentences_on_partial_success_turn() -> None:
     gate.feed("I've added all the pizzas to your order. ", ["place_order"])
 
     assert spoken == []
+
+
+# ---------------------------------------------------------------------------
+# Implausible quantity (kiosk-core _implausible_quantity_payload)
+# ---------------------------------------------------------------------------
+
+
+def _quantity_payload(ref: str = "Classic Chicken Burger", qty: int = 2001) -> dict:
+    """Reproduce kiosk-core's quantity rejection payload verbatim."""
+    return {
+        "error": (
+            f"A quantity of {qty} for '{ref}' exceeds the limit of 20 per item "
+            f"and was almost certainly misheard. Nothing was added to the order. "
+            f"Ask the customer how many '{ref}' they would like — do not guess a "
+            f"number, and do not say anything was added."
+        ),
+        "max_quantity": 20,
+    }
+
+
+def test_quantity_rejection_is_recorded_as_a_rejection() -> None:
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_quantity_payload()))
+    state = menu_guard.current_state()
+    assert state.quantity_refused is True
+    assert state.has_rejection is True
+    assert state.succeeded is False
+
+
+def test_quantity_refusal_does_not_claim_the_item_is_off_menu() -> None:
+    # Live regression: ASR heard "one and 2,000" for "one or two", the model
+    # ordered 2001 burgers and the kiosk announced a total of 338169. Capping
+    # the quantity fixed the write, but the refusal then reached the customer
+    # as "that isn't on our menu" — false, and unactionable, since renaming a
+    # real product can never resolve a quantity problem.
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_quantity_payload()))
+    refusal = menu_guard.build_refusal()
+    assert "menu" not in refusal.lower()
+    assert "how many" in refusal.lower()
+
+
+def test_quantity_refusal_replaces_a_false_addition_claim() -> None:
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_quantity_payload()))
+    reply, corrected = menu_guard.validate_reply(
+        "I've added Classic Chicken Burger to your order. Your total is now 338169."
+    )
+    assert corrected is True
+    assert "338169" not in reply
+    assert "how many" in reply.lower()

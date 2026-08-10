@@ -17,15 +17,37 @@ export async function startStreamSession(
   sampleRate: number,
   history: HistoryTurn[],
   conversationId?: string,
+  singleChunk = false,
 ): Promise<StartStreamResponse> {
+  // Push-to-talk sends the whole recording as one chunk on Stop, so the
+  // backend must not re-split it. Its chunk cap and silence endpoint are
+  // pushed beyond any realistic utterance, leaving the explicit end-of-stream
+  // signal as the only thing that ends the turn — which is exactly what the
+  // Stop button is. Hands-free conversation mode keeps the tuned values: it
+  // has no Stop button and relies on silence endpointing to end a turn.
+  const chunkSeconds = singleChunk
+    ? tuning.singleChunkMaxSeconds
+    : tuning.asrChunkSeconds;
+  const silenceTimeout = singleChunk
+    ? tuning.singleChunkSilenceSeconds
+    : tuning.silenceTimeoutSeconds;
   const res = await fetch(endpoints.startStream, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       sample_rate: sampleRate,
-      chunk_seconds: tuning.chunkSeconds,
-      silence_timeout_seconds: tuning.silenceTimeoutSeconds,
-      max_session_seconds: 60.0,
+      chunk_seconds: chunkSeconds,
+      silence_timeout_seconds: silenceTimeout,
+      // The adaptive pre-warm flush fires on any pause >= 0.70s and would
+      // split the recording exactly like the chunk cap does, so raising the
+      // two values above is not sufficient on its own — it must be switched
+      // off for single-chunk mode. It is purely a latency optimisation
+      // (it starts ASR early); with one upload at Stop there is no speech
+      // left to overlap with, so nothing is lost by disabling it.
+      ...(singleChunk ? { adaptive_flush_pause_seconds: 0 } : {}),
+      // Equal to chunk_seconds in single-chunk mode so a recording can never
+      // exceed one chunk (see tuning.singleChunkMaxSeconds).
+      max_session_seconds: singleChunk ? tuning.singleChunkMaxSeconds : 60.0,
       silence_threshold: 900,
       language: 'en',
       temperature: 0.0,

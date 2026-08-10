@@ -280,7 +280,17 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       worklet.port.onmessage = (ev: MessageEvent<Float32Array>) => {
         if (!recordingRef.current) return;
         framesRef.current.push(ev.data);
-        void flushChunk(false);
+        // Push-to-talk uploads nothing mid-utterance: the whole recording is
+        // sent as ONE chunk when Stop is pressed (see flushChunk(true) in
+        // stop()). Streaming it in 2.5s slices meant the backend re-split the
+        // audio at fixed boundaries and words straddling a cut were lost
+        // ("Aloo Tikki Burger" decoded as "and 2,000"). One uncut chunk gives
+        // Whisper the entire utterance and its full context.
+        //
+        // Hands-free conversation mode keeps streaming: it has no Stop button
+        // and depends on the backend's silence endpointing to end a turn, so
+        // withholding audio until "stop" would mean the turn never ends.
+        if (conversationModeRef.current) void flushChunk(false);
       };
 
       source.connect(worklet);
@@ -295,6 +305,7 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
         TARGET_RATE,
         buildHistory(),
         conversationIdRef.current,
+        !conversationModeRef.current,
       );
       sessionIdRef.current = session_id;
 

@@ -43,8 +43,55 @@ export const endpoints = {
 
 // Tuning constants (mirror kiosk_core config defaults).
 export const tuning = {
-  chunkSeconds: 2.5,         // max chunk size; adaptive flush fires earlier at ~300ms pause
-  silenceTimeoutSeconds: 0.65, // trailing silence before endpoint (was 2.5s)
+  // Upload cadence only — how often buffered audio is POSTed while recording.
+  // Kept short so audio reaches the backend promptly; it does NOT bound the
+  // ASR chunk (see asrChunkSeconds).
+  chunkSeconds: 2.5,
+  // Max seconds of speech the backend accumulates before force-flushing to
+  // Whisper, sent as chunk_seconds on session start.
+  //
+  // This was previously taken from chunkSeconds (2.5s), which made the upload
+  // cadence double as a hard ASR boundary: speech was sliced every 2.5s
+  // regardless of word boundaries. Measured live, "one Aloo Tikki Burger and
+  // two Classic Chicken Burger" was cut into "I would like to have one" /
+  // "and 2,000" / "Classic Chicken Burger" — the item name straddled a cut and
+  // was lost. Whisper needs whole phrases for context; a fragment decodes into
+  // whatever is phonetically closest.
+  //
+  // 6.0s matches KIOSK_CORE_CHUNK_SECONDS. It is only a ceiling — the backend
+  // still flushes earlier at natural pauses (adaptive flush), so ordinary
+  // speech latency is unchanged and this bites only on continuous speech.
+  asrChunkSeconds: 6.0,
+  // Push-to-talk only. When the whole recording is uploaded as a single chunk
+  // on Stop, the backend must not re-split it, so its chunk cap is raised to
+  // the maximum the request model allows (chunk_seconds <= 30) and the session
+  // cap is set to the SAME value. Making them equal is what guarantees one
+  // chunk: a recording can never outlive the session cap, so it can never
+  // reach the chunk cap either, and the explicit end-of-stream signal from the
+  // Stop button stays the only thing that ends a turn.
+  singleChunkMaxSeconds: 30.0,
+  // Trailing-silence endpoint for push-to-talk, at the model's ceiling
+  // (silence_timeout_seconds <= 10). It is deliberately far longer than any
+  // pause inside a sentence, so it cannot cut the customer off; Stop ends the
+  // turn. It still exists as a backstop for a recording that is pure silence.
+  singleChunkSilenceSeconds: 10.0,
+  // Trailing silence that ends the turn. THIS OVERRIDES the backend default
+  // (KIOSK_CORE_SILENCE_TIMEOUT_SECONDS) — it is sent as
+  // silence_timeout_seconds on session start, so this constant is the value
+  // that actually decides when the customer gets cut off.
+  //
+  // Was 0.65s, which is shorter than an ordinary mid-sentence pause: a
+  // customer glancing at the menu ("I would like to order one … Classic
+  // Chicken Burger") had the turn ended during the hesitation. Measured live,
+  // every turn captured only 1.8-2.5s of audio and Whisper received truncated
+  // sentences — it even emitted a literal "..." for one, and guessed a wrong
+  // final word on another, because the item name was never recorded. That
+  // looked like an ASR accuracy problem but was purely an endpointing one.
+  //
+  // Must stay strictly greater than the backend's adaptive flush pause,
+  // otherwise the endpoint always fires first and the pre-warm flush that
+  // hides ASR latency can never run.
+  silenceTimeoutSeconds: 1.5,
   sampleRate: 16000,
   pollIntervalMs: 350,
   perfRefreshMs: 10000,

@@ -395,28 +395,37 @@ class BaseAudioSession:
                 with self._lock:
                     self.error = str(exc)
                 logger.exception("RAG query failed for session %s", self.session_id)
-        elif final_status == "completed" and end_reason != "stopped_by_api":
-            # An empty transcript has two very different causes. If speech was
-            # captured but the speaker filter rejected every segment, telling
-            # the customer "How can I help you?" hides the fact that they were
-            # ignored and gives them no reason to retry.
+        elif final_status == "completed":
+            # The transcript is empty — the kiosk has nothing meaningful to say.
+            # Log why the turn produced no output, then stay silent.
             #
-            # A THIRD case is excluded above: the customer explicitly stopped
-            # the conversation (end_reason == "stopped_by_api") before
-            # speaking again. Speaking either prompt here would be actively
-            # wrong — the UI/TTS would greet or ask the customer to repeat
-            # *after* they already asked to end the session, which looks like
-            # the stop button didn't work. An explicit stop with no new
-            # transcript should end silently.
+            # Rationale for always staying silent here:
+            #  - "stopped_by_api" / "no_speech_detected": user explicitly stopped
+            #    without speaking — speaking any prompt looks like the button
+            #    had no effect.
+            #  - Rejected-speech (speaker filter / diarization): often triggered
+            #    by Whisper hallucinations ("you", "thank you", etc.) on
+            #    background noise or TTS echo from the previous turn. These are
+            #    not real utterances, so "I couldn't recognise your voice" is
+            #    a false alarm that confuses the customer.
+            #  - "silence_timeout": VAD ended the turn with no speech — the
+            #    customer is either not there or not ready; prompting can feel
+            #    intrusive and the UI already shows "🎧 Listening…" or re-arms
+            #    automatically in conversation mode.
+            #
+            # In all empty-transcript cases the correct UX is silence: the
+            # kiosk only speaks when it has something real to respond to.
             if self._rejected_speech_chunks:
                 logger.info(
                     "Session %s: %d chunk(s) of speech were rejected by the speaker "
-                    "filter — asking the customer to repeat instead of greeting",
+                    "filter (likely hallucination or echo) — staying silent",
                     self.session_id, self._rejected_speech_chunks,
                 )
-                self._synthesize_response(config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT)
             else:
-                self._synthesize_response(config.DEFAULT_NO_SPEECH_PROMPT)
+                logger.info(
+                    "Session %s: empty transcript (end_reason=%s) — staying silent",
+                    self.session_id, end_reason,
+                )
 
         with self._lock:
             if final_status == "completed" and self.end_reason == "stopped_by_api":
@@ -787,6 +796,11 @@ class BaseAudioSession:
                 diarization=config.DEFAULT_DIARIZATION_ENABLED,
                 session_id=self._analyzer_session_id,
                 speaker_scope_id=self.agent_session_id,
+                # Bias Whisper towards the real menu vocabulary. Without it the
+                # decoder spells product names phonetically ("aloo tiki",
+                # "Kin Burger"), which the catalogue's fuzzy resolver then
+                # fails to match, so the item silently never reaches the cart.
+                prompt=config.DEFAULT_ASR_PROMPT,
             )
             # Accumulate genuine ASR time. Chunks are transcribed as they are
             # flushed during capture, long before _finalize_run runs, so this

@@ -95,6 +95,14 @@ _REFUSAL_GENERIC = (
     "Please choose an item from our menu — what would you like instead?"
 )
 
+# Spoken when kiosk-core refused the quantity rather than the product. The
+# item is deliberately not named: the number was misheard, so the reference
+# attached to it is not trustworthy enough to repeat back as fact.
+_REFUSAL_QUANTITY = (
+    "Sorry, I didn't catch how many you'd like, so I haven't added anything "
+    "yet. How many would you like?"
+)
+
 # How many alternatives to speak. Three is the practical ceiling for a voice
 # reply; beyond that the customer stops retaining them.
 _MAX_ALTERNATIVES = 3
@@ -158,6 +166,7 @@ class _TurnState:
     alternatives: list[dict[str, Any]] = field(default_factory=list)
     partial_refs: list[str] = field(default_factory=list)
     partial_alternatives: list[dict[str, Any]] = field(default_factory=list)
+    quantity_refused: bool = False
 
     @property
     def has_rejection(self) -> bool:
@@ -268,6 +277,22 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
         return
 
     payload = result.data
+
+    # A quantity refusal is a rejection, but not an off-menu one: the product
+    # is real and on the menu, only the number was implausible (ASR heard
+    # "one and 2,000" for "one or two"). Falling through to the off-menu path
+    # would tell the customer their burger "isn't on our menu", which is both
+    # false and unactionable — they would keep renaming a product that was
+    # never the problem. kiosk-core marks this payload with ``max_quantity``.
+    if isinstance(payload, dict) and payload.get("max_quantity"):
+        state.quantity_refused = True
+        state.rejected_refs.append("")
+        logger.warning(
+            "[MENU-GUARD] Implausible quantity refused by %s | detail=%r",
+            tool_name, result.message[:160],
+        )
+        return
+
     ref_match = _REJECTED_REF_RE.match(result.message)
     if ref_match:
         state.rejected_refs.append(ref_match.group(1))
@@ -366,6 +391,8 @@ def build_refusal(state: _TurnState | None = None) -> str:
         A short, markup-free sentence naming only real catalogue items.
     """
     state = state if state is not None else current_state()
+    if state.quantity_refused:
+        return _REFUSAL_QUANTITY
     item = next((ref for ref in state.rejected_refs if ref), "")
     if not item or not _looks_like_item_name(item):
         return _REFUSAL_GENERIC

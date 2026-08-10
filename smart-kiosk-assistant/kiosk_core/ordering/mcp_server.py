@@ -263,6 +263,53 @@ def _ambiguous_payload(ambiguous: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+# A voice kiosk has no keypad: every quantity arrives through ASR, which
+# mishears spoken numbers routinely. Observed live — the customer said "one or
+# two Classic Chicken Burger", ASR produced "one and 2,000", the model called
+# place_order(quantity=2001), the write **succeeded**, and the kiosk announced a
+# total of ₹338,169. Every truthfulness guard stayed silent, and correctly so:
+# the claim "I've added Classic Chicken Burger" was true. What was missing is
+# not honesty but plausibility. This check runs before any write, so the order
+# is left untouched and no "added" claim is possible for the turn.
+MAX_ITEM_QUANTITY = 20
+
+
+def _implausible_quantity_payload(
+    items: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Reject an order line whose quantity is too large to be genuine.
+
+    Args:
+        items: Raw item dicts as supplied by the model.
+
+    Returns:
+        An error payload naming the offending reference and quantity, or
+        ``None`` when every quantity is plausible.
+    """
+    for it in items:
+        ref = it.get("product_id") or it.get("name") or it.get("product") or "that item"
+        try:
+            qty = int(it.get("quantity", 1))
+        except (TypeError, ValueError):
+            continue
+        if qty > MAX_ITEM_QUANTITY:
+            logger.warning(
+                "[MCP-SERVER] implausible quantity %d for '%s' — refusing before write",
+                qty, ref,
+            )
+            return {
+                "error": (
+                    f"A quantity of {qty} for '{ref}' exceeds the limit of "
+                    f"{MAX_ITEM_QUANTITY} per item and was almost certainly "
+                    f"misheard. Nothing was added to the order. Ask the customer "
+                    f"how many '{ref}' they would like — do not guess a number, "
+                    f"and do not say anything was added."
+                ),
+                "max_quantity": MAX_ITEM_QUANTITY,
+            }
+    return None
+
+
 def _rejection_payload(rejected: list[dict[str, Any]]) -> dict[str, Any]:
     """Describe unavailable references for the agent, with grounded alternatives.
 
@@ -459,6 +506,10 @@ async def place_order(
     """
     from kiosk_core.ordering.models import CreateOrderRequest, OrderItemIn
 
+    implausible = _implausible_quantity_payload(items)
+    if implausible is not None:
+        return implausible
+
     resolved, rejected, ambiguous, resolved_display = await _resolve_items(items, dietary=dietary)
     if not resolved:
         if ambiguous:
@@ -506,6 +557,10 @@ async def update_order(
         ``available_products`` if a reference cannot be matched.
     """
     from kiosk_core.ordering.models import OrderItemIn
+
+    implausible = _implausible_quantity_payload(items)
+    if implausible is not None:
+        return implausible
 
     resolved, rejected, ambiguous, resolved_display = await _resolve_items(items, dietary=dietary)
     if not resolved:

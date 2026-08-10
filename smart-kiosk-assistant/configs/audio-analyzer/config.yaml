@@ -129,6 +129,46 @@ models:
     # At 0.8s the per-window scores for a single speaker swung by ±0.2 cosine,
     # which is wider than the gap between the customer and a bystander.
     min_window_seconds: 1.5
+    # Minimum total segment span before a below-threshold similarity may label
+    # a segment as a secondary speaker. Below this the diarizer abstains and
+    # keeps the segment as SPEAKER_00.
+    #
+    # This is the same evidence bar min_window_seconds already applies to
+    # comparison windows, enforced on the segment as a whole. The measured
+    # same-speaker cosine spread noted above (0.21-0.68 at 1.5s) is precisely
+    # why: on a sub-1.5s fragment the score carries more phonetic content than
+    # voice identity, so a low value is noise rather than proof of a second
+    # speaker. _extract_embedding only declines below 250ms, which left the
+    # 0.25-1.5s band being judged at full confidence.
+    #
+    # Symptom this fixes: when an utterance spilled past kiosk-core's chunk
+    # boundary, the severed tail (~0.5-1.5s) scored low, was relabelled
+    # SPEAKER_01 and hard-dropped by kiosk-core's first-speaker lock — so
+    # "suggest something to drink" reached the agent as "suggest some".
+    #
+    # Bystander protection is unaffected: any real interjection runs longer
+    # than this and is still scored normally, and intra-segment speaker
+    # splitting inside longer segments is untouched. 0 disables the guard.
+    voice_verify_min_duration: 1.5
+    # Seconds of enrolled speech required before the reference is trusted
+    # enough to label anyone SPEAKER_01. Below this the reference is
+    # PROVISIONAL: everything is kept as primary and the reference is upgraded
+    # in place as longer speech arrives.
+    #
+    # enrollment_window_seconds above is only an upper bound — enrollment gets
+    # whatever the first qualifying chunk holds. Measured live: a real
+    # conversation enrolled from just 2.00s because the opening chunk is
+    # flushed at the speaker's first pause, whereas a 4.00s enrollment
+    # classified the same voices correctly. That weak 2s reference then
+    # rejected the customer's own speech for the rest of the session
+    # ("I would like to" kept, "have two cheeseburgers and" + "and one french
+    # fries" both dropped as SPEAKER_01).
+    #
+    # Trade-off: during the provisional window a bystander would be accepted.
+    # That is the correct bias — the reference genuinely cannot discriminate
+    # yet, and losing the customer's order is far worse than briefly admitting
+    # a stray voice. 0 restores the previous trust-immediately behaviour.
+    enrollment_trust_duration: 4.0
     # Span taken from the start of the first qualifying segment when enrolling
     # the primary voice. This span always belongs to the customer (it is the
     # opening of the first utterance), so a longer window buys a much more
