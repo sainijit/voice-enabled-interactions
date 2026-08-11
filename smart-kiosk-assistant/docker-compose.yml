@@ -166,8 +166,6 @@ services:
       - "8010:8010"
     devices:
       - /dev/dri:/dev/dri
-      # Intel NPU passthrough.
-      - /dev/accel/accel0:/dev/accel/accel0
     group_add:
       - video
       - "${RENDER_GID:-992}"

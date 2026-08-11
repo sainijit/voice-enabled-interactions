@@ -31,7 +31,7 @@ The **Devices** column lists the supported inference devices for each:
 
 | Service | Field | Default (validated) | Other examples | Devices |
 |---|---|---|---|---|
-| `audio-analyzer` ASR | `models.asr.name` | `whisper-base` | `whisper-tiny`, `whisper-small`, `whisper-medium`, `whisper-large` | `CPU`, `GPU` (`GPU` requires `provider: openvino`) |
+| `audio-analyzer` ASR | `models.asr.name` | `whisper-base` | `whisper-tiny`, `whisper-small`, `whisper-medium`, `whisper-large` | `CPU`, `GPU`, `NPU` (`GPU`/`NPU` require `provider: openvino`) |
 | `audio-analyzer` sentiment | `sentiment.model` | `speechbrain/emotion-recognition-wav2vec2-IEMOCAP` | other SpeechBrain emotion-recognition models | `CPU`, `GPU` (disabled by default) |
 | `text-to-speech` | `models.tts.name` | `microsoft/speecht5_tts` (SpeechT5) | `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` (Qwen-TTS) | `CPU`, `GPU` (`int4` on iGPU produces noise; use `fp16` or `int8` on GPU) |
 | `rag-service` LLM | `models.llm.hf_id` | `Qwen/Qwen3-4B-Instruct-2507` | other OpenVINO-exportable instruct LLMs | `CPU`, `GPU` (`GPU` recommended for acceptable latency) |
@@ -100,9 +100,18 @@ This repository treats it as the single source of truth. Configure:
 - `models.asr.provider`
 - `models.asr.device`
 
-`docker-compose.yml` must provide container hardware/runtime access (for
-example Intel NPU passthrough and Level Zero runtime variables), but
-must not override ASR provider/device.
+There is exactly one Compose file in this project: `docker-compose.yml`.
+No hardware-specific Compose override files are used.
+
+`docker-compose.yml` provides container runtime access, while ASR
+provider/device selection remains in `config.yaml` only. Provider/device
+is validated before startup by `make check-env`; startup is rejected early
+with actionable errors when configured hardware is unavailable.
+
+When `models.asr.provider=openvino` and `models.asr.device=NPU`, the
+Makefile generates a temporary Compose override under `/tmp` at runtime
+to add an explicit `/dev/accel/accel*` mapping for `audio-analyzer`.
+This temporary file is not checked in, and is removed automatically.
 
 ### Enable OpenVINO Whisper on NPU
 
@@ -137,6 +146,16 @@ docker compose config | grep AUDIO_ANALYZER__MODELS__ASR__
 ```
 
 The provider/device override keys should not be present.
+
+Hardware checks happen before startup:
+
+- `provider=openvino, device=CPU` does not require GPU/NPU nodes.
+- `provider=openvino, device=GPU` requires Intel GPU detection.
+- `provider=openvino, device=NPU` requires Intel NPU detection.
+- Missing requested hardware fails during `make check-env` (no fallback).
+
+NPU device exposure is added only for the `openvino + NPU` case. CPU/GPU
+paths do not require `/dev/accel`.
 
 Look for startup log lines showing OpenVINO Whisper loaded on `NPU`
 (for example `Loading Model: model name=whisper-base, device=NPU`) and
@@ -182,6 +201,17 @@ The following are not supported by the current OpenAI/PyTorch Whisper backend:
 - Use `openvino + NPU` for NPU execution.
 - Use `openvino + GPU` for GPU execution.
 - For OpenAI/PyTorch Whisper, use a supported device such as `CPU`.
+
+### ASR Support Matrix
+
+| Provider | CPU | GPU | NPU |
+|---|---|---|---|
+| `openai` | Yes | No | No |
+| `openvino` | Yes | Yes (Intel GPU required) | Yes (Intel NPU required) |
+
+If `GPU` or `NPU` is configured and unavailable on the host,
+`make check-env` fails before any container startup. The stack does not
+silently fall back to another device.
 
 ## Environment Variables
 

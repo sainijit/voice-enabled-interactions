@@ -61,6 +61,36 @@ _RTSP_LIVE_ON          = $(filter live,$(_RTSP_SOURCE_MODE))
 _CAMERA_DEVICE_RAW     = $(strip $(CAMERA_DEVICE))
 _RTSP_CAMERA_DEVICE    = $(if $(_RTSP_LIVE_ON),$(_CAMERA_DEVICE_RAW),/dev/null)
 COMPOSE_BASE           = RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) docker compose -f $(COMPOSE_FILE)
+NPU_RUNTIME_OVERRIDE   ?= /tmp/ska-npu-runtime-override.$(USER).$(notdir $(CURDIR)).yml
+
+define RUN_COMPOSE_WITH_RUNTIME_NPU
+set -e; \
+ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
+ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
+ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
+COMPOSE_FILES="-f $(COMPOSE_FILE)"; \
+NPU_OVERRIDE_FILE="$(NPU_RUNTIME_OVERRIDE)"; \
+rm -f "$$NPU_OVERRIDE_FILE"; \
+cleanup() { rm -f "$$NPU_OVERRIDE_FILE"; }; \
+trap cleanup EXIT; \
+if [ "$$ASR_CFG_PROVIDER" = "openvino" ] && [ "$$ASR_CFG_DEVICE" = "NPU" ]; then \
+	NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -1); \
+	if [ -z "$$NPU_NODE" ]; then \
+		echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=NPU in $$ASR_CFG_PATH, but no Intel NPU was detected.$(NC)"; \
+		echo "    Please select device=CPU/GPU or install/enable the Intel NPU driver and runtime."; \
+		echo "    Check /dev/accel and Intel NPU runtime/driver installation."; \
+		exit 1; \
+	elif [ ! -c "$$NPU_NODE" ]; then \
+		echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=NPU in $$ASR_CFG_PATH, but $$NPU_NODE is not a character device.$(NC)"; \
+		echo "    Please verify Intel NPU driver/runtime installation."; \
+		exit 1; \
+	fi; \
+	printf "services:\n  audio-analyzer:\n    devices:\n      - %s:/dev/accel/accel0\n" "$$NPU_NODE" > "$$NPU_OVERRIDE_FILE"; \
+	COMPOSE_FILES="$$COMPOSE_FILES -f $$NPU_OVERRIDE_FILE"; \
+	echo "  $(GREEN)✓ Using temporary NPU device override$(NC) ($$NPU_OVERRIDE_FILE)"; \
+fi; \
+RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) $(1) docker compose $$COMPOSE_FILES $(2)
+endef
 
 # Services with fully local build contexts
 LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui queue-service rtsp-streamer
@@ -272,9 +302,53 @@ check-env: ## Validate .env and all required variables before running the stack
 				ERRORS=$$((ERRORS+1)); \
 			fi; \
 			if [ "$$ASR_CFG_PROVIDER" = "openai" ] && [ "$$ASR_CFG_DEVICE" != "CPU" ]; then \
-				echo "  $(RED)✗ Invalid ASR combination in $$ASR_CFG_PATH: provider=openai with device=$$ASR_CFG_DEVICE$(NC)"; \
-				echo "    OpenAI ASR provider supports CPU only in this stack."; \
-				echo "    Use provider=openvino for GPU or NPU execution."; \
+				echo "  $(RED)✗ ERROR: OpenAI ASR is configured with device=$$ASR_CFG_DEVICE in $$ASR_CFG_PATH, but OpenAI ASR supports CPU only in this stack.$(NC)"; \
+				echo "    Please set models.asr.device=CPU, or switch to provider=openvino for GPU/NPU."; \
+				ERRORS=$$((ERRORS+1)); \
+			fi; \
+			if [ "$$ASR_CFG_PROVIDER" = "openvino" ]; then \
+				if [ "$$ASR_CFG_DEVICE" = "CPU" ]; then \
+					echo "  $(GREEN)✓ OpenVINO ASR CPU mode selected$(NC)"; \
+				elif [ "$$ASR_CFG_DEVICE" = "GPU" ]; then \
+					GPU_RENDER_NODE=$$(ls /dev/dri/renderD* 2>/dev/null | head -1); \
+					if [ -z "$$GPU_RENDER_NODE" ]; then \
+						echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=GPU in $$ASR_CFG_PATH, but no Intel GPU was detected.$(NC)"; \
+						echo "    Please select device=CPU or install/enable the Intel GPU runtime."; \
+						ERRORS=$$((ERRORS+1)); \
+					else \
+						if command -v lspci >/dev/null 2>&1; then \
+							if lspci | grep -E "VGA compatible controller|3D controller|Display controller" | grep -qi "Intel"; then \
+								echo "  $(GREEN)✓ Intel GPU detected$(NC) ($$GPU_RENDER_NODE)"; \
+							else \
+								echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=GPU in $$ASR_CFG_PATH, but no Intel GPU was detected.$(NC)"; \
+								echo "    Found $$GPU_RENDER_NODE, but lspci did not report an Intel display/GPU controller."; \
+								echo "    Please select device=CPU or install/enable Intel GPU drivers/runtime."; \
+								ERRORS=$$((ERRORS+1)); \
+							fi; \
+						else \
+							echo "  $(GREEN)✓ GPU render node detected$(NC) ($$GPU_RENDER_NODE)"; \
+							echo "  $(YELLOW)⚠ lspci not available; proceeding based on /dev/dri render node detection$(NC)"; \
+						fi; \
+					fi; \
+				elif [ "$$ASR_CFG_DEVICE" = "NPU" ]; then \
+					NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -1); \
+					if [ -z "$$NPU_NODE" ]; then \
+						echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=NPU in $$ASR_CFG_PATH, but no Intel NPU was detected.$(NC)"; \
+						echo "    Please select device=CPU/GPU or install/enable the Intel NPU driver and runtime."; \
+						echo "    Check /dev/accel and Intel NPU runtime/driver installation."; \
+						ERRORS=$$((ERRORS+1)); \
+					elif [ ! -c "$$NPU_NODE" ]; then \
+						echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=NPU in $$ASR_CFG_PATH, but $$NPU_NODE is not a character device.$(NC)"; \
+						echo "    Please verify Intel NPU driver/runtime installation."; \
+						ERRORS=$$((ERRORS+1)); \
+					else \
+						echo "  $(GREEN)✓ Intel NPU detected$(NC) ($$NPU_NODE)"; \
+					fi; \
+				fi; \
+			fi; \
+			if [ "$$ASR_CFG_PROVIDER" = "whispercpp" ] && [ "$$ASR_CFG_DEVICE" != "CPU" ]; then \
+				echo "  $(RED)✗ ERROR: whispercpp ASR supports CPU only in this stack, but $$ASR_CFG_PATH sets device=$$ASR_CFG_DEVICE.$(NC)"; \
+				echo "    Please set models.asr.device=CPU for provider=whispercpp."; \
 				ERRORS=$$((ERRORS+1)); \
 			fi; \
 		fi; \
@@ -354,8 +428,8 @@ show-config: ## Print resolved configuration
 	@ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
 	ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
 	ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
-	echo "  ASR_PROVIDER      = $$ASR_CFG_PROVIDER (from $$ASR_CFG_PATH)"; \
-	echo "  ASR_DEVICE        = $$ASR_CFG_DEVICE (from $$ASR_CFG_PATH)"
+	echo "  ASR_CFG_PROVIDER  = $$ASR_CFG_PROVIDER (from $$ASR_CFG_PATH)"; \
+	echo "  ASR_CFG_DEVICE    = $$ASR_CFG_DEVICE (from $$ASR_CFG_PATH)"
 	@echo ""
 	@echo "$(YELLOW)Authentication:$(NC)"
 	@echo "  HF_TOKEN          = $$([ -n '$(HF_TOKEN)' ] && echo '***set***' || echo 'NOT SET')"
@@ -378,17 +452,17 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 	@echo "$(BLUE)Preparing Docker images...$(NC)"
 	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
 		echo "$(YELLOW)  REGISTRY=false → Building local services from source$(NC)"; \
-		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC); \
+		$(call RUN_COMPOSE_WITH_RUNTIME_NPU,REGISTRY=$(_DOCKER_REGISTRY),$(_IDENTITY_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC)); \
 	else \
 		echo "$(YELLOW)  REGISTRY=$(REGISTRY) → Pulling images from registry$(NC)"; \
-		REGISTRY=$(REGISTRY) $(COMPOSE_BASE) pull $(LOCAL_ONLY_SERVICES); \
+		$(call RUN_COMPOSE_WITH_RUNTIME_NPU,REGISTRY=$(REGISTRY),pull $(LOCAL_ONLY_SERVICES)); \
 		if [ -n "$(_IDENTITY_SVC)" ]; then \
 			echo "$(YELLOW)  Building identity-service locally (no registry image)...$(NC)"; \
-			REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build identity-service; \
+			$(call RUN_COMPOSE_WITH_RUNTIME_NPU,REGISTRY=$(_DOCKER_REGISTRY),$(_IDENTITY_PROFILE) build identity-service); \
 		fi; \
 	fi; \
 	echo "$(YELLOW)  Pulling audio-analyzer, text-to-speech from Docker Hub (edge-ai-libraries — separate repo, no local build)...$(NC)"; \
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull $(REGISTRY_ONLY_SERVICES)
+	$(call RUN_COMPOSE_WITH_RUNTIME_NPU,REGISTRY=$(_DOCKER_REGISTRY),pull $(REGISTRY_ONLY_SERVICES))
 	@echo "$(GREEN)✓ Images ready$(NC)"
 
 # =============================================================================
@@ -397,7 +471,7 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 
 up: check-env setup-dirs ## Start all services
 	@echo "$(BLUE)Starting Smart Kiosk Assistant...$(NC)"
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) up -d
+	@$(call RUN_COMPOSE_WITH_RUNTIME_NPU,REGISTRY=$(_DOCKER_REGISTRY),$(_IDENTITY_PROFILE) up -d)
 	@echo ""
 	@echo "$(GREEN)✓ Stack started$(NC)"
 	@echo "  Kiosk UI        → http://localhost:7860"
@@ -411,7 +485,9 @@ up: check-env setup-dirs ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping Smart Kiosk Assistant...$(NC)"
+	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	$(COMPOSE_BASE) $(_IDENTITY_PROFILE) down
+	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	@echo "$(GREEN)✓ All services stopped$(NC)"
 
 restart: down up ## Stop then restart all services
@@ -505,8 +581,8 @@ dev-build: ## Rebuild and restart a single service: make dev-build SVC=rag-servi
 		exit 1; \
 	fi
 	@echo "$(BLUE)Rebuilding $(SVC)...$(NC)"
-	$(COMPOSE_BASE) build $(SVC)
-	$(COMPOSE_BASE) up -d $(SVC)
+	@$(call RUN_COMPOSE_WITH_RUNTIME_NPU,,build $(SVC))
+	@$(call RUN_COMPOSE_WITH_RUNTIME_NPU,,$(_IDENTITY_PROFILE) up -d $(SVC))
 	@echo "$(GREEN)✓ $(SVC) rebuilt and restarted$(NC)"
 
 # =============================================================================
@@ -515,6 +591,8 @@ dev-build: ## Rebuild and restart a single service: make dev-build SVC=rag-servi
 
 clean: ## Stop containers and remove named volumes
 	@echo "$(BLUE)Stopping services and removing volumes...$(NC)"
+	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	$(COMPOSE_BASE) down -v
+	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	@echo "$(GREEN)✓ Containers stopped and volumes removed$(NC)"
 	@echo "  Note: models/ directory is preserved. Delete it manually to free ~4 GB."
