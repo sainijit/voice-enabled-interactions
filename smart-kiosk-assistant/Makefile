@@ -61,18 +61,13 @@ _RTSP_LIVE_ON          = $(filter live,$(_RTSP_SOURCE_MODE))
 _CAMERA_DEVICE_RAW     = $(strip $(CAMERA_DEVICE))
 _RTSP_CAMERA_DEVICE    = $(if $(_RTSP_LIVE_ON),$(_CAMERA_DEVICE_RAW),/dev/null)
 COMPOSE_BASE           = RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) docker compose -f $(COMPOSE_FILE)
-NPU_RUNTIME_OVERRIDE   ?= /tmp/ska-npu-runtime-override.$(USER).$(notdir $(CURDIR)).yml
 
 define RUN_COMPOSE_WITH_RUNTIME_NPU
 set -e; \
 ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
 ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
 ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
-COMPOSE_FILES="-f $(COMPOSE_FILE)"; \
-NPU_OVERRIDE_FILE="$(NPU_RUNTIME_OVERRIDE)"; \
-rm -f "$$NPU_OVERRIDE_FILE"; \
-cleanup() { rm -f "$$NPU_OVERRIDE_FILE"; }; \
-trap cleanup EXIT; \
+ACCEL_MOUNT_PATH=""; \
 if [ "$$ASR_CFG_PROVIDER" = "openvino" ] && [ "$$ASR_CFG_DEVICE" = "NPU" ]; then \
 	NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -1); \
 	if [ -z "$$NPU_NODE" ]; then \
@@ -85,11 +80,24 @@ if [ "$$ASR_CFG_PROVIDER" = "openvino" ] && [ "$$ASR_CFG_DEVICE" = "NPU" ]; then
 		echo "    Please verify Intel NPU driver/runtime installation."; \
 		exit 1; \
 	fi; \
-	printf "services:\n  audio-analyzer:\n    devices:\n      - %s:/dev/accel/accel0\n" "$$NPU_NODE" > "$$NPU_OVERRIDE_FILE"; \
-	COMPOSE_FILES="$$COMPOSE_FILES -f $$NPU_OVERRIDE_FILE"; \
-	echo "  $(GREEN)✓ Using temporary NPU device override$(NC) ($$NPU_OVERRIDE_FILE)"; \
+	echo "  $(BLUE)Validating NPU visibility inside the audio-analyzer image...$(NC)"; \
+	if ! docker run --rm \
+		--user 1000:1000 \
+		--group-add $(if $(strip $(RENDER_GID)),$(RENDER_GID),992) \
+		--device "$$NPU_NODE:/dev/accel/accel0" \
+		--device /dev/dri:/dev/dri \
+		--env ZE_ENABLE_ALT_DRIVERS=libze_intel_npu.so \
+		--env ACCEL_MOUNT_PATH="$$NPU_NODE" \
+		--entrypoint sh "$(_DOCKER_REGISTRY)/audio-analyzer:$(RELEASE_TAG)" \
+			-lc 'python3 -c "import openvino as ov; devices = [str(device).upper() for device in ov.Core().available_devices]; print(devices); raise SystemExit(0 if \"NPU\" in devices else 1)"'; then \
+		echo "  $(RED)✗ ERROR: OpenVINO does not report an NPU device inside the audio-analyzer container.$(NC)"; \
+		echo "    Verify ACCEL_MOUNT_PATH, /dev/accel mapping, ZE_ENABLE_ALT_DRIVERS, and the host Intel NPU runtime."; \
+		exit 1; \
+	fi; \
+	ACCEL_MOUNT_PATH="$$NPU_NODE"; \
+	echo "  $(GREEN)✓ Intel NPU detected and validated inside the container$(NC) ($$NPU_NODE)"; \
 fi; \
-RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) $(1) docker compose $$COMPOSE_FILES $(2)
+RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) ACCEL_MOUNT_PATH="$$ACCEL_MOUNT_PATH" $(1) docker compose -f $(COMPOSE_FILE) $(2)
 endef
 
 # Services with fully local build contexts
@@ -342,7 +350,22 @@ check-env: ## Validate .env and all required variables before running the stack
 						echo "    Please verify Intel NPU driver/runtime installation."; \
 						ERRORS=$$((ERRORS+1)); \
 					else \
-						echo "  $(GREEN)✓ Intel NPU detected$(NC) ($$NPU_NODE)"; \
+						echo "  $(BLUE)Validating NPU visibility inside the audio-analyzer image...$(NC)"; \
+						if docker run --rm \
+							--user 1000:1000 \
+							--group-add $(if $(strip $(RENDER_GID)),$(RENDER_GID),992) \
+							--device "$$NPU_NODE:/dev/accel/accel0" \
+							--device /dev/dri:/dev/dri \
+							--env ZE_ENABLE_ALT_DRIVERS=libze_intel_npu.so \
+							--env ACCEL_MOUNT_PATH="$$NPU_NODE" \
+							--entrypoint sh "$(_DOCKER_REGISTRY)/audio-analyzer:$(RELEASE_TAG)" \
+							-lc 'python3 -c "import openvino as ov; devices = [str(device).upper() for device in ov.Core().available_devices]; print(devices); raise SystemExit(0 if \"NPU\" in devices else 1)"' >/dev/null; then \
+							echo "  $(GREEN)✓ Intel NPU detected and validated inside the container$(NC) ($$NPU_NODE)"; \
+						else \
+							echo "  $(RED)✗ ERROR: OpenVINO does not report an NPU device inside the audio-analyzer container.$(NC)"; \
+							echo "    Verify ACCEL_MOUNT_PATH, /dev/accel mapping, ZE_ENABLE_ALT_DRIVERS, and the host Intel NPU runtime."; \
+							ERRORS=$$((ERRORS+1)); \
+						fi; \
 					fi; \
 				fi; \
 			fi; \
@@ -485,9 +508,7 @@ up: check-env setup-dirs ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping Smart Kiosk Assistant...$(NC)"
-	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	$(COMPOSE_BASE) $(_IDENTITY_PROFILE) down
-	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	@echo "$(GREEN)✓ All services stopped$(NC)"
 
 restart: down up ## Stop then restart all services
@@ -591,8 +612,6 @@ dev-build: ## Rebuild and restart a single service: make dev-build SVC=rag-servi
 
 clean: ## Stop containers and remove named volumes
 	@echo "$(BLUE)Stopping services and removing volumes...$(NC)"
-	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	$(COMPOSE_BASE) down -v
-	@rm -f "$(NPU_RUNTIME_OVERRIDE)"
 	@echo "$(GREEN)✓ Containers stopped and volumes removed$(NC)"
 	@echo "  Note: models/ directory is preserved. Delete it manually to free ~4 GB."

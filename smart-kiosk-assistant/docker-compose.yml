@@ -166,6 +166,9 @@ services:
       - "8010:8010"
     devices:
       - /dev/dri:/dev/dri
+      # Intel NPU passthrough is driven by ACCEL_MOUNT_PATH so direct Compose
+      # runs stay CPU/GPU-safe on hosts without an NPU.
+      - ${ACCEL_MOUNT_PATH:-/dev/null}:/dev/accel/accel0
     group_add:
       - video
       - "${RENDER_GID:-992}"

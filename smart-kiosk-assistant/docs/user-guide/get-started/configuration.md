@@ -108,10 +108,36 @@ provider/device selection remains in `config.yaml` only. Provider/device
 is validated before startup by `make check-env`; startup is rejected early
 with actionable errors when configured hardware is unavailable.
 
-When `models.asr.provider=openvino` and `models.asr.device=NPU`, the
-Makefile generates a temporary Compose override under `/tmp` at runtime
-to add an explicit `/dev/accel/accel*` mapping for `audio-analyzer`.
-This temporary file is not checked in, and is removed automatically.
+The NPU device mapping is controlled by `ACCEL_MOUNT_PATH` in the Compose
+environment. The checked-in Compose file defaults that mapping to
+`/dev/null`, so CPU/GPU-only hosts can start cleanly. For OpenVINO + NPU,
+`make up` auto-detects the host Intel NPU node, validates that OpenVINO can
+see it inside the container, and exports that path for the Compose run.
+For direct `docker compose up`, set `ACCEL_MOUNT_PATH` in `.env` or the
+shell to the host NPU device node first.
+
+Recommended workflow for OpenVINO + NPU:
+
+```bash
+make check-env
+make up
+```
+
+When `models.asr.provider=openvino` and `models.asr.device=NPU`, `make`
+automatically detects a host NPU node under `/dev/accel/accel*` (for
+example `/dev/accel/accel0`) and passes it to Compose through
+`ACCEL_MOUNT_PATH`.
+
+Direct Compose workflow (no Makefile wrapper):
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d audio-analyzer
+```
+
+`/dev/accel/accel0` is a common host path on Meteor Lake systems, but the
+host path may differ by platform. `ACCEL_MOUNT_PATH` always refers to the
+host NPU device node and is mapped into the container as
+`/dev/accel/accel0`.
 
 ### Enable OpenVINO Whisper on NPU
 
@@ -127,8 +153,15 @@ models:
 Then restart `audio-analyzer`:
 
 ```bash
-docker compose down
-docker compose up -d audio-analyzer
+make check-env
+make up
+```
+
+If you intentionally run Compose directly (without `make`), provide the NPU
+host device path explicitly:
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d audio-analyzer
 ```
 
 Verify effective environment and health:
@@ -151,11 +184,13 @@ Hardware checks happen before startup:
 
 - `provider=openvino, device=CPU` does not require GPU/NPU nodes.
 - `provider=openvino, device=GPU` requires Intel GPU detection.
-- `provider=openvino, device=NPU` requires Intel NPU detection.
+- `provider=openvino, device=NPU` requires Intel NPU detection and
+  container-level OpenVINO visibility.
 - Missing requested hardware fails during `make check-env` (no fallback).
 
-NPU device exposure is added only for the `openvino + NPU` case. CPU/GPU
-paths do not require `/dev/accel`.
+`ACCEL_MOUNT_PATH` drives NPU passthrough for `audio-analyzer`.
+CPU/GPU paths do not require `/dev/accel`; the Compose default maps
+`/dev/null` instead.
 
 Look for startup log lines showing OpenVINO Whisper loaded on `NPU`
 (for example `Loading Model: model name=whisper-base, device=NPU`) and
@@ -207,7 +242,8 @@ The following are not supported by the current OpenAI/PyTorch Whisper backend:
 | Provider | CPU | GPU | NPU |
 |---|---|---|---|
 | `openai` | Yes | No | No |
-| `openvino` | Yes | Yes (Intel GPU required) | Yes (Intel NPU required) |
+| `whispercpp` | Yes | No | No |
+| `openvino` | Yes | Yes (Intel GPU required) | Yes (Intel NPU required, and `ACCEL_MOUNT_PATH` must point at the host NPU device for Compose runs) |
 
 If `GPU` or `NPU` is configured and unavailable on the host,
 `make check-env` fails before any container startup. The stack does not
