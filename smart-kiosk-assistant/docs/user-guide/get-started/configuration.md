@@ -100,9 +100,8 @@ This repository treats it as the single source of truth. Configure:
 - `models.asr.provider`
 - `models.asr.device`
 
-There is exactly one Compose file in this project: `docker-compose.yml`.
-No hardware-specific Compose override files are used.
-
+There is exactly one checked-in Compose file in this project: `docker-compose.yml`.
+No checked-in hardware-specific Compose override files are used (the Makefile may generate a temporary runtime override under `/tmp` to inject `/dev/accel` for the OpenVINO+NPU case).
 `docker-compose.yml` provides container runtime access, while ASR
 provider/device selection remains in `config.yaml` only. Provider/device
 is validated before startup by `make check-env`; startup is rejected early
