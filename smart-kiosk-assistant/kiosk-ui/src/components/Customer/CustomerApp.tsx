@@ -126,9 +126,8 @@ export function CustomerApp() {
 
   return (
     <div className="flex h-full flex-col bg-gray-50">
-      <Header />
+      <Header queueInfo={queueInfo} />
       <QueueBar
-        queueInfo={queueInfo}
         isPeak={isPeak}
         showFullMenu={showFullMenu}
         onToggleFullMenu={() => setShowFullMenu((v) => !v)}

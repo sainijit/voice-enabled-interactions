@@ -2,10 +2,10 @@ import { useCallback, useState } from 'react';
 
 import MenuPanel from '../Order/MenuPanel';
 import OrderPanel from '../Order/OrderPanel';
+import { LiveQueueFeed } from '../Chat/LiveQueueFeed';
 import {
   QUEUE_STATUS_ICON as STATUS_ICON,
   QUEUE_STATUS_STYLE as STATUS_STYLE,
-  QUEUE_STREAM_URL,
   useQueueStream,
   type QueueInfo,
 } from '../../hooks/useQueue';
@@ -36,7 +36,6 @@ export function QsrPanel({ orderActive }: QsrPanelProps) {
   const [subTab, setSubTab]             = useState<SubTab>('menu');
   const [queueInfo, setQueueInfo]       = useState<QueueInfo | null>(null);
   const [showFullMenu, setShowFullMenu] = useState(false);
-  const [streamErr, setStreamErr]       = useState(false);
 
   const onQueueData = useCallback((info: QueueInfo) => {
     setQueueInfo(info);
@@ -57,20 +56,8 @@ export function QsrPanel({ orderActive }: QsrPanelProps) {
     <div className="space-y-3 p-4">
 
       {/* 1 ── Live queue feed (MJPEG) ───────────────────────────────────── */}
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-black shadow-sm">
-        {streamErr ? (
-          <div className="flex items-center justify-center text-xs text-gray-400" style={{ height: '280px' }}>
-            📷 Queue feed unavailable
-          </div>
-        ) : (
-          <img
-            src={QUEUE_STREAM_URL}
-            alt="Live queue feed with person detection"
-            className="w-full object-contain"
-            style={{ height: '280px' }}
-            onError={() => setStreamErr(true)}
-          />
-        )}
+      <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+        <LiveQueueFeed height="280px" />
       </div>
 
       {/* 2 ── Queue status banner ───────────────────────────────────────── */}

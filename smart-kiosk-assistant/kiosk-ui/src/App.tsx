@@ -6,6 +6,7 @@ import Footer from './components/Footer/Footer';
 import ChatPane from './components/Chat/ChatPane';
 import MicButton from './components/Chat/MicButton';
 import AssistantIndicator from './components/Chat/AssistantIndicator';
+import { LiveQueueFeed } from './components/Chat/LiveQueueFeed';
 import { PerformanceDashboard } from './components/Dashboard/PerformanceDashboard';
 import useMicDevices from './hooks/useMicDevices';
 import { useKpis } from './hooks/useKpis';
@@ -84,27 +85,44 @@ export default function App() {
             className="flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm
                        min-h-[420px] lg:min-h-0 min-w-0"
           >
-            <ChatPane
-              messages={messages}
-              partialUser={partialUser}
-              partialAssistant={partialAssistant}
-              phase={phase}
-            />
-            <div className="shrink-0 border-t border-gray-200 bg-gray-50/80 px-4 sm:px-6 py-3 sm:py-4">
-              <div className="flex flex-col items-center gap-2 sm:gap-3">
-                <AssistantIndicator phase={phase} playbackState={playbackState} />
-                <MicButton
+            {/* Container 1 — fixed-height live queue video. Demo screen
+                shows the QSR people-queue feed above the chat at all times.
+                The QSR tab on the right (QsrPanel) keeps its own copy. */}
+            <div className="shrink-0 p-2">
+              <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+                <LiveQueueFeed height="220px" />
+              </div>
+            </div>
+
+            {/* Divider between the two containers */}
+            <div className="mx-3 h-px shrink-0 bg-gray-300" />
+
+            {/* Container 2 — chat + mic controls */}
+            <div className="flex flex-1 min-h-0 flex-col p-2">
+              <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 shadow-sm">
+                <ChatPane
+                  messages={messages}
+                  partialUser={partialUser}
+                  partialAssistant={partialAssistant}
                   phase={phase}
-                  playbackState={playbackState}
-                  locked={ingestBusy}
-                  conversationMode={conversationMode}
-                  onStart={startConversation}
-                  onStop={endConversation}
-                  onInterrupt={interruptSpeaking}
                 />
-                <p className="text-xs text-kiosk-textlo text-center min-h-[1rem] max-w-sm">
-                  {statusText}
-                </p>
+                <div className="shrink-0 border-t border-gray-200 bg-gray-50/80 px-4 sm:px-6 py-3 sm:py-4">
+                  <div className="flex flex-col items-center gap-2 sm:gap-3">
+                    <AssistantIndicator phase={phase} playbackState={playbackState} />
+                    <MicButton
+                      phase={phase}
+                      playbackState={playbackState}
+                      locked={ingestBusy}
+                      conversationMode={conversationMode}
+                      onStart={startConversation}
+                      onStop={endConversation}
+                      onInterrupt={interruptSpeaking}
+                    />
+                    <p className="text-xs text-kiosk-textlo text-center min-h-[1rem] max-w-sm">
+                      {statusText}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </section>

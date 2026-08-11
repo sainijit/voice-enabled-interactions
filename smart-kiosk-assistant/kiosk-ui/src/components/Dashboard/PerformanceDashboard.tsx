@@ -106,11 +106,27 @@ export function PerformanceDashboard({
             {/* Executive KPIs */}
             <ExecutiveKpis kpis={kpis} />
 
-            <div className="flex justify-end">
+            <div className="flex items-start justify-between gap-4">
+              <p className="min-w-0 flex-1 text-justify text-[10px] leading-snug text-gray-400 italic">
+                <span className="font-semibold not-italic text-gray-500">Notices &amp; Disclaimers</span>
+                <br />
+                Performance varies by use, configuration and other factors. Learn more at{' '}
+                <a
+                  href="https://www.intel.com/PerformanceIndex"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline hover:text-gray-600"
+                >
+                  www.Intel.com/PerformanceIndex
+                </a>
+                . Performance results are based on testing as of dates shown in configurations and may
+                not reflect all publicly available updates. See backup for configuration details. No
+                product or component can be absolutely secure.
+              </p>
               <button
                 type="button"
                 onClick={onRefreshKpis}
-                className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] text-gray-500 transition-colors hover:border-intel-blue/50 hover:text-intel-blue"
+                className="flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] text-gray-500 transition-colors hover:border-intel-blue/50 hover:text-intel-blue"
               >
                 <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />

@@ -1,22 +1,25 @@
 import type { ChatMessage, TtsPlaybackState, VoicePhase } from '../../types';
 
 /**
- * Spoken examples shown under the Ask button while the kiosk is idle.
+ * Spoken examples shown above the Start button while the kiosk is idle.
  *
  * These do double duty: they tell a first-time customer that the kiosk
  * understands natural speech (not just keywords), and they advertise the
- * capabilities that are otherwise invisible on a voice-only screen — browsing,
- * ordering, removing an item, and asking a knowledge-base question.
+ * two things this screen can do that are otherwise invisible on a
+ * voice-only UI — answer restaurant knowledge-base questions (hours,
+ * dietary options, popular dishes, facilities) AND take/modify an order.
  * They are deliberately NOT buttons: this screen has no text input path, so a
  * tappable chip would promise an interaction the kiosk cannot honour.
  */
 const EXAMPLE_PROMPTS = [
-  'What burgers do you have?',
+  'What are your opening hours?',
   "I'd like a chicken burger and fries",
+  'Do you have vegetarian or non-veg options?',
+  'What are your most popular dishes?',
+  'Where can I find the restroom?',
   'Remove the fries from my cart',
-  'Are any items vegetarian?',
-  "That's all, confirm my order",
 ];
+
 
 interface AskBarProps {
   phase: VoicePhase;
