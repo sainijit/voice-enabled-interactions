@@ -1,4 +1,5 @@
 import logging
+import math
 import tempfile
 import threading
 import time
@@ -161,6 +162,18 @@ class BaseAudioSession:
         self._captured_samples = 0
         self._source_kind = "audio"
 
+        # ── Adaptive VAD state ─────────────────────────────────────────────
+        # `request.silence_threshold` is the seed/fallback gate. When adaptive
+        # VAD is enabled the effective gate (`_vad_threshold`) is re-derived
+        # from the measured noise floor after the calibration window; until
+        # then the seed value is used, so behaviour is unchanged if
+        # calibration never completes (e.g. a very short recording).
+        self._vad_threshold: float = float(self.request.silence_threshold)
+        self._noise_floor: float | None = None
+        self._vad_calibrating: bool = config.ADAPTIVE_VAD_ENABLED
+        self._vad_calibration_rms: list[float] = []
+        # ───────────────────────────────────────────────────────────────────
+
         # ── Pipeline timing (monotonic clock) ──────────────────────────────────
         # All _t_* fields are set during _finalize_run / _stream_rag_response.
         # Using time.monotonic() for accurate durations; datetime only for display.
@@ -178,7 +191,17 @@ class BaseAudioSession:
 
         self._frame_samples = max(1, int(self.request.sample_rate * config.DEFAULT_BLOCK_DURATION_SECONDS))
         self._frame_duration_seconds = self._frame_samples / self.request.sample_rate
-        preroll_frames = max(1, int(config.DEFAULT_PREROLL_SECONDS / self._frame_duration_seconds))
+        self._vad_calibration_frames = max(
+            1, int(config.DEFAULT_VAD_CALIBRATION_SECONDS / self._frame_duration_seconds)
+        )
+        # Preroll must outlast the calibration window: calibration frames are
+        # classified as non-speech (they are what defines "non-speech"), so they
+        # land in the preroll deque. If the deque were shorter than the window a
+        # customer who starts talking immediately would lose their opening word.
+        preroll_seconds = config.DEFAULT_PREROLL_SECONDS
+        if config.ADAPTIVE_VAD_ENABLED:
+            preroll_seconds = max(preroll_seconds, config.DEFAULT_VAD_CALIBRATION_SECONDS + 0.2)
+        preroll_frames = max(1, int(preroll_seconds / self._frame_duration_seconds))
         self._preroll_frames: deque[np.ndarray] = deque(maxlen=preroll_frames)
         self._session_output_dir = Path(__file__).resolve().parent.parent / "generated_audio" / self.session_id
 
@@ -215,6 +238,9 @@ class BaseAudioSession:
                 "end_reason": self.end_reason,
                 "error": self.error,
                 "speech_started": self._speech_started,
+                "noise_floor_rms": round(self._noise_floor, 1) if self._noise_floor is not None else None,
+                "vad_threshold": round(self._vad_threshold, 1),
+                "vad_calibrated": self._noise_floor is not None,
                 "captured_audio_seconds": round(self._captured_samples / self.request.sample_rate, 3),
                 "transcript": transcript,
                 "partial_transcript": transcript,
@@ -248,7 +274,18 @@ class BaseAudioSession:
                     break
 
                 rms = self._rms(frame)
-                is_speech = rms >= self.request.silence_threshold
+                is_speech = rms >= self._vad_threshold
+                # Refine the gate from the measured floor, then re-classify:
+                # during the calibration window the seed threshold is still in
+                # force, so the first frames after calibration must be judged
+                # by the newly derived gate rather than the stale seed.
+                self._update_vad_threshold(rms, is_speech)
+                if self._vad_calibrating:
+                    # Still measuring the room — hold the frame in preroll
+                    # rather than committing to a speech/silence decision.
+                    is_speech = False
+                else:
+                    is_speech = rms >= self._vad_threshold
 
                 if not self._speech_started:
                     if is_speech:
@@ -677,6 +714,8 @@ class BaseAudioSession:
                 )
                 if config.DEFAULT_TTS_TRIM_ENABLED:
                     self._trim_tts_segment(output_path, sentence)
+                if config.DEFAULT_TTS_GAIN_ENABLED:
+                    self._apply_tts_gain(output_path)
                 with self._lock:
                     self._t_last_tts = time.monotonic()
                     self.tts_audio_segments.append(
@@ -747,11 +786,25 @@ class BaseAudioSession:
             if end - start >= samples.size:
                 return
 
+            segment = samples[start:end].astype(np.float64)
+            # Ramp both edges to true zero so back-to-back playback of
+            # separately-synthesised segments never has a sample-level jump
+            # at the seam (see DEFAULT_TTS_FADE_MS docstring in config.py).
+            fade_samples = min(
+                int(frame_rate * config.DEFAULT_TTS_FADE_MS / 1000.0),
+                segment.size // 4,
+            )
+            if fade_samples > 1:
+                ramp = np.linspace(0.0, 1.0, fade_samples)
+                segment[:fade_samples] *= ramp
+                segment[-fade_samples:] *= ramp[::-1]
+            segment = np.clip(segment, -32768, 32767).astype(np.int16)
+
             with wave.open(str(path), "wb") as wav_out:
                 wav_out.setnchannels(n_channels)
                 wav_out.setsampwidth(sample_width)
                 wav_out.setframerate(frame_rate)
-                wav_out.writeframes(samples[start:end].tobytes())
+                wav_out.writeframes(segment.tobytes())
 
             logger.debug(
                 "[TTS] session=%s trimmed %s: %.2fs -> %.2fs",
@@ -761,6 +814,84 @@ class BaseAudioSession:
         except Exception:
             logger.warning(
                 "[TTS] session=%s could not trim %s; using untrimmed audio",
+                self.session_id, path.name, exc_info=True,
+            )
+
+    def _apply_tts_gain(self, path: Path) -> None:
+        """Boost a synthesized segment's loudness for kiosk speakers.
+
+        SpeechT5's vocoder outputs a quiet, roughly constant level regardless
+        of which speaker embedding is used, so a soft-sounding kiosk is a
+        level problem, not a voice-choice problem, and there is no gain
+        control in the text-to-speech service itself. This peak-normalizes
+        the segment to ``DEFAULT_TTS_TARGET_PEAK`` of full scale, then applies
+        an extra flat boost (``DEFAULT_TTS_GAIN_DB``), with the combined gain
+        hard-clamped at ``DEFAULT_TTS_GAIN_MAX_DB`` so a near-silent or failed
+        synthesis can't be amplified into distortion/noise.
+
+        Failures are swallowed: a segment that cannot be parsed is left as
+        synthesised, since a quiet reply is preferable to a corrupted one.
+
+        Args:
+            path: WAV file to rewrite in place.
+        """
+        try:
+            with wave.open(str(path), "rb") as wav_in:
+                n_channels = wav_in.getnchannels()
+                sample_width = wav_in.getsampwidth()
+                frame_rate = wav_in.getframerate()
+                frames = wav_in.readframes(wav_in.getnframes())
+
+            # Only 16-bit mono is handled; anything else is left untouched
+            # rather than risking a corrupted rewrite.
+            if sample_width != 2 or n_channels != 1 or not frames:
+                return
+
+            samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+            if samples.size == 0:
+                return
+
+            peak = float(np.abs(samples).max())
+            if peak <= 0:
+                return
+
+            int16_max = 32767.0
+            normalize_gain = (int16_max * config.DEFAULT_TTS_TARGET_PEAK) / peak
+            extra_gain = 10.0 ** (config.DEFAULT_TTS_GAIN_DB / 20.0)
+            max_gain = 10.0 ** (config.DEFAULT_TTS_GAIN_MAX_DB / 20.0)
+            # `normalize_gain * extra_gain` alone can push the segment's peak
+            # past full scale (extra_gain is a flat boost stacked *on top of*
+            # normalization, not a replacement for it), which used to get
+            # silently hard-clipped by np.clip below. That is real clipping
+            # distortion, not a client-side volume issue: observed live on a
+            # real synthesized sentence, 14 separate clipped runs (up to 6
+            # consecutive samples each) — audible as a subtle crackle/buzz on
+            # every loud syllable. `no_clip_gain` caps the total at the exact
+            # gain that brings the peak to (not past) full scale, so this
+            # segment is never actually clipped, only ever soft-limited.
+            no_clip_gain = int16_max / peak
+            total_gain = min(normalize_gain * extra_gain, max_gain, no_clip_gain)
+
+            if abs(total_gain - 1.0) < 1e-3:
+                return  # already at target level; skip a no-op rewrite
+
+            boosted = np.clip(samples * total_gain, -int16_max, int16_max).astype(np.int16)
+
+            with wave.open(str(path), "wb") as wav_out:
+                wav_out.setnchannels(n_channels)
+                wav_out.setsampwidth(sample_width)
+                wav_out.setframerate(frame_rate)
+                wav_out.writeframes(boosted.tobytes())
+
+            logger.debug(
+                "[TTS] session=%s gained %s: peak %d -> target %.0f%% FS (total gain %.1f dB)",
+                self.session_id, path.name, int(peak),
+                config.DEFAULT_TTS_TARGET_PEAK * 100,
+                20.0 * math.log10(total_gain),
+            )
+        except Exception:
+            logger.warning(
+                "[TTS] session=%s could not apply gain to %s; using unmodified audio",
                 self.session_id, path.name, exc_info=True,
             )
 
@@ -774,6 +905,77 @@ class BaseAudioSession:
     def _rms(frame: np.ndarray) -> float:
         samples = frame.astype(np.float32)
         return float(np.sqrt(np.mean(samples * samples)))
+
+    def _update_vad_threshold(self, rms: float, is_speech: bool) -> None:
+        """Derive the speech gate from the measured background noise level.
+
+        During the calibration window every frame is treated as background and
+        collected; once enough frames exist the floor is taken as a low
+        percentile of them (robust to a customer who starts talking straight
+        away, since the quiet gaps between words still dominate the low
+        percentile). Afterwards the floor keeps tracking, but only on frames
+        classified as non-speech — adapting during speech would make the gate
+        climb mid-utterance and cut the customer off.
+
+        The resulting gate is always clamped to
+        ``[DEFAULT_VAD_THRESHOLD_MIN, DEFAULT_VAD_THRESHOLD_MAX]`` so a freak
+        measurement can never push it high enough to suppress all speech.
+
+        Args:
+            rms: Energy of the current frame.
+            is_speech: Current classification of this frame, used to freeze
+                floor adaptation while the customer is talking.
+        """
+        if not config.ADAPTIVE_VAD_ENABLED:
+            return
+
+        if self._vad_calibrating:
+            self._vad_calibration_rms.append(rms)
+            if len(self._vad_calibration_rms) < self._vad_calibration_frames:
+                return
+            floor = float(
+                np.percentile(self._vad_calibration_rms, config.DEFAULT_VAD_FLOOR_PERCENTILE)
+            )
+            self._vad_calibrating = False
+            self._vad_calibration_rms = []
+        elif not is_speech:
+            current = self._noise_floor if self._noise_floor is not None else rms
+            # Asymmetric: track a quietening room quickly, but resist being
+            # dragged upward by the quiet gaps inside an utterance.
+            alpha = (
+                config.DEFAULT_VAD_FLOOR_ADAPT_DOWN
+                if rms < current
+                else config.DEFAULT_VAD_FLOOR_ADAPT_UP
+            )
+            floor = (1.0 - alpha) * current + alpha * rms
+        else:
+            return
+
+        gate = floor * (10.0 ** (config.DEFAULT_VAD_MARGIN_DB / 20.0))
+        clamped = min(
+            max(gate, float(config.DEFAULT_VAD_THRESHOLD_MIN)),
+            float(config.DEFAULT_VAD_THRESHOLD_MAX),
+        )
+
+        first_time = self._noise_floor is None
+        self._noise_floor = floor
+        self._vad_threshold = clamped
+
+        if first_time:
+            # Logged at INFO deliberately: this single line is the on-site
+            # diagnostic for whether the venue's noise floor is workable.
+            logger.info(
+                "[VAD] session=%s | noise floor RMS=%.0f (%.1f dBFS) | gate=%.0f%s | seed was %d",
+                self.session_id,
+                floor,
+                20.0 * np.log10(max(floor, 1.0) / 32767.0),
+                clamped,
+                " (CLAMPED — venue louder than gate ceiling, "
+                "falling back to permissive detection)"
+                if clamped < gate
+                else "",
+                self.request.silence_threshold,
+            )
 
     def _chunk_duration_seconds(self, frames: list[np.ndarray]) -> float:
         total_samples = sum(len(frame) for frame in frames)

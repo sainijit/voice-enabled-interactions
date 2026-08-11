@@ -127,6 +127,45 @@ DEFAULT_TTS_CLAUSE_PAD_MS = float(os.getenv("KIOSK_CORE_TTS_CLAUSE_PAD_MS", "60"
 DEFAULT_TTS_SENTENCE_PAD_MS = float(os.getenv("KIOSK_CORE_TTS_SENTENCE_PAD_MS", "150"))
 # Amplitude below this fraction of the segment peak counts as silence.
 DEFAULT_TTS_SILENCE_FLOOR = float(os.getenv("KIOSK_CORE_TTS_SILENCE_FLOOR", "0.02"))
+# Linear fade-in/fade-out applied to the very edges of every trimmed segment,
+# in milliseconds. The trim cut lands on whatever raw sample index the pad
+# window computes to — not a zero-crossing — so the waveform can (and does,
+# depending on the phoneme at that exact point) have a non-zero value right
+# at the edge. The UI schedules segments back-to-back on one Web Audio
+# timeline with no gap and no crossfade (see useAudioQueue.ts), so any such
+# jump between one segment's last sample and the next segment's first sample
+# is heard as an audible click — intermittently, only on the sentences whose
+# cut points happen to land off a zero-crossing. This ramps every segment's
+# edges to true zero unconditionally, which fully removes that click
+# regardless of content. Kept well inside the lead/clause/sentence pads above
+# so it never touches actual speech.
+DEFAULT_TTS_FADE_MS = float(os.getenv("KIOSK_CORE_TTS_FADE_MS", "5"))
+
+# TTS output loudness. SpeechT5's vocoder outputs a quiet, roughly constant
+# level regardless of which speaker embedding is selected — swapping voices
+# (e.g. Ryan -> Kabir) changes timbre, not level, so a soft-sounding kiosk is
+# a gain problem, not a voice problem. There is no gain/volume control in the
+# text-to-speech service itself, so kiosk-core normalizes + boosts every
+# synthesized segment in place before playback.
+#
+# Two knobs stack: first each segment's peak is normalized up (or down) to
+# TARGET_PEAK, then an extra flat boost of GAIN_DB is applied on top. Total
+# applied gain is hard-clamped at GAIN_MAX_DB so that a near-silent/failed
+# synthesis (e.g. a clipped word) can't be amplified into harsh noise.
+#
+# TARGET_PEAK is intentionally kept a little below full scale (not 1.0):
+# observed live, pushing peaks to 100% FS left zero headroom, so any
+# downstream OS/mixer volume above unity (venue speaker volume nudged up on
+# demo day, PipeWire sink gain >100%, etc.) clipped and was heard as
+# crackling/distortion. 0.9 keeps ~1 dB of headroom against exactly that.
+DEFAULT_TTS_GAIN_ENABLED = os.getenv("KIOSK_CORE_TTS_GAIN_ENABLED", "true").lower() not in ("false", "0", "no")
+# Fraction of full-scale (int16 max) each segment's peak is normalized to.
+DEFAULT_TTS_TARGET_PEAK = float(os.getenv("KIOSK_CORE_TTS_TARGET_PEAK", "0.9"))
+# Extra flat boost in dB applied on top of peak normalization. Raise this
+# first if the kiosk still sounds quiet over venue noise after normalization.
+DEFAULT_TTS_GAIN_DB = float(os.getenv("KIOSK_CORE_TTS_GAIN_DB", "4.0"))
+# Safety ceiling on total applied gain (normalization + boost combined).
+DEFAULT_TTS_GAIN_MAX_DB = float(os.getenv("KIOSK_CORE_TTS_GAIN_MAX_DB", "15.0"))
 
 # Metrics collector – base URL of the standalone metrics-collector container.
 # Within Docker the service is reachable as http://metrics-collector:9000.
@@ -191,6 +230,53 @@ DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SE
 DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.70"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))
+
+# ── Adaptive VAD (noise-floor calibration) ────────────────────────────────────
+# DEFAULT_SILENCE_THRESHOLD is an absolute int16 RMS value, which is only ever
+# correct for the microphone and room it was measured on. Measured on the demo
+# unit (PCM2902 USB codec, quiet room, nobody speaking) the *silence* floor was
+# RMS ~1076 — i.e. above the 900 gate, so every frame classified as speech,
+# silence_run_seconds never accumulated, and neither the silence endpoint nor
+# the adaptive flush could ever fire. A louder venue makes that worse.
+#
+# Rather than hand-tuning the constant per venue (impossible when the venue
+# cannot be tested beforehand), the session measures the actual noise floor at
+# runtime and places the speech gate a fixed margin above it.
+#
+# FAIL-OPEN BY CONSTRUCTION: the derived gate is clamped to
+# [THRESHOLD_MIN, THRESHOLD_MAX]. If a venue is so loud that floor*margin
+# exceeds THRESHOLD_MAX, the gate saturates at THRESHOLD_MAX and behaviour
+# degrades to "treat everything as speech" — exactly today's behaviour, never
+# worse. A too-HIGH gate is the dangerous direction (speech is never detected
+# and nothing is transcribed at all), which the ceiling exists to prevent.
+ADAPTIVE_VAD_ENABLED = os.getenv("KIOSK_CORE_ADAPTIVE_VAD_ENABLED", "true").lower() not in ("false", "0", "no")
+# Audio observed before the gate is derived. Frames in this window are held in
+# the preroll buffer (which is sized to cover it), so nothing is lost.
+DEFAULT_VAD_CALIBRATION_SECONDS = float(os.getenv("KIOSK_CORE_VAD_CALIBRATION_SECONDS", "0.5"))
+# Low percentile of frame RMS used as the floor estimate. Deliberately low so
+# that a customer who starts talking immediately (making some calibration frames
+# loud) still yields a floor drawn from the quiet frames between words.
+DEFAULT_VAD_FLOOR_PERCENTILE = float(os.getenv("KIOSK_CORE_VAD_FLOOR_PERCENTILE", "20"))
+# How far above the measured floor the speech gate sits. 6 dB ~= 2x the floor.
+# Measured against real speech mixed over the real PCM2902 noise floor: at 9 dB
+# the gate needed ~15 dB SNR before it reliably saw speech, which a kiosk mic at
+# arm's length will not deliver. 6 dB detects normal speech from ~9 dB SNR while
+# still sitting clear of the floor.
+DEFAULT_VAD_MARGIN_DB = float(os.getenv("KIOSK_CORE_VAD_MARGIN_DB", "6.0"))
+DEFAULT_VAD_THRESHOLD_MIN = int(os.getenv("KIOSK_CORE_VAD_THRESHOLD_MIN", "300"))
+DEFAULT_VAD_THRESHOLD_MAX = int(os.getenv("KIOSK_CORE_VAD_THRESHOLD_MAX", "4000"))
+# Once calibrated, the floor keeps tracking on non-speech frames only (standard
+# VAD practice — never adapt the noise estimate while speech is present, or the
+# gate climbs during a long utterance and cuts the customer off).
+#
+# Adaptation is ASYMMETRIC. Quiet frames *within* an utterance (gaps between
+# words) fall below the gate and are therefore seen as "non-speech"; with a
+# symmetric EMA they dragged the floor upward mid-sentence — measured drift was
+# 1098 -> 1642, which pushed the gate up and swallowed the rest of the
+# utterance. Downward moves (room genuinely got quieter) are safe and track
+# quickly; upward moves are deliberately ~10x slower.
+DEFAULT_VAD_FLOOR_ADAPT_DOWN = float(os.getenv("KIOSK_CORE_VAD_FLOOR_ADAPT_DOWN", "0.05"))
+DEFAULT_VAD_FLOOR_ADAPT_UP = float(os.getenv("KIOSK_CORE_VAD_FLOOR_ADAPT_UP", "0.005"))
 DEFAULT_BLOCK_DURATION_SECONDS = float(os.getenv("KIOSK_CORE_BLOCK_DURATION_SECONDS", "0.1"))
 DEFAULT_PREROLL_SECONDS = float(os.getenv("KIOSK_CORE_PREROLL_SECONDS", "0.3"))
 DEFAULT_HTTP_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_HTTP_TIMEOUT_SECONDS", "300.0"))

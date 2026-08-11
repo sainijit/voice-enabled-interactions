@@ -457,6 +457,14 @@ services:
       KIOSK_CORE_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
       KIOSK_CORE_RAG_URL:      http://rag-service:8020/api/v1/query
       KIOSK_CORE_TTS_URL:      http://text-to-speech:8011/v1/audio/speech
+      # Back to Ryan (US English male, bright and projecting) — the
+      # text-to-speech service's own default_speaker, and previously
+      # confirmed the loudest/fastest built-in voice (see
+      # configs/text-to-speech/config.yaml). Kabir was tried and reverted.
+      # This override is left explicit (rather than omitted) so the choice
+      # is visible here and can be swapped without touching config.yaml.
+      # Full supported_speakers list is in configs/text-to-speech/config.yaml.
+      KIOSK_CORE_TTS_VOICE:    Ryan
       KIOSK_CORE_METRICS_URL:  http://metrics-collector:9000
       # Diarization — re-enable once HF terms are accepted for pyannote models.
       # Accept terms at: https://huggingface.co/pyannote/speaker-diarization-3.1
