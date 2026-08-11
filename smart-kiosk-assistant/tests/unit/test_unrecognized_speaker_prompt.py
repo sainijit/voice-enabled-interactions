@@ -142,6 +142,15 @@ class TestFinalizeRunSuppressesGreetingAfterExplicitStop:
     only `final_status == "completed"`, without regard to *why* the turn
     ended, so an explicit `stopped_by_api` end reason with no new speech hit
     the same greeting/retry path as true silence or a rejected bystander.
+
+    That fix was later generalised: `_finalize_run` no longer speaks
+    `DEFAULT_NO_SPEECH_PROMPT` / `DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT` for
+    *any* empty-transcript end reason (see the rationale comment above the
+    branch under test) — a silence-timeout or a rejected bystander segment is
+    just as likely to be a false alarm (Whisper hallucination, TTS echo) as
+    an explicit stop is, so the kiosk now stays silent in every empty-
+    transcript case and only logs why. These tests pin that current,
+    intentional behaviour rather than the two-prompt design that preceded it.
     """
 
     def test_explicit_stop_with_no_transcript_stays_silent(self):
@@ -155,18 +164,18 @@ class TestFinalizeRunSuppressesGreetingAfterExplicitStop:
         session._finalize_run("completed", "stopped_by_api")
         assert session.response_parts == []
 
-    def test_true_silence_timeout_still_gets_the_greeting(self):
+    def test_true_silence_timeout_stays_silent_not_a_spoken_greeting(self):
         session = _make_finalize_ready_session()
         session._finalize_run("completed", "silence_timeout")
-        assert session.response_parts == [config.DEFAULT_NO_SPEECH_PROMPT]
+        assert session.response_parts == []
 
-    def test_no_speech_detected_still_gets_the_greeting(self):
+    def test_no_speech_detected_stays_silent_not_a_spoken_greeting(self):
         session = _make_finalize_ready_session()
         session._finalize_run("completed", "no_speech_detected")
-        assert session.response_parts == [config.DEFAULT_NO_SPEECH_PROMPT]
+        assert session.response_parts == []
 
-    def test_rejected_speech_with_non_stop_end_reason_still_gets_retry_prompt(self):
+    def test_rejected_speech_with_non_stop_end_reason_also_stays_silent(self):
         session = _make_finalize_ready_session()
         session._rejected_speech_chunks = 1
         session._finalize_run("completed", "silence_timeout")
-        assert session.response_parts == [config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT]
+        assert session.response_parts == []

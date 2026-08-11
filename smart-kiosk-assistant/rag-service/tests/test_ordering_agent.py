@@ -613,6 +613,49 @@ class TestStripAdminLeak:
         ) is False
 
 
+class TestStripLeakedDirectives:
+    """System-prompt instructions echoed verbatim must never reach TTS."""
+
+    def test_real_mcp_rejection_message_pronoun_form_is_stripped(self):
+        # Regression: observed live. mcp_server._rejection_payload's own
+        # unavailable-item template reads "...Tell them those are unavailable
+        # and offer these real alternatives instead: ...", a pronoun
+        # back-reference to "the customer" rather than the literal word
+        # "customer". The model echoed this verbatim over TTS because the
+        # original _LEAKED_DIRECTIVE_RE only matched openers followed by the
+        # literal word "customer"/"the customer", never "them".
+        reply = (
+            "\"burji\", \"kathi_roll\" are not on the menu. Do not invent "
+            "them and do not ask the customer to try again. Tell them those "
+            "are unavailable and offer these real alternatives instead: "
+            "Chicken Tikka Kathi Roll (149), Paneer Bhurji Kathi Roll (129)."
+        )
+        cleaned = ordering_agent._strip_leaked_directives(reply)
+        assert "Tell them" not in cleaned
+        assert "Chicken Tikka Kathi Roll (149)" not in cleaned
+
+    def test_classic_tell_the_customer_form_still_stripped(self):
+        reply = "Tell the customer their cart is already empty."
+        assert ordering_agent._strip_leaked_directives(reply) == reply  # no trailing text, falls back unchanged
+        # With trailing customer-facing text present, only the directive is removed.
+        reply2 = "Sure! Tell the customer their cart is already empty. Anything else?"
+        cleaned2 = ordering_agent._strip_leaked_directives(reply2)
+        assert "Tell the customer" not in cleaned2
+        assert "Anything else?" in cleaned2
+
+    def test_ordinary_reply_addressing_customer_as_you_is_untouched(self):
+        reply = "I've added your item. Would you like anything else?"
+        assert ordering_agent._strip_leaked_directives(reply) == reply
+
+    def test_ordinary_reply_starting_with_offer_or_ask_word_is_untouched(self):
+        # "Offer"/"Ask" as ordinary words (not directive verbs targeting
+        # "customer"/"them") must not be stripped.
+        reply = "Offer valid until midnight, would you like to add fries?"
+        assert ordering_agent._strip_leaked_directives(reply) == reply
+        reply2 = "Ask away, I'm happy to help with the menu."
+        assert ordering_agent._strip_leaked_directives(reply2) == reply2
+
+
 class TestIsSingleAddUtterance:
     """_is_single_add_utterance must be conservative — only True for provably single adds."""
 

@@ -18,6 +18,8 @@ class Product(BaseModel):
     name: str
     category: str
     price: float
+    is_bestseller: bool = False
+    is_veg: bool = True
 
 
 class ProductResolution(BaseModel):

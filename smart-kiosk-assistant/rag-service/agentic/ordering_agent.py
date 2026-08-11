@@ -78,7 +78,13 @@ _USER_ID_INJECTED_TOOLS = frozenset({
 # chicken burger), wasting 5–7 decode tokens per call.  Dietary preferences are
 # expressed by the user in natural language, stored in _dietary_prefs by the
 # extraction layer, and injected here — the model never needs to generate them.
-_DIETARY_INJECTED_TOOLS = frozenset({"place_order", "update_order"})
+# Also covers list_products/get_popular_products so a customer who has stated
+# a vegetarian/vegan preference gets a veg-only catalogue/bestseller list for
+# open-ended "suggest me some dishes"/"what are your favourites" questions,
+# without the model needing to ask again or filter free-hand.
+_DIETARY_INJECTED_TOOLS = frozenset({
+    "place_order", "update_order", "list_products", "get_popular_products",
+})
 
 # The current turn's raw customer utterance (untouched by the
 # ``[customer_name=...]``/``[dietary=...]`` tag prefixes), read by ``_mcp_fn``
@@ -267,6 +273,8 @@ _KNOWLEDGE_QUERY_RE = re.compile(
     r"parking|deliver(?:y|ies)?|takeaway|dine[- ]?in|wifi|contact|phone|"
     r"halal|vegetarian|vegan|allergen|gluten|ingredient|spicy|"
     r"payment|upi|card|cash|policy|refund|"
+    r"restrooms?|bathrooms?|washrooms?|toilets?|facilit(?:y|ies)|"
+    r"wheelchair|accessib\w*|seating|"
     r"(?:tell|know|hear|learn) (?:me )?(?:something |anything )?about "
     r"(?:the|your|this) (?:restaurant|outlet|place|kiosk)|"
     r"about (?:the|your|this) (?:restaurant|outlet|place))\b",
@@ -614,7 +622,7 @@ def _needs_tool_retry(reply: str, message: str) -> tuple[bool, str]:
         return True, _ORDER_NUDGE
     if _CATALOGUE_QUERY_RE.search(message):
         return True, _CATALOGUE_NUDGE
-    if _KNOWLEDGE_QUERY_RE.search(message):
+    if _KNOWLEDGE_QUERY_RE.search(message) and not _is_dietary_statement_only(message):
         return True, _KNOWLEDGE_NUDGE
     if _PROMISE_RE.search(reply) or _REFUSAL_RE.search(reply):
         return True, _RETRY_NUDGE
@@ -650,6 +658,7 @@ _TOOL_NAMES = (
     "knowledge_lookup",
     "list_categories",
     "list_products",
+    "get_popular_products",
     "place_order",
     "update_order",
     "get_order",
@@ -737,10 +746,21 @@ def _strip_markdown(reply: str) -> str:
 # prefill tokens on every turn. Matching is anchored to a small set of
 # second-person directive openers so that ordinary replies, which address the
 # customer as "you", are never touched.
+#
+# Also matches "them" as the object, not just "customer"/"the customer":
+# observed live, `mcp_server._rejection_payload`'s own unavailable-item
+# template reads "...Tell them those are unavailable and offer these real
+# alternatives instead: ..." — a pronoun back-reference to "the customer"
+# mentioned earlier in the same instruction string — and the original
+# regex, anchored to the literal word "customer", let that exact sentence
+# through verbatim to TTS. A genuine customer-facing reply never opens a
+# sentence with "Tell them"/"Ask them" in the third person (it addresses the
+# customer directly as "you"), so adding "them" as an alternative object is
+# safe and does not risk stripping legitimate replies.
 _LEAKED_DIRECTIVE_RE = re.compile(
     r"(?:^|(?<=[.!?]))\s*"
     r"(?:Tell|Inform|Ask|Remind|Offer|Do not tell|Never tell)\s+"
-    r"(?:the\s+)?customer\b[^.!?]*[.!?]",
+    r"(?:the\s+)?(?:customers?|them)\b[^.!?]*[.!?]",
     re.IGNORECASE,
 )
 
@@ -1301,6 +1321,16 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                         for p in data
                     ]
 
+        elif tool_name == "get_popular_products":
+            # Same shape as list_products, minus the {category, item_count}
+            # summary branch — this tool never returns that shape.
+            if isinstance(data, list):
+                compressed = [
+                    {"name": p.get("name"), "price": _price(p.get("price"))}
+                    for p in data
+                    if isinstance(p, dict) and "name" in p
+                ]
+
         elif tool_name in ("place_order", "update_order", "get_order", "get_current_order"):
             if isinstance(data, dict):
                 items = [
@@ -1447,8 +1477,9 @@ def _extract_customer_name(message: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 # Checked before the positive patterns: "I'm not vegetarian" / "I eat
-# non-veg" must clear a preference, not set "vegetarian" from the substring
-# match that would otherwise fire.
+# non-veg" must clear a preference (capability statement — "I can eat
+# anything"), not set "vegetarian" from the substring match that would
+# otherwise fire.
 _NON_VEG_PATTERN = re.compile(
     r"\b(?:i(?:'m| am)\s+not\s+vegetarian|i(?:'m| am)\s+non[- ]?veg(?:etarian)?|"
     r"i\s+eat\s+(?:meat|non[- ]?veg(?:etarian)?|chicken|fish))\b",
@@ -1462,6 +1493,43 @@ _VEGETARIAN_PATTERN = re.compile(
 )
 
 
+def _is_dietary_statement_only(message: str) -> bool:
+    """Return True if ``message`` is a bare dietary capability statement.
+
+    "I'm vegetarian" / "I'm vegan" / "I eat meat" / "I'm not vegetarian" match
+    ``_KNOWLEDGE_QUERY_RE`` on the word "vegetarian"/"vegan" alone, even though
+    they are not a question about the outlet's menu — they are Rule 0.6
+    (acknowledge, no tool call). Both the pre-grounding step and
+    ``_needs_tool_retry`` must treat them as exempt from the knowledge path,
+    or the model gets irrelevant [knowledge] context (e.g. opening hours)
+    injected ahead of, or forced into, a plain preference statement.
+    """
+    return bool(
+        _NON_VEG_PATTERN.search(message)
+        or _VEGAN_PATTERN.search(message)
+        or _VEGETARIAN_PATTERN.search(message)
+    )
+
+
+# Ad-hoc "suggest me veg dishes" / "show me non-veg options" — the customer
+# names veg/non-veg as a filter on THIS request rather than stating an
+# ongoing capability ("I'm vegetarian"). Distinct from the patterns above:
+# "non veg dishes" is a request to see ONLY non-vegetarian items (a positive
+# filter), not "I'm not vegetarian" (which means no restriction at all — see
+# _NON_VEG_PATTERN). Scoped to fire only alongside a food-request context
+# word so a plain order like "I'll have the veg burger" (Rule 1 DIRECT ORDER,
+# resolved by name/id, never reaches list_products/get_popular_products)
+# does not get misread as a lasting dietary statement.
+_DIET_ADHOC_CONTEXT_RE = re.compile(
+    r"\b(?:dish|dishes|item|items|option|options|food|menu|thing|things|stuff|"
+    r"suggest|suggestion|suggestions|recommend|recommendation|recommendations|"
+    r"favou?rite|favou?rites|bestseller|bestsellers)\b",
+    re.IGNORECASE,
+)
+_NON_VEG_ADHOC_PATTERN = re.compile(r"\bnon[- ]?veg(?:etarian)?\b", re.IGNORECASE)
+_VEG_ADHOC_PATTERN = re.compile(r"\b(?:veg|vegetarian|vegan)\b", re.IGNORECASE)
+
+
 def _extract_dietary_pref(message: str) -> str | None:
     """Pull a stated dietary preference out of an utterance, if present.
 
@@ -1471,8 +1539,11 @@ def _extract_dietary_pref(message: str) -> str | None:
     later turn instead of relying on conversation memory.
 
     Returns:
-        ``"vegetarian"``, ``"vegan"``, ``"none"`` (explicit non-veg statement,
-        clears any earlier preference), or ``None`` if nothing was stated.
+        ``"vegetarian"``, ``"vegan"``, ``"non_vegetarian"`` (positive filter —
+        show only non-veg items, e.g. "suggest me non veg dishes"),
+        ``"none"`` (explicit non-veg capability statement, e.g. "I'm not
+        vegetarian" — clears any earlier preference, no restriction), or
+        ``None`` if nothing was stated.
     """
     if not message:
         return None
@@ -1482,6 +1553,13 @@ def _extract_dietary_pref(message: str) -> str | None:
         return "vegan"
     if _VEGETARIAN_PATTERN.search(message):
         return "vegetarian"
+    # Ad-hoc "veg dishes"/"non veg options" phrasing — only trusted alongside
+    # a food-request context word (see _DIET_ADHOC_CONTEXT_RE docstring).
+    if _DIET_ADHOC_CONTEXT_RE.search(message):
+        if _NON_VEG_ADHOC_PATTERN.search(message):
+            return "non_vegetarian"
+        if _VEG_ADHOC_PATTERN.search(message):
+            return "vegetarian"
     return None
 
 
@@ -1500,6 +1578,8 @@ Every turn must call a tool first unless the customer is only being social ("hi"
 
 0.5. TENTATIVE ("I was thinking of", "maybe a", "I might want", "what about a", "I'm considering", "I was going to get", "possibly a") → NOT an order. Call list_products for the named category and ask which item they want. "ordering" inside a tentative phrase does not trigger Rule 1.
 
+0.6. DIETARY STATEMENT ONLY ("I'm vegetarian", "I'm vegan", "I eat meat", "I'm not vegetarian" with no item, category, or question attached) → NOT an order, NOT a request for suggestions. Do not call any tool. Acknowledge briefly in one short sentence and ask what they'd like (e.g. "Got it — what can I get you?"). Never output a tag, bracket, or the word "dietary" as your reply.
+
 1. DIRECT ORDER ("I want X", "add X", "order X", "get me X") → place_order (or update_order if a draft exists). Do NOT call list_products first.
    - error + available_products: offer those by name and price, ask which they want.
    - success: reply with NAME and PRICE from the result, copy every upsell display string verbatim, then ask to confirm. Never state any name or price not in the result.
@@ -1512,6 +1592,8 @@ Every turn must call a tool first unless the customer is only being social ("hi"
 4. BROWSE CATEGORY ("show me burgers") → list_products(category). List EVERY returned item with name and price in one sentence, ask which they want.
 
 4b. BROWSE WHOLE MENU → list_categories (not list_products). Name the categories, ask which to see.
+
+4c. OPEN SUGGESTION ("suggest something to drink", "what do you recommend", "what's your most ordered dish", "show me your favourites/bestsellers") with no specific item and nothing in the cart to base a pairing on → get_popular_products(category), inferring category from what they named (drink/beverage → beverages) or omitting it for a restaurant-wide answer. List returned items with name and price. Never call get_upsell_suggestions here — that tool requires real cart product_ids and fabricates a result without them. Empty result: say nothing is flagged popular in that category, ask what they'd like instead. Never state a dish or price that is not in the result.
 
 5. MANAGE / CONFIRM — "show my order", "what's my total" → get_current_order(user_id). "confirm / yes / place it" → confirm_active_order. Only say the order is confirmed after the tool returns successfully; read back the order_id exactly as the tool returned it. Never invent or reformat an order_id.
 
@@ -1535,8 +1617,8 @@ When [knowledge]…[/knowledge] is present, answer from it directly — do not c
 
 ## Message tags
 [customer_name=X]: use the name sparingly — at most once per reply. Never let it imply an order was placed or confirmed.
-[dietary=vegetarian/vegan]: steer suggestions accordingly; does not change which rule applies. Never pass dietary as a tool argument yourself — it is injected automatically.
-Never speak any tag, bracket, or the words "customer_name", "user_id", or "dietary" aloud.
+[dietary=X]: X is the customer's known dietary preference (vegetarian, vegan, or non-veg-only). Use it silently to steer suggestions; it does not change which rule applies. Never pass dietary as a tool argument yourself — it is injected automatically.
+These tags appear only when a preference is already known — if you don't see one, none is known; never invent, guess, or output a tag yourself, and never speak any tag, bracket, or the words "customer_name", "user_id", or "dietary" aloud.
 
 ## Tool errors
 {"error": …, "available_products": […]} means the item is not on the menu. Never say "try again". Offer the available_products alternatives by name and price.
@@ -1725,13 +1807,19 @@ class OrderingAgent:
             # 8–19 tokens per call at 18 tps (~444–1,050ms).
             if tool_name in _USER_ID_INJECTED_TOOLS:
                 kwargs["user_id"] = _user_id_ctx.get() or "anonymous"
-            if tool_name in ("place_order", "update_order"):
+            if tool_name in _DIETARY_INJECTED_TOOLS:
                 # Overwrite rather than merge: this is the deterministically
                 # captured preference, always more trustworthy than anything
-                # the model might guess and pass itself.
+                # the model might guess and pass itself. Applies to
+                # place_order/update_order (cart writes) as well as
+                # list_products/get_popular_products (catalogue reads), so a
+                # customer who has stated a veg/vegan preference gets a
+                # veg-only result for "suggest me some dishes" without the
+                # model needing to ask again or filter free-hand.
                 diet = _dietary_ctx.get()
                 if diet:
                     kwargs["dietary"] = diet
+            if tool_name in ("place_order", "update_order"):
                 # Catch a stale/pending item reference the model failed to
                 # update against what the customer just said this turn (e.g.
                 # a pending "French fries" confirmation still in the call
@@ -2119,12 +2207,21 @@ class OrderingAgent:
         # Catalogue and order intents are excluded: those are answered by
         # list_products/place_order, and prose context would only invite the
         # model to invent products from marketing copy.
+        #
+        # A dietary preference STATEMENT ("I'm vegetarian", "I'm not
+        # vegetarian") is also excluded: it matches _KNOWLEDGE_QUERY_RE on
+        # the word "vegetarian"/"vegan" but is not a question about the
+        # outlet's offerings — it is Rule 0.6 (acknowledge, no tool call).
+        # Pre-grounding it injected irrelevant [knowledge] prose ahead of a
+        # plain statement and produced garbled replies (observed: the model
+        # echoing a bare "[dietary=...]" tag instead of a real sentence).
         pregrounded = False
         if (
             agent_cfg.PREGROUND_KNOWLEDGE
             and _KNOWLEDGE_QUERY_RE.search(message)
             and not _CATALOGUE_QUERY_RE.search(message)
             and not _ORDER_ACTION_RE.search(message)
+            and not _is_dietary_statement_only(message)
         ):
             try:
                 context = await knowledge_lookup(message)

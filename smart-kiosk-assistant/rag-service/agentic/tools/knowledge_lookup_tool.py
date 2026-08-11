@@ -244,6 +244,30 @@ _USE_LIST_PRODUCTS = (
     "from memory."
 )
 
+# Same failure mode as _PRICE_QUERY_RE, different phrasing: "what's popular /
+# your favourite / most ordered" is still a catalogue question — the answer is
+# a specific dish name and price, not marketing prose. Observed live: "show me
+# restaurant favourite dishes" against this knowledge base returned one real
+# item (Chicken Tikka Kathi Roll, ₹169 — correctly [HIT]-tagged in the source)
+# plus two fabricated ones ("Butter Chicken Wrap ₹179", "Crispy Chicken
+# Burrito ₹179") that do not exist anywhere in the catalogue. The bestseller
+# flag is catalogue data (``Product.is_bestseller``, seeded from the same
+# products.yaml that prices come from) — ``get_popular_products`` is the
+# authoritative source, never free-text retrieval.
+_POPULARITY_QUERY_RE = re.compile(
+    r"\b(?:popular|favou?rite\w*|bestsell\w*|best.selling|most.order\w*|"
+    r"top.selling|recommend\w*|suggest\w*)\b",
+    re.IGNORECASE,
+)
+
+_USE_GET_POPULAR_PRODUCTS = (
+    "This question asks what is popular/most-ordered/recommended. The "
+    "knowledge base is not authoritative for this and using it would invent "
+    "dishes that do not exist. Call `get_popular_products` instead and answer "
+    "only from its result. Do not answer this question from the knowledge "
+    "base or from memory."
+)
+
 # Questions fully answered by the pinned root section (see _root_section
 # above): the same ~14 venue-level facts the root chunk covers in one block.
 # Retrieval scores are not a reliable relevance signal at this corpus size —
@@ -294,7 +318,7 @@ def _format_sources(records, budget: int = _MAX_CONTEXT_CHARS) -> str:
 # with retrieved context (see ordering_agent's PREGROUND_KNOWLEDGE) must be
 # able to tell these apart from real context, since injecting either into the
 # prompt as if it were fact would be actively misleading.
-NON_CONTEXT_RESULTS = frozenset({_NO_CONTEXT, _USE_LIST_PRODUCTS})
+NON_CONTEXT_RESULTS = frozenset({_NO_CONTEXT, _USE_LIST_PRODUCTS, _USE_GET_POPULAR_PRODUCTS})
 
 
 async def knowledge_lookup(question: str) -> str:
@@ -305,7 +329,9 @@ async def knowledge_lookup(question: str) -> str:
 
     Do NOT use this tool for prices, product availability, or menu listings —
     call ``list_products`` for those, it is the only authoritative source for
-    product names and prices. Do NOT use it for placing, updating, or
+    product names and prices. Do NOT use it for "what's popular / your
+    favourites / most ordered / what do you recommend" — call
+    ``get_popular_products`` for those. Do NOT use it for placing, updating, or
     confirming orders.
 
     Args:
@@ -324,6 +350,17 @@ async def knowledge_lookup(question: str) -> str:
             question[:120],
         )
         return _USE_LIST_PRODUCTS
+
+    # Refuse popularity/recommendation questions — see _POPULARITY_QUERY_RE.
+    # Checked before the KB-override carve-out below would otherwise apply,
+    # since "popular"/"recommend" never co-occurs with a genuine KB override
+    # term in a way that changes which tool is authoritative.
+    if _POPULARITY_QUERY_RE.search(question):
+        logger.info(
+            "[TOOL:knowledge_lookup] Redirecting popularity question to get_popular_products: %r",
+            question[:120],
+        )
+        return _USE_GET_POPULAR_PRODUCTS
 
     started = time.perf_counter()
     try:

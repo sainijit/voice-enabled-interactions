@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 
 class AbstractProductRepository(ABC):
     @abstractmethod
-    async def list_all(self, category: str | None = None) -> list[Product]:
+    async def list_all(
+        self, category: str | None = None, is_veg: bool | None = None
+    ) -> list[Product]:
         ...
 
     @abstractmethod
@@ -36,6 +38,12 @@ class AbstractProductRepository(ABC):
 
     @abstractmethod
     async def upsert(self, product: Product) -> None:
+        ...
+
+    @abstractmethod
+    async def list_bestsellers(
+        self, category: str | None = None, is_veg: bool | None = None
+    ) -> list[Product]:
         ...
 
 
@@ -86,41 +94,96 @@ class SqliteProductRepository(AbstractProductRepository):
     def __init__(self, db: aiosqlite.Connection):
         self._db = db
 
-    async def list_all(self, category: str | None = None) -> list[Product]:
+    _COLUMNS = "product_id, name, category, price, is_bestseller, is_veg"
+
+    @staticmethod
+    def _row_to_product(r) -> Product:
+        return Product(
+            product_id=r[0], name=r[1], category=r[2], price=r[3],
+            is_bestseller=bool(r[4]), is_veg=bool(r[5]),
+        )
+
+    async def list_all(
+        self, category: str | None = None, is_veg: bool | None = None
+    ) -> list[Product]:
+        clauses: list[str] = []
+        params: list[object] = []
         if category:
-            cursor = await self._db.execute(
-                "SELECT product_id, name, category, price FROM products WHERE category = ? ORDER BY name",
-                (category,),
-            )
-        else:
-            cursor = await self._db.execute(
-                "SELECT product_id, name, category, price FROM products ORDER BY category, name"
-            )
+            clauses.append("category = ?")
+            params.append(category)
+        if is_veg is not None:
+            clauses.append("is_veg = ?")
+            params.append(int(is_veg))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        cursor = await self._db.execute(
+            f"SELECT {self._COLUMNS} FROM products{where} ORDER BY category, name",
+            params,
+        )
         rows = await cursor.fetchall()
-        return [Product(product_id=r[0], name=r[1], category=r[2], price=r[3]) for r in rows]
+        return [self._row_to_product(r) for r in rows]
 
     async def get(self, product_id: str) -> Product | None:
         cursor = await self._db.execute(
-            "SELECT product_id, name, category, price FROM products WHERE product_id = ?",
+            f"SELECT {self._COLUMNS} FROM products WHERE product_id = ?",
             (product_id,),
         )
         row = await cursor.fetchone()
         if not row:
             return None
-        return Product(product_id=row[0], name=row[1], category=row[2], price=row[3])
+        return self._row_to_product(row)
 
     async def upsert(self, product: Product) -> None:
         await self._db.execute(
             """
-            INSERT INTO products (product_id, name, category, price)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO products (product_id, name, category, price, is_bestseller, is_veg)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(product_id) DO UPDATE SET
-                name     = excluded.name,
-                category = excluded.category,
-                price    = excluded.price
+                name          = excluded.name,
+                category      = excluded.category,
+                price         = excluded.price,
+                is_bestseller = excluded.is_bestseller,
+                is_veg        = excluded.is_veg
             """,
-            (product.product_id, product.name, product.category, product.price),
+            (
+                product.product_id, product.name, product.category, product.price,
+                int(product.is_bestseller), int(product.is_veg),
+            ),
         )
+
+    async def list_bestsellers(
+        self, category: str | None = None, is_veg: bool | None = None
+    ) -> list[Product]:
+        """Return only the products flagged ``is_bestseller`` in the catalogue.
+
+        This is the authoritative, hallucination-free source for "what's
+        popular / most ordered / your favourites" questions — the data comes
+        from the same catalogue used for prices and availability, never from
+        free-text knowledge-base retrieval, so the model cannot pad the
+        result with dishes that do not exist (see agentic/ordering_agent.py
+        Rule 7 for how this is wired into the agent).
+
+        Args:
+            is_veg: When the customer has stated a vegetarian/vegan
+                preference, restricts the result to ``is_veg = true`` items
+                only, so "show me your favourites" never surfaces a
+                non-vegetarian dish to someone who said they're vegetarian.
+        """
+        clauses = ["is_bestseller = 1"]
+        params: list[object] = []
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if is_veg is not None:
+            clauses.append("is_veg = ?")
+            params.append(int(is_veg))
+        where = " AND ".join(clauses)
+        cursor = await self._db.execute(
+            f"SELECT {self._COLUMNS} FROM products WHERE {where} ORDER BY category, name",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_product(r) for r in rows]
+
 
 
 class SqliteOrderRepository(AbstractOrderRepository):

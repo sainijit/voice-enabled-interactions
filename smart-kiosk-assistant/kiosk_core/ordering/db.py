@@ -26,10 +26,12 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS products (
-    product_id TEXT PRIMARY KEY,
-    name       TEXT NOT NULL,
-    category   TEXT NOT NULL,
-    price      REAL NOT NULL
+    product_id     TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    category       TEXT NOT NULL,
+    price          REAL NOT NULL,
+    is_bestseller  INTEGER NOT NULL DEFAULT 0,
+    is_veg         INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -68,6 +70,25 @@ async def init_db(db_path: str | None = None) -> None:
     logger.info("[DB] Initialising database at %s", path)
     async with aiosqlite.connect(path) as db:
         await db.executescript(_CREATE_TABLES_SQL)
+        # ``CREATE TABLE IF NOT EXISTS`` does not add columns to a table that
+        # already exists from before this column was introduced — migrate it
+        # explicitly. SQLite has no "ADD COLUMN IF NOT EXISTS", so the
+        # duplicate-column error on an already-migrated database is expected
+        # and swallowed.
+        try:
+            await db.execute(
+                "ALTER TABLE products ADD COLUMN is_bestseller INTEGER NOT NULL DEFAULT 0"
+            )
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+        try:
+            await db.execute(
+                "ALTER TABLE products ADD COLUMN is_veg INTEGER NOT NULL DEFAULT 1"
+            )
+        except aiosqlite.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
         await db.commit()
     logger.info("[DB] Schema bootstrap complete")
 

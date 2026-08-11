@@ -23,16 +23,17 @@ from kiosk_core.ordering.models import Order, OrderItem  # noqa: E402
 
 
 class _FakeProduct:
-    def __init__(self, product_id: str, name: str, price: float) -> None:
+    def __init__(self, product_id: str, name: str, price: float, category: str) -> None:
         self.product_id = product_id
         self.name = name
         self.price = price
+        self.category = category
 
 
 _CATALOGUE = {
-    "chicken_burger": _FakeProduct("chicken_burger", "Chicken Burger", 120.0),
-    "classic_french_fries": _FakeProduct("classic_french_fries", "Classic French Fries", 80.0),
-    "cold_coffee": _FakeProduct("cold_coffee", "Cold Coffee", 90.0),
+    "chicken_burger": _FakeProduct("chicken_burger", "Chicken Burger", 120.0, "burgers"),
+    "classic_french_fries": _FakeProduct("classic_french_fries", "Classic French Fries", 80.0, "sides"),
+    "cold_coffee": _FakeProduct("cold_coffee", "Cold Coffee", 90.0, "beverages"),
 }
 
 
@@ -47,8 +48,16 @@ class _FakeService:
     async def resolve_product(self, ref: str):
         return _CATALOGUE.get(ref)
 
-    async def suggest_products(self, ref: str):
+    async def suggest_products(self, ref: str, n: int = 5, dietary: str | None = None, min_score: float = 0.5):
         return list(_CATALOGUE.values())
+
+    async def list_products(self, category: str | None = None):
+        # Mirrors OrderingService.list_products — used by mcp_server's
+        # _resolve_category to discover real menu categories, and by the
+        # ambiguous-reference path to offer choices within one.
+        if category is None:
+            return list(_CATALOGUE.values())
+        return [p for p in _CATALOGUE.values() if p.category == category]
 
     async def place_order(self, req):
         self.placed_items = list(req.items)

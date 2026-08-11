@@ -15,6 +15,12 @@
 - **Wi-Fi**: SSID QuickBite_Guest | **Loyalty Program**: QBRewards (app-based)
 - **Catering / Bulk Orders**: Min 24-hour notice; contact manager at outlet
 
+## Facilities
+- **Restrooms**: Located near the entrance, past the counter, on the left side of the seating area. Signposted "Restrooms". Wheelchair-accessible unisex restroom available.
+- **Seating**: 64 indoor + 12 outdoor patio seats (see above); high chairs available for toddlers on request at the counter.
+- **Accessibility**: Ramp access at the main entrance; wheelchair-accessible restroom and indoor seating; staff can assist with tray carrying on request.
+- **Baby Care**: A baby-changing station is available inside the accessible restroom.
+
 ## Dietary Tag System
 - **[V]**: Pure Vegetarian (no eggs, no meat, no fish)
 - **[E]**: Eggetarian (contains egg; no meat or fish)

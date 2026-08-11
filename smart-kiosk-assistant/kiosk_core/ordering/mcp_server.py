@@ -7,6 +7,7 @@ The server is mounted into the FastAPI app — not run as a separate process.
 
 Tools exposed:
   - list_products   — list available menu items (optional category filter)
+  - get_popular_products — bestseller/most-ordered items (optional category)
   - place_order     — create a new draft order
   - update_order    — add/increment items on an existing draft order
   - get_order       — get order summary (items, quantities, total)
@@ -54,6 +55,14 @@ _ALL_CATEGORY_ALIASES = frozenset({
     "all", "any", "all categories", "everything", "full", "full menu", "menu",
     "menu items", "items", "food", "all items", "all products", "none",
     "null", "n/a", "-",
+    # Dietary words are not categories — they arrive separately via the
+    # `dietary` param (injected server-side, see _DIETARY_INJECTED_TOOLS).
+    # The model sometimes puts the dietary word here too when the customer
+    # asked for e.g. "veg dishes"/"non veg options" with no named category;
+    # treating it as "no category filter" lets the dietary param alone do
+    # the filtering instead of failing to match any real category.
+    "veg", "vegetarian", "vegan", "non veg", "non-veg", "nonveg",
+    "non vegetarian", "non-vegetarian", "nonvegetarian", "non_vegetarian",
 })
 
 # Singular forms the model uses for categories stored as plurals.
@@ -383,7 +392,9 @@ async def list_categories() -> list[dict[str, Any]]:
 
 
 @mcp.tool()
-async def list_products(category: str | None = None) -> list[dict[str, Any]] | dict[str, Any]:
+async def list_products(
+    category: str | None = None, dietary: str | None = None
+) -> list[dict[str, Any]] | dict[str, Any]:
     """List menu products in a category, or the category list when none is given.
 
     Args:
@@ -392,18 +403,21 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]] | d
                   prices. Call with NO category only to discover which
                   categories exist — that returns category names and item
                   counts, NOT products.
+        dietary: Leave unset — the caller fills this in automatically from
+                 whatever the customer stated earlier in the conversation
+                 (see the ordering agent's dietary tracking).
 
     Returns:
-        With a category: products with product_id, name, category, and price.
-        Without one: ``{category, item_count}`` entries to offer the customer.
-        With a category/item that matches nothing we carry at all (e.g.
-        "dosa", "sushi"): ``{category_not_found: True, message, categories}``
-        — see the comment below for why this is a distinct case.
+        With a category: products with product_id, name, category, price,
+        and is_veg. Without one: ``{category, item_count}`` entries to offer
+        the customer. With a category/item that matches nothing we carry at
+        all (e.g. "dosa", "sushi"): ``{category_not_found: True, message,
+        categories}`` — see the comment below for why this is a distinct case.
     """
     requested = category
     category = _normalise_category(category)
 
-    products = await _svc().list_products(category=category)
+    products = await _svc().list_products(category=category, dietary=dietary)
 
     if not products and category is not None:
         # This string never matched a real category (aliases for "everything"
@@ -425,7 +439,7 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]] | d
         # term. Case 1 then still finds its real matches; case 2 finds
         # nothing and gets an honest "we don't carry that" signal instead of
         # unrelated products.
-        all_products = await _svc().list_products(category=None)
+        all_products = await _svc().list_products(category=None, dietary=dietary)
         tokens = [t for t in re.sub(r"[^a-z0-9 ]", " ", (requested or "").lower()).split() if t]
         name_matches = [
             p for p in all_products
@@ -462,7 +476,14 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]] | d
     # catalogue". Returning 26 products made the model recite all of them:
     # ~19 s of generation and ~40 s of synthesised speech. Returning the
     # categories makes the short answer the only answer available.
-    if category is None and DEFAULT_LIST_PRODUCTS_SUMMARY:
+    #
+    # A dietary filter changes this: "show me veg dishes"/"non veg dishes"
+    # with no named category is a genuine request for the (much smaller,
+    # dietary-narrowed) item list, not a "what categories do you have"
+    # question — collapsing it to a category summary silently drops the
+    # customer's actual ask. Only apply the summary shortcut when nothing
+    # has narrowed the result set.
+    if category is None and dietary is None and DEFAULT_LIST_PRODUCTS_SUMMARY:
         counts: dict[str, int] = {}
         for product in products:
             counts[product.category] = counts.get(product.category, 0) + 1
@@ -479,6 +500,44 @@ async def list_products(category: str | None = None) -> list[dict[str, Any]] | d
     logger.info(
         "[MCP-SERVER] list_products category=%s (requested=%r) → %d item(s)",
         category, requested, len(products),
+    )
+    return [p.model_dump() for p in products]
+
+
+@mcp.tool()
+async def get_popular_products(
+    category: str | None = None, dietary: str | None = None
+) -> list[dict[str, Any]] | dict[str, Any]:
+    """Return the restaurant's popular / bestseller / most-ordered dishes.
+
+    Use this for open-ended requests with no specific item or cart in mind —
+    "what do you recommend", "suggest something to drink", "what's your most
+    ordered dish", "show me your favourites". This is a catalogue flag set by
+    the restaurant, not a generated opinion, so it is safe to state as fact.
+
+    Do NOT use ``get_upsell_suggestions`` for this — that tool only pairs
+    items already in the customer's cart and requires real cart product_ids;
+    calling it with no cart (or an invented product_id) produces an empty or
+    fabricated result.
+
+    Args:
+        category: Optional category to narrow within (e.g. "beverages" for
+                  "suggest something to drink"). Omit for restaurant-wide
+                  favourites.
+        dietary: Leave unset — the caller fills this in automatically from
+                 whatever the customer stated earlier in the conversation
+                 (see the ordering agent's dietary tracking).
+
+    Returns:
+        Products with product_id, name, category, price, is_veg,
+        is_bestseller=true. An empty list means nothing in that category is
+        flagged popular — say so, do not invent an answer.
+    """
+    category = _normalise_category(category)
+    products = await _svc().list_bestsellers(category=category, dietary=dietary)
+    logger.info(
+        "[MCP-SERVER] get_popular_products category=%s dietary=%s → %d item(s)",
+        category, dietary, len(products),
     )
     return [p.model_dump() for p in products]
 

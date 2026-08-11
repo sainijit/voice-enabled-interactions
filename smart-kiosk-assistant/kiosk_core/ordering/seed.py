@@ -54,6 +54,8 @@ async def seed_products(products_yaml_path: str) -> int:
                 name=entry["name"],
                 category=entry["category"],
                 price=float(entry["price"]),
+                is_bestseller=bool(entry.get("is_bestseller", False)),
+                is_veg=bool(entry.get("is_veg", True)),
             )
             await repo.upsert(product)
             count += 1

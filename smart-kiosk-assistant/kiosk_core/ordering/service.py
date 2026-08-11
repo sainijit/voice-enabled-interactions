@@ -43,6 +43,23 @@ def _normalize(text: str) -> str:
     return _NON_ALNUM.sub(" ", (text or "").lower()).strip()
 
 
+def _is_veg_filter(dietary: str | None) -> bool | None:
+    """Map a captured dietary preference to an ``is_veg`` repository filter.
+
+    ``"vegetarian"``/``"vegan"`` → ``True`` (veg-only). ``"non_vegetarian"``
+    (an explicit "suggest me non veg dishes" request) → ``False`` (non-veg
+    only — excludes plain-veg items like fries or a brownie, not just
+    "chicken burger"). Anything else, including ``"none"`` (a capability
+    statement like "I'm not vegetarian" meaning no restriction) or ``None``
+    (nothing stated), → ``None`` (unfiltered).
+    """
+    if dietary in ("vegetarian", "vegan"):
+        return True
+    if dietary == "non_vegetarian":
+        return False
+    return None
+
+
 def _resolve_against(ref: str, products: list[Product]) -> ProductResolution:
     """Pure product-reference resolver: no I/O, deterministic, unit-testable.
 
@@ -118,18 +135,6 @@ def _resolve_against(ref: str, products: list[Product]) -> ProductResolution:
     return ProductResolution(status="NOT_FOUND")
 
 
-def _is_veg(product_id: str) -> bool:
-    """True if ``product_id`` follows the catalogue's ``-VEG-`` naming convention.
-
-    ``products.yaml`` has no dedicated dietary field; every id instead embeds
-    ``VEG`` or ``NV`` (e.g. ``BURGER-VEG-001`` / ``BURGER-NV-001``). This reads
-    that existing convention rather than adding a schema migration, since the
-    only current need is filtering "did you mean" suggestions for a customer
-    who has stated a vegetarian/vegan preference.
-    """
-    return "-VEG-" in (product_id or "").upper()
-
-
 class OrderingService:
     """Business logic for product catalogue, cart management, and upsell.
 
@@ -144,11 +149,46 @@ class OrderingService:
     # Products
     # ------------------------------------------------------------------
 
-    async def list_products(self, category: str | None = None) -> list[Product]:
+    async def list_products(
+        self, category: str | None = None, dietary: str | None = None
+    ) -> list[Product]:
+        """List catalogue products, optionally restricted by dietary preference.
+
+        Args:
+            dietary: ``"vegetarian"``/``"vegan"`` restricts the result to
+                veg items only. ``"non_vegetarian"`` restricts to non-veg
+                items only (an explicit "suggest me non veg dishes" request).
+                Any other value (including None/"none") returns the
+                unfiltered list. See :func:`_is_veg_filter`.
+        """
+        is_veg = _is_veg_filter(dietary)
         async with get_db() as db:
             repo = SqliteProductRepository(db)
-            products = await repo.list_all(category=category)
-        logger.debug("[SERVICE] list_products category=%s → %d result(s)", category, len(products))
+            products = await repo.list_all(category=category, is_veg=is_veg)
+        logger.debug(
+            "[SERVICE] list_products category=%s dietary=%s → %d result(s)",
+            category, dietary, len(products),
+        )
+        return products
+
+    async def list_bestsellers(
+        self, category: str | None = None, dietary: str | None = None
+    ) -> list[Product]:
+        """Return bestseller products, optionally restricted by dietary preference.
+
+        Args:
+            dietary: Same semantics as :meth:`list_products` — restricts to
+                veg-only or non-veg-only bestsellers when the customer has
+                stated a preference.
+        """
+        is_veg = _is_veg_filter(dietary)
+        async with get_db() as db:
+            repo = SqliteProductRepository(db)
+            products = await repo.list_bestsellers(category=category, is_veg=is_veg)
+        logger.debug(
+            "[SERVICE] list_bestsellers category=%s dietary=%s → %d result(s)",
+            category, dietary, len(products),
+        )
         return products
 
     async def get_product(self, product_id: str) -> Product | None:
@@ -307,10 +347,11 @@ class OrderingService:
         so the agent can offer real options instead of inventing items.
 
         Args:
-            dietary: ``"vegetarian"`` or ``"vegan"`` restricts the ranked pool
-                to veg items first, so an ambiguous reference from a customer
-                who has stated a veg preference (e.g. "burger") offers only
-                veg alternatives instead of a mix. If restricting would leave
+            dietary: ``"vegetarian"``/``"vegan"`` restricts the ranked pool to
+                veg items first; ``"non_vegetarian"`` restricts it to non-veg
+                items first — so an ambiguous reference from a customer who
+                has stated a preference (e.g. "burger") offers only matching
+                alternatives instead of a mix. If restricting would leave
                 nothing to suggest, falls back to the full catalogue rather
                 than returning an empty list.
             min_score: Minimum ``difflib`` ratio a candidate must clear to be
@@ -328,10 +369,11 @@ class OrderingService:
             repo = SqliteProductRepository(db)
             products = await repo.list_all()
         pool = products
-        if dietary in ("vegetarian", "vegan"):
-            veg_only = [p for p in products if _is_veg(p.product_id)]
-            if veg_only:
-                pool = veg_only
+        preferred_is_veg = _is_veg_filter(dietary)
+        if preferred_is_veg is not None:
+            filtered = [p for p in products if p.is_veg == preferred_is_veg]
+            if filtered:
+                pool = filtered
         nref = _normalize(ref)
         scored = [
             (p, difflib.SequenceMatcher(None, nref, _normalize(p.name)).ratio())
