@@ -323,6 +323,21 @@ DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT = os.getenv(
     "Sorry, I couldn't clearly recognise your voice. Could you please repeat that?",
 )
 
+# A single rejected turn is unreliable evidence of a real bystander — it is
+# just as often a Whisper hallucination or TTS echo bleeding into the mic from
+# the kiosk's own previous reply (see the rationale where this constant is
+# consumed, in BaseAudioSession._finalize_run). Speaking
+# DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT after every single rejection reintroduces
+# that false-positive noise. Requiring this many CONSECUTIVE rejected turns in
+# the SAME conversation (tracked by agent_session_id, reset the moment a turn
+# produces a real transcript) before speaking distinguishes a persistent
+# bystander/misconfigured enrollment from a one-off echo, while still telling
+# a genuinely ignored customer something after a couple of silently dropped
+# turns rather than leaving them with no feedback at all.
+DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD = int(
+    os.getenv("KIOSK_CORE_CONSECUTIVE_REJECTION_THRESHOLD", "2")
+)
+
 # ── Ordering & Agent feature ─────────────────────────────────────────────────
 # Set KIOSK_CORE_ORDERING_ENABLED=false to disable the ordering/agent feature
 # and keep the legacy RAG-only Q&A flow.

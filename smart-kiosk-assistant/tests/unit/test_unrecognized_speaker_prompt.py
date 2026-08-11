@@ -143,14 +143,17 @@ class TestFinalizeRunSuppressesGreetingAfterExplicitStop:
     ended, so an explicit `stopped_by_api` end reason with no new speech hit
     the same greeting/retry path as true silence or a rejected bystander.
 
-    That fix was later generalised: `_finalize_run` no longer speaks
-    `DEFAULT_NO_SPEECH_PROMPT` / `DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT` for
-    *any* empty-transcript end reason (see the rationale comment above the
-    branch under test) — a silence-timeout or a rejected bystander segment is
-    just as likely to be a false alarm (Whisper hallucination, TTS echo) as
-    an explicit stop is, so the kiosk now stays silent in every empty-
-    transcript case and only logs why. These tests pin that current,
-    intentional behaviour rather than the two-prompt design that preceded it.
+    That fix was later refined further: `_finalize_run` still stays silent on
+    an explicit stop (`stopped_by_api`) and on the FIRST rejected-speech turn
+    of a conversation — a lone rejection is still just as likely to be a
+    Whisper hallucination or TTS echo as a real bystander. But
+    `config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD` consecutive rejected
+    turns in the SAME conversation (tracked by `agent_session_id` — see
+    `_note_conversation_rejection`) now escalates to speaking
+    `DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT`, because staying silent forever
+    reproduced the original problem: a customer who really is being ignored,
+    turn after turn, gets no feedback at all and the kiosk looks broken. An
+    explicit stop never escalates, at any streak length.
     """
 
     def test_explicit_stop_with_no_transcript_stays_silent(self):
@@ -175,7 +178,86 @@ class TestFinalizeRunSuppressesGreetingAfterExplicitStop:
         assert session.response_parts == []
 
     def test_rejected_speech_with_non_stop_end_reason_also_stays_silent(self):
+        """The FIRST rejected turn in a conversation still stays silent."""
         session = _make_finalize_ready_session()
         session._rejected_speech_chunks = 1
         session._finalize_run("completed", "silence_timeout")
         assert session.response_parts == []
+
+
+@pytest.mark.tier1
+class TestConsecutiveRejectionEscalation:
+    """Repeated rejected turns in one conversation must eventually speak up.
+
+    Regression: after the fix pinned by ``TestFinalizeRunSuppressesGreeting-
+    AfterExplicitStop`` above, a customer whose voice the analyzer never
+    matched (bystander, or a mistuned enrollment rejecting the real
+    customer) got silently ignored turn after turn with no feedback at all.
+    These tests pin the escalation that fixes that: the SAME conversation
+    (``agent_session_id``) must accumulate
+    ``config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD`` consecutive rejected
+    turns before the kiosk speaks, and any real accepted transcript resets
+    the streak.
+    """
+
+    def test_single_rejection_stays_silent(self):
+        session = _make_finalize_ready_session("convo-a")
+        session._rejected_speech_chunks = 1
+        session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == []
+
+    def test_threshold_consecutive_rejections_speaks_the_retry_prompt(self):
+        threshold = config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD
+        session = None
+        for _ in range(threshold):
+            session = _make_finalize_ready_session("convo-b")
+            session._rejected_speech_chunks = 1
+            session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == [config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT]
+
+    def test_streak_resets_after_speaking(self):
+        """After escalating once, the streak starts over from zero."""
+        threshold = config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD
+        for _ in range(threshold):
+            session = _make_finalize_ready_session("convo-c")
+            session._rejected_speech_chunks = 1
+            session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == [config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT]
+
+        # One more rejection right after escalating is turn 1 of a new
+        # streak, not turn (threshold + 1) of the old one.
+        session = _make_finalize_ready_session("convo-c")
+        session._rejected_speech_chunks = 1
+        session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == []
+
+    def test_a_real_transcript_resets_the_streak(self):
+        threshold = config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD
+        for _ in range(threshold - 1):
+            session = _make_finalize_ready_session("convo-d")
+            session._rejected_speech_chunks = 1
+            session._finalize_run("completed", "silence_timeout")
+
+        # A turn that WAS understood should clear the streak, not just add
+        # to a running tally the next rejection would then complete.
+        heard_session = _make_finalize_ready_session("convo-d")
+        heard_session.transcript_parts = ["one cold coffee"]
+        heard_session._stream_rag_response = lambda text: None  # type: ignore[method-assign]
+        heard_session._finalize_run("completed", "silence_timeout")
+
+        session = _make_finalize_ready_session("convo-d")
+        session._rejected_speech_chunks = 1
+        session._finalize_run("completed", "silence_timeout")
+        assert session.response_parts == []
+
+    def test_conversations_are_tracked_independently(self):
+        session_x = _make_finalize_ready_session("convo-x")
+        session_x._rejected_speech_chunks = 1
+        session_x._finalize_run("completed", "silence_timeout")
+
+        session_y = _make_finalize_ready_session("convo-y")
+        session_y._rejected_speech_chunks = 1
+        session_y._finalize_run("completed", "silence_timeout")
+
+        assert session_x.response_parts == []
+        assert session_y.response_parts == []

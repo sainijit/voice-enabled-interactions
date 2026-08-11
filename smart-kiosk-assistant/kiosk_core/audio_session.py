@@ -62,6 +62,67 @@ _DOMAIN_KEYWORDS: frozenset[str] = frozenset({
     "help", "assist", "please", "want", "need", "like", "get",
 })
 
+# ── Consecutive speaker-rejection tracking (cross-turn, per conversation) ──
+# ``_rejected_speech_chunks`` on a session instance only counts chunks
+# rejected WITHIN that one turn. A BaseAudioSession is created fresh per
+# voice turn, so distinguishing "this is the first rejected turn" from "this
+# conversation has been rejected several turns running" needs state that
+# outlives a single instance, keyed by the persistent ``agent_session_id``
+# (see its docstring in __init__) shared across every turn of one
+# conversation. See config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD for the
+# rationale on why a streak, not a single rejection, gates the retry prompt.
+_consecutive_rejections_lock = threading.Lock()
+_consecutive_rejections: dict[str, int] = {}
+# Simple bound so a long-running kiosk process doesn't accumulate one entry
+# per conversation forever. A kiosk lane never has anywhere near this many
+# conversations in flight at once, so clearing on overflow only ever discards
+# stale entries from finished conversations.
+_MAX_TRACKED_CONVERSATIONS = 500
+
+
+def _note_conversation_rejection(agent_session_id: str) -> int:
+    """Record a rejected turn for ``agent_session_id`` and return the streak.
+
+    Args:
+        agent_session_id: The persistent conversation identifier shared
+            across every voice turn of one customer's session.
+
+    Returns:
+        The number of consecutive rejected turns recorded so far for this
+        conversation, including this one.
+    """
+    with _consecutive_rejections_lock:
+        if (
+            len(_consecutive_rejections) > _MAX_TRACKED_CONVERSATIONS
+            and agent_session_id not in _consecutive_rejections
+        ):
+            _consecutive_rejections.clear()
+        count = _consecutive_rejections.get(agent_session_id, 0) + 1
+        _consecutive_rejections[agent_session_id] = count
+        return count
+
+
+def _reset_conversation_rejections(agent_session_id: str) -> None:
+    """Clear the rejection streak for ``agent_session_id``.
+
+    Called whenever a turn produces a real, accepted transcript — the
+    customer was successfully heard, so any earlier rejection streak no
+    longer says anything about whether they are being ignored now.
+    """
+    with _consecutive_rejections_lock:
+        _consecutive_rejections.pop(agent_session_id, None)
+
+
+def reset_all_rejection_tracking() -> None:
+    """Drop all tracked rejection streaks.
+
+    Test-only entry point — prevents state from one test leaking into the
+    next when several tests reuse the same default conversation id.
+    """
+    with _consecutive_rejections_lock:
+        _consecutive_rejections.clear()
+
+
 class BaseAudioSession:
     def __init__(
         self,
@@ -426,6 +487,10 @@ class BaseAudioSession:
         self._t_turn_start = time.monotonic()
         transcript = " ".join(part for part in self.transcript_parts if part).strip()
         if transcript:
+            # A real, accepted transcript ends any rejection streak for this
+            # conversation — the customer was just heard, so a stale streak
+            # from earlier turns must not trigger the retry prompt later.
+            _reset_conversation_rejections(self.agent_session_id)
             try:
                 self._stream_rag_response(transcript)
             except Exception as exc:
@@ -433,10 +498,11 @@ class BaseAudioSession:
                     self.error = str(exc)
                 logger.exception("RAG query failed for session %s", self.session_id)
         elif final_status == "completed":
-            # The transcript is empty — the kiosk has nothing meaningful to say.
-            # Log why the turn produced no output, then stay silent.
+            # The transcript is empty — the kiosk usually has nothing
+            # meaningful to say. Log why the turn produced no output, then
+            # decide whether this specific case still warrants speaking.
             #
-            # Rationale for always staying silent here:
+            # Rationale for staying silent by default:
             #  - "stopped_by_api" / "no_speech_detected": user explicitly stopped
             #    without speaking — speaking any prompt looks like the button
             #    had no effect.
@@ -444,20 +510,41 @@ class BaseAudioSession:
             #    by Whisper hallucinations ("you", "thank you", etc.) on
             #    background noise or TTS echo from the previous turn. These are
             #    not real utterances, so "I couldn't recognise your voice" is
-            #    a false alarm that confuses the customer.
+            #    a false alarm on the FIRST occurrence.
             #  - "silence_timeout": VAD ended the turn with no speech — the
             #    customer is either not there or not ready; prompting can feel
             #    intrusive and the UI already shows "🎧 Listening…" or re-arms
             #    automatically in conversation mode.
             #
-            # In all empty-transcript cases the correct UX is silence: the
-            # kiosk only speaks when it has something real to respond to.
-            if self._rejected_speech_chunks:
-                logger.info(
-                    "Session %s: %d chunk(s) of speech were rejected by the speaker "
-                    "filter (likely hallucination or echo) — staying silent",
-                    self.session_id, self._rejected_speech_chunks,
-                )
+            # Exception: rejected speech is escalated once it becomes a
+            # STREAK (config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD
+            # consecutive rejected turns in the same conversation). Staying
+            # silent forever there regressed to the exact problem the retry
+            # prompt originally existed for — a genuinely ignored customer
+            # (real bystander, or a mistuned enrollment rejecting them) gets
+            # zero feedback and the kiosk looks unresponsive. An explicit stop
+            # never escalates: speaking here would look like the stop button
+            # didn't work.
+            if self._rejected_speech_chunks and end_reason != "stopped_by_api":
+                streak = _note_conversation_rejection(self.agent_session_id)
+                threshold = config.DEFAULT_CONSECUTIVE_REJECTION_THRESHOLD
+                if streak >= threshold:
+                    logger.info(
+                        "Session %s: %d chunk(s) rejected AND %d consecutive "
+                        "rejected turn(s) for conversation %s (threshold=%d) "
+                        "— asking the customer to repeat",
+                        self.session_id, self._rejected_speech_chunks, streak,
+                        self.agent_session_id, threshold,
+                    )
+                    self._synthesize_response(config.DEFAULT_UNRECOGNIZED_SPEAKER_PROMPT)
+                    _reset_conversation_rejections(self.agent_session_id)
+                else:
+                    logger.info(
+                        "Session %s: %d chunk(s) of speech were rejected by the speaker "
+                        "filter (likely hallucination or echo) — staying silent "
+                        "(streak=%d/%d)",
+                        self.session_id, self._rejected_speech_chunks, streak, threshold,
+                    )
             else:
                 logger.info(
                     "Session %s: empty transcript (end_reason=%s) — staying silent",

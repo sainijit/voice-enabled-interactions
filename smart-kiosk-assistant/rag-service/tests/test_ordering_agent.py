@@ -688,3 +688,84 @@ class TestIsSingleAddUtterance:
     def test_compound_returns_false(self, utt):
         from agentic.ordering_agent import _is_single_add_utterance
         assert _is_single_add_utterance(utt) is False, f"Expected False for: {utt!r}"
+
+
+class TestIsOutOfScopeSittingSynonyms:
+    """"Sitting capacity"/"sitting option" were missing from the in-domain
+    keyword set, so a bare in-domain question about seating was wrongly
+    refused as world knowledge. Only "seat"/"seating" matched before this fix.
+    """
+
+    @pytest.mark.parametrize("message", [
+        "What is the sitting capacity?",
+        "Tell me about the sitting option.",
+        "How many people can sit here?",
+        "Do you have outdoor seats?",
+    ])
+    def test_seating_related_questions_are_in_scope(self, message):
+        assert ordering_agent._is_out_of_scope(message) is False
+
+
+class TestExtractDietaryPref:
+    """Deterministic veg/non-veg preference extraction.
+
+    Regression coverage for the bug where naming BOTH veg and non-veg in the
+    same ad-hoc request (e.g. "veg option and non-veg options") collapsed to
+    ``non_vegetarian`` only, because ``_VEG_ADHOC_PATTERN`` also matches the
+    substring "veg" inside "non-veg" and the non-veg branch was checked (and
+    returned) first.
+    """
+
+    @pytest.mark.parametrize("message", [
+        "I'm vegetarian",
+        "I am vegetarian",
+    ])
+    def test_stated_vegetarian_capability(self, message):
+        assert ordering_agent._extract_dietary_pref(message) == "vegetarian"
+
+    def test_stated_vegan_capability(self):
+        assert ordering_agent._extract_dietary_pref("I'm vegan") == "vegan"
+
+    @pytest.mark.parametrize("message", [
+        "I eat meat",
+        "I'm not vegetarian",
+    ])
+    def test_non_veg_capability_clears_restriction(self, message):
+        assert ordering_agent._extract_dietary_pref(message) == "none"
+
+    @pytest.mark.parametrize("message", [
+        "suggest me veg dishes",
+        "show me vegetarian options",
+        "any veg suggestions?",
+    ])
+    def test_adhoc_veg_only_filter(self, message):
+        assert ordering_agent._extract_dietary_pref(message) == "vegetarian"
+
+    @pytest.mark.parametrize("message", [
+        "suggest me non veg dishes",
+        "show me non-veg options",
+        "any nonveg suggestions?",
+    ])
+    def test_adhoc_non_veg_only_filter(self, message):
+        assert ordering_agent._extract_dietary_pref(message) == "non_vegetarian"
+
+    @pytest.mark.parametrize("message", [
+        "veg option and non-veg options",
+        "show me veg and non veg dishes",
+        "suggest veg items and non-veg items too",
+    ])
+    def test_adhoc_both_veg_and_non_veg_named_shows_full_catalogue(self, message):
+        # Naming both is not a valid single positive filter - it must not
+        # silently collapse to non_vegetarian and hide every veg item.
+        assert ordering_agent._extract_dietary_pref(message) == "none"
+
+    def test_plain_order_by_name_is_not_a_lasting_preference(self):
+        # "I'll have the veg burger" resolves via direct-order name matching
+        # and must not be misread as a dietary-filter statement.
+        assert ordering_agent._extract_dietary_pref("I'll have the veg burger.") is None
+
+    def test_no_dietary_mention_returns_none(self):
+        assert ordering_agent._extract_dietary_pref("What are the burger options?") is None
+
+    def test_empty_message_returns_none(self):
+        assert ordering_agent._extract_dietary_pref("") is None

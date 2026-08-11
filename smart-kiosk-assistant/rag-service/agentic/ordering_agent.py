@@ -357,7 +357,8 @@ _QUESTION_RE = re.compile(
 _IN_DOMAIN_RE = re.compile(
     r"\b(?:order|orders|cart|bill|total|checkout|pay|payment|price|cost|"
     r"menu|item|items|food|eat|drink|drinks|meal|combo|snack|"
-    r"restaurant|outlet|kiosk|store|shop|kitchen|staff|table|seat|seating|"
+    r"restaurant|outlet|kiosk|store|shop|kitchen|staff|table|"
+    r"seat|seats|seating|sit|sitting|"
     r"add|added|remove|cancel|confirm|serve|serves|recommend|suggest|"
     r"veg|vegan|vegetarian|halal|allergen|gluten|spicy|calorie|calories|"
     r"burger|burgers|pizza|pizzas|wrap|wraps|fries|dessert|desserts|"
@@ -1542,8 +1543,10 @@ def _extract_dietary_pref(message: str) -> str | None:
         ``"vegetarian"``, ``"vegan"``, ``"non_vegetarian"`` (positive filter —
         show only non-veg items, e.g. "suggest me non veg dishes"),
         ``"none"`` (explicit non-veg capability statement, e.g. "I'm not
-        vegetarian" — clears any earlier preference, no restriction), or
-        ``None`` if nothing was stated.
+        vegetarian" — clears any earlier preference, no restriction; also
+        returned when BOTH veg and non-veg are named in the same turn, e.g.
+        "veg and non-veg options" — a single positive filter would silently
+        drop half of what was asked for), or ``None`` if nothing was stated.
     """
     if not message:
         return None
@@ -1556,9 +1559,22 @@ def _extract_dietary_pref(message: str) -> str | None:
     # Ad-hoc "veg dishes"/"non veg options" phrasing — only trusted alongside
     # a food-request context word (see _DIET_ADHOC_CONTEXT_RE docstring).
     if _DIET_ADHOC_CONTEXT_RE.search(message):
-        if _NON_VEG_ADHOC_PATTERN.search(message):
+        has_non_veg = bool(_NON_VEG_ADHOC_PATTERN.search(message))
+        # _VEG_ADHOC_PATTERN also matches the "veg" inside "non-veg", so a
+        # standalone veg mention must be tested against the message with any
+        # non-veg mention stripped out first — otherwise "non veg dishes"
+        # alone looks like both were requested.
+        veg_only_text = _NON_VEG_ADHOC_PATTERN.sub("", message)
+        has_veg = bool(_VEG_ADHOC_PATTERN.search(veg_only_text))
+        if has_non_veg and has_veg:
+            # Customer named BOTH filters in the same turn, e.g. "veg option
+            # and non-veg options" — observed live: this collapsed to
+            # non_vegetarian only, silently hiding every veg item from a
+            # customer who explicitly asked to see both.
+            return "none"
+        if has_non_veg:
             return "non_vegetarian"
-        if _VEG_ADHOC_PATTERN.search(message):
+        if has_veg:
             return "vegetarian"
     return None
 
