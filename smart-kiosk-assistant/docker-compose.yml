@@ -166,10 +166,8 @@ services:
       - "8010:8010"
     devices:
       - /dev/dri:/dev/dri
-      # Intel NPU passthrough. Defaults to /dev/null so hosts without an NPU
-      # (and CI runners) start unchanged; set ACCEL_MOUNT_PATH=/dev/accel/accel0
-      # in .env to expose it. Mirrors the upstream edge-ai-libraries pattern.
-      - ${ACCEL_MOUNT_PATH:-/dev/null}:/dev/accel/accel0
+      # Intel NPU passthrough.
+      - /dev/accel/accel0:/dev/accel/accel0
     group_add:
       - video
       - "${RENDER_GID:-992}"
@@ -177,16 +175,6 @@ services:
       # Required for Level Zero to enumerate the Intel NPU. Harmless when no
       # NPU node is mapped — OpenVINO then reports CPU/GPU only.
       ZE_ENABLE_ALT_DRIVERS: libze_intel_npu.so
-      # ASR placement. Measured on Core Ultra 7 356H across 25 real 16 kHz
-      # kiosk chunks (ov_genai whisper-base, language forced to en):
-      #   CPU 284 ms | GPU 57 ms | NPU 58 ms  (median)
-      # NPU gives GPU-class ASR latency while leaving the whole iGPU to the
-      # LLM, but only applies when ASR_PROVIDER=openvino.
-      AUDIO_ANALYZER__MODELS__ASR__DEVICE: ${ASR_DEVICE:-CPU}
-      # Default stays on the PyTorch "openai" provider: it is the only path
-      # exposing no_speech_prob/avg_logprob, which the hallucination filter
-      # needs. ov_genai is ~5x faster but transcribes pure silence as "you".
-      AUDIO_ANALYZER__MODELS__ASR__PROVIDER: ${ASR_PROVIDER:-openai}
       # Whisper mis-detects language on short kiosk chunks and replies in
       # Spanish; forcing en cut WER 11.0% -> 7.0% on every device. The language
       # is a per-request parameter, so it is set by kiosk-core

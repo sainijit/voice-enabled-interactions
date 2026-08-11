@@ -71,7 +71,7 @@ Each model-hosting service reads its device from a pinned config file:
 The supported devices for each model are listed in the
 [Supported / validated models](#supported--validated-models) table above.
 
-Use uppercase device names (`CPU`, `GPU`). `rag-service` expects
+Use uppercase device names (`CPU`, `GPU`, `NPU`). `rag-service` expects
 them as quoted strings; `audio-analyzer` and `text-to-speech` unquoted.
 
 After editing, restart the affected service and confirm OpenVINO picked
@@ -88,6 +88,100 @@ OpenVINO prints a `Compiling model on <DEVICE>` line on first load.
 > service. Whether a given model actually runs on GPU and how it
 > performs depends on the OpenVINO version and operator coverage for
 > that model.
+
+## Audio Analyzer ASR Provider/Device (`config.yaml`)
+
+For ASR provider/device selection, use:
+
+1. `configs/audio-analyzer/config.yaml`
+
+This repository treats it as the single source of truth. Configure:
+
+- `models.asr.provider`
+- `models.asr.device`
+
+`docker-compose.yml` must provide container hardware/runtime access (for
+example Intel NPU passthrough and Level Zero runtime variables), but
+must not override ASR provider/device.
+
+### Enable OpenVINO Whisper on NPU
+
+Edit `configs/audio-analyzer/config.yaml`:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: NPU
+```
+
+Then restart `audio-analyzer`:
+
+```bash
+docker compose down
+docker compose up -d audio-analyzer
+```
+
+Verify effective environment and health:
+
+```bash
+docker exec audio-analyzer env | grep AUDIO_ANALYZER
+docker logs audio-analyzer
+curl http://localhost:8010/health
+```
+
+Also verify that compose is not injecting ASR provider/device overrides:
+
+```bash
+docker compose config | grep AUDIO_ANALYZER__MODELS__ASR__
+```
+
+The provider/device override keys should not be present.
+
+Look for startup log lines showing OpenVINO Whisper loaded on `NPU`
+(for example `Loading Model: model name=whisper-base, device=NPU`) and
+`Application startup complete.`
+
+### Other Supported ASR Configurations
+
+OpenAI + CPU:
+
+```yaml
+models:
+  asr:
+    provider: openai
+    device: CPU
+```
+
+OpenVINO + GPU:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: GPU
+```
+
+OpenVINO + CPU:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: CPU
+```
+
+### Unsupported Combinations: OpenAI + GPU/NPU
+
+`models.asr.provider=openai` supports `CPU` only in this stack.
+The following are not supported by the current OpenAI/PyTorch Whisper backend:
+
+- `models.asr.provider=openai` with `models.asr.device=GPU`
+- `models.asr.provider=openai` with `models.asr.device=NPU`
+
+- Use `openvino + NPU` for NPU execution.
+- Use `openvino + GPU` for GPU execution.
+- For OpenAI/PyTorch Whisper, use a supported device such as `CPU`.
 
 ## Environment Variables
 

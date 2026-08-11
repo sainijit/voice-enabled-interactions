@@ -51,7 +51,8 @@ The device field lives in the per-service pinned config (see
 does not appear in the logs:
 
 - Check the value is supported for that model (e.g. `audio-analyzer`
-  ASR supports `CPU` and `GPU` only).
+  ASR supports `CPU` for `provider: openai`, and `CPU|GPU|NPU` for
+  `provider: openvino`).
 - For `GPU`: confirm `/dev/dri` exists and the Intel OpenVINO GPU
   runtime is installed.
 - Restart the affected service after the change:
@@ -65,6 +66,42 @@ does not appear in the logs:
   ```bash
   docker compose logs <service-name> | grep -i -E "device|compiling|GPU|CPU"
   ```
+
+For `audio-analyzer` specifically, check the effective provider/device
+selection from `configs/audio-analyzer/config.yaml`:
+
+```bash
+grep -n "provider:\|device:" configs/audio-analyzer/config.yaml
+```
+
+and verify startup behavior:
+
+```bash
+docker logs audio-analyzer
+```
+
+`docker-compose.yml` should provide hardware/runtime access (for example
+`/dev/accel/accel0` passthrough and Level Zero configuration) but should
+not override ASR provider/device.
+
+### OpenAI + GPU/NPU Fails for Whisper ASR
+
+The current OpenAI/PyTorch Whisper backend supports `CPU` only.
+
+- Unsupported: `provider: openai` + `device: GPU`
+- Unsupported: `provider: openai` + `device: NPU`
+- Supported NPU path: `provider: openvino` + `device: NPU`
+- Supported GPU path: `provider: openvino` + `device: GPU`
+
+If you hit startup/model-load errors with `openai + GPU/NPU`, switch to
+`openvino + GPU/NPU` (or use `openai + CPU`) and recreate `audio-analyzer`:
+
+```bash
+docker compose down
+docker compose up -d audio-analyzer
+docker logs audio-analyzer
+curl http://localhost:8010/health
+```
 
 ## Permission Errors on Mounted Folders
 

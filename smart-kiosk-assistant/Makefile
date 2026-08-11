@@ -250,6 +250,36 @@ check-env: ## Validate .env and all required variables before running the stack
 		echo "  $(GREEN)✓ TARGET_DEVICE=$(TARGET_DEVICE)$(NC)"; \
 	fi; \
 	\
+	ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
+	if [ ! -f "$$ASR_CFG_PATH" ]; then \
+		echo "  $(RED)✗ $$ASR_CFG_PATH not found$(NC)"; \
+		ERRORS=$$((ERRORS+1)); \
+	else \
+		ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
+		ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
+		if [ -z "$$ASR_CFG_PROVIDER" ] || [ -z "$$ASR_CFG_DEVICE" ]; then \
+			echo "  $(RED)✗ Could not read models.asr.provider/device from $$ASR_CFG_PATH$(NC)"; \
+			ERRORS=$$((ERRORS+1)); \
+		else \
+			echo "  $(GREEN)✓ ASR config source = $$ASR_CFG_PATH$(NC)"; \
+			echo "  $(GREEN)✓ ASR provider=$$ASR_CFG_PROVIDER, device=$$ASR_CFG_DEVICE$(NC)"; \
+			if [ "$$ASR_CFG_PROVIDER" != "openai" ] && [ "$$ASR_CFG_PROVIDER" != "openvino" ] && [ "$$ASR_CFG_PROVIDER" != "whispercpp" ]; then \
+				echo "  $(RED)✗ Invalid ASR provider in $$ASR_CFG_PATH: $$ASR_CFG_PROVIDER$(NC)  (must be openai | openvino | whispercpp)"; \
+				ERRORS=$$((ERRORS+1)); \
+			fi; \
+			if [ "$$ASR_CFG_DEVICE" != "CPU" ] && [ "$$ASR_CFG_DEVICE" != "GPU" ] && [ "$$ASR_CFG_DEVICE" != "NPU" ]; then \
+				echo "  $(RED)✗ Invalid ASR device in $$ASR_CFG_PATH: $$ASR_CFG_DEVICE$(NC)  (must be CPU | GPU | NPU)"; \
+				ERRORS=$$((ERRORS+1)); \
+			fi; \
+			if [ "$$ASR_CFG_PROVIDER" = "openai" ] && [ "$$ASR_CFG_DEVICE" != "CPU" ]; then \
+				echo "  $(RED)✗ Invalid ASR combination in $$ASR_CFG_PATH: provider=openai with device=$$ASR_CFG_DEVICE$(NC)"; \
+				echo "    OpenAI ASR provider supports CPU only in this stack."; \
+				echo "    Use provider=openvino for GPU or NPU execution."; \
+				ERRORS=$$((ERRORS+1)); \
+			fi; \
+		fi; \
+	fi; \
+	\
 	if [ "$(_RTSP_SOURCE_MODE_RAW)" != "" ] && [ "$(_RTSP_SOURCE_MODE_RAW)" != "sample" ] && [ "$(_RTSP_SOURCE_MODE_RAW)" != "live" ]; then \
 		echo "  $(RED)✗ RTSP_SOURCE_MODE='$(_RTSP_SOURCE_MODE_RAW)' is invalid$(NC)  (must be sample | live)"; \
 		ERRORS=$$((ERRORS+1)); \
@@ -321,6 +351,11 @@ show-config: ## Print resolved configuration
 	@echo "  TARGET_DEVICE     = $(TARGET_DEVICE)"
 	@echo "  OVMS_MODEL_NAME   = $(OVMS_MODEL_NAME)"
 	@echo "  RENDER_GID        = $(RENDER_GID)"
+	@ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
+	ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
+	ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
+	echo "  ASR_PROVIDER      = $$ASR_CFG_PROVIDER (from $$ASR_CFG_PATH)"; \
+	echo "  ASR_DEVICE        = $$ASR_CFG_DEVICE (from $$ASR_CFG_PATH)"
 	@echo ""
 	@echo "$(YELLOW)Authentication:$(NC)"
 	@echo "  HF_TOKEN          = $$([ -n '$(HF_TOKEN)' ] && echo '***set***' || echo 'NOT SET')"
