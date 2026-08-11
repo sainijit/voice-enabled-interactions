@@ -203,3 +203,83 @@ def test_non_empty_cart_confirms_normally(svc):
     result = _call(mcp_server.confirm_active_order, user_id="kiosk-user")
     assert "error" not in result
     assert svc.confirmed_ids == [82]
+
+
+# ---------------------------------------------------------------------------
+# Partial implausible-quantity rejection (per item, not all-or-nothing)
+# ---------------------------------------------------------------------------
+#
+# Live regression: "one mango lassi and 100 pepsi" — a two-item place_order
+# call — used to abort the ENTIRE call the instant it saw the implausible
+# 100, so even the perfectly clear "one mango lassi" was silently dropped.
+# ``_split_implausible_quantities`` now filters per line, mirroring the
+# existing off-menu per-reference handling above.
+
+
+def test_valid_quantity_item_is_added_even_when_another_lines_quantity_is_implausible(svc):
+    """The exact production failure: 1 clear line + 1 absurd quantity."""
+    result = _call(
+        mcp_server.place_order,
+        user_id="kiosk-user",
+        items=[
+            {"product_id": "cold_coffee", "quantity": 1},
+            {"product_id": "chicken_burger", "quantity": 2001},
+        ],
+    )
+
+    # The clear line must have reached the cart.
+    ordered = {i.product_id: i.quantity for i in svc.placed_items}
+    assert ordered == {"cold_coffee": 1}
+    # It is a success, not an error.
+    assert "error" not in result
+    assert result["items"]
+    # ...but the implausible line is reported so the agent can be honest.
+    assert result["quantity_rejected_items"] == ["chicken_burger"]
+    assert "chicken_burger" in result["quantity_rejected_message"]
+    assert result["max_quantity"] == mcp_server.MAX_ITEM_QUANTITY
+
+
+def test_wholly_implausible_batch_is_still_a_hard_error(svc):
+    result = _call(
+        mcp_server.place_order,
+        user_id="kiosk-user",
+        items=[{"product_id": "chicken_burger", "quantity": 2001}],
+    )
+    assert "error" in result
+    assert svc.placed_items == []
+    assert result["quantity_rejected_items"] == ["chicken_burger"]
+
+
+def test_plausible_quantity_at_the_limit_is_not_rejected(svc):
+    """The boundary itself (MAX_ITEM_QUANTITY) must still be treated as
+    trusted — only quantities strictly greater than it are implausible."""
+    result = _call(
+        mcp_server.place_order,
+        user_id="kiosk-user",
+        items=[{"product_id": "chicken_burger", "quantity": mcp_server.MAX_ITEM_QUANTITY}],
+    )
+    assert "error" not in result
+    assert "quantity_rejected_items" not in result
+    ordered = {i.product_id: i.quantity for i in svc.placed_items}
+    assert ordered == {"chicken_burger": mcp_server.MAX_ITEM_QUANTITY}
+
+
+def test_off_menu_and_implausible_quantity_can_both_be_reported_at_once(svc):
+    """Both partial-rejection shapes can occur in the same multi-item call,
+    and the result must carry both — neither must silently override the
+    other, since the agent-side guard discloses each independently."""
+    result = _call(
+        mcp_server.place_order,
+        user_id="kiosk-user",
+        items=[
+            {"product_id": "cold_coffee", "quantity": 1},
+            {"product_id": "chicken_burger", "quantity": 2001},
+            {"product_id": "petty_fries", "quantity": 1},
+        ],
+    )
+    assert "error" not in result
+    ordered = {i.product_id: i.quantity for i in svc.placed_items}
+    assert ordered == {"cold_coffee": 1}
+    assert result["quantity_rejected_items"] == ["chicken_burger"]
+    assert result["unavailable_items"] == ["petty_fries"]
+

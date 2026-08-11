@@ -90,6 +90,27 @@ def _resolve_against(ref: str, products: list[Product]) -> ProductResolution:
     if len(contains) == 1:
         return ProductResolution(status="MATCH", product=contains[0], confidence=0.9)
 
+    # Reverse direction: the catalogue name is a whole-word substring INSIDE
+    # a longer/noisier reference, rather than the other way around. The
+    # check above only ever asks "is the reference short enough to fit
+    # inside a product name?" — it can never match when the caller passes a
+    # full noisy utterance as the reference (e.g. an agent forwarding
+    # "yes please add the paneer tikka burger to my order" verbatim instead
+    # of a clean item name). Observed live: a valid "Paneer Tikka Burger"
+    # was rejected as off-menu after a compound utterance because neither
+    # direction of substring check nor the token-subset check below (which
+    # requires every query token to be a name token, and fails the moment
+    # the reference carries extra filler words) ever fired. ``\b`` word
+    # boundaries keep this from matching a name as a fragment of an
+    # unrelated longer word (e.g. "tea" must not match inside "steak").
+    reverse_contains = [
+        p
+        for p in products
+        if _normalize(p.name) and re.search(rf"\b{re.escape(_normalize(p.name))}\b", nref)
+    ]
+    if len(reverse_contains) == 1:
+        return ProductResolution(status="MATCH", product=reverse_contains[0], confidence=0.85)
+
     qtokens = set(nref.split())
     token_hits = [
         p for p in products if qtokens and qtokens.issubset(set(_normalize(p.name).split()))

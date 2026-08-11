@@ -576,6 +576,67 @@ class TestStripContextBreadcrumb:
         assert ordering_agent._strip_admin_leak(stripped) == ordering_agent._ADMIN_LEAK_FALLBACK
 
 
+class TestStripLeakedContextTags:
+    """A leaked ``[customer_name=X]``/``[user_id=X]``/``[dietary=X]`` scaffold
+    tag — the internal signal ``chat()`` prefixes onto the customer's turn —
+    must never reach TTS, whether echoed in its exact injected bracket form
+    or paraphrased by the model into an invented XML-style tag.
+    """
+
+    def test_bracket_tag_prefix_is_stripped_keeping_the_real_reply(self):
+        reply = "[customer_name=tester] Please tell me what items are in your order."
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == "Please tell me what items are in your order."
+
+    def test_bracket_tag_with_trailing_colon_is_stripped(self):
+        reply = "[customer_name=Paris]: Goodbye! Have a great day!"
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == "Goodbye! Have a great day!"
+
+    def test_xml_style_tag_with_real_content_around_it_is_stripped(self):
+        reply = "Got it <customer_name>Arjun</customer_name>, what would you like?"
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert "<customer_name>" not in out
+        assert "</customer_name>" not in out
+        assert "Got it" in out and "what would you like?" in out
+
+    def test_bare_xml_tag_reply_gets_a_minimal_natural_substitute(self):
+        # Regression: observed live, "What's my name?" got back the ENTIRE
+        # reply as a bare `<customer_name>Arjun</customer_name>` with nothing
+        # else spoken — stripping alone would leave either "" or just
+        # "Arjun", neither of which is an acceptable spoken reply.
+        reply = "<customer_name>Arjun</customer_name>"
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == "Got it, Arjun."
+
+    def test_bare_bracket_tag_reply_gets_a_minimal_natural_substitute(self):
+        reply = "[customer_name=Arjun]"
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == "Got it, Arjun."
+
+    def test_bare_tag_with_no_recoverable_name_uses_generic_fallback(self):
+        reply = "<user_id>tester</user_id>"
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == ordering_agent._CONTEXT_TAG_ONLY_FALLBACK
+
+    def test_user_id_bracket_tag_is_stripped(self):
+        reply = "[user_id=tester] Sure, here's your order total: ₹596."
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == "Sure, here's your order total: ₹596."
+
+    def test_dietary_bracket_tag_is_stripped(self):
+        reply = "[dietary=vegetarian] We have several veg options available."
+        out = ordering_agent._strip_leaked_context_tags(reply)
+        assert out == "We have several veg options available."
+
+    def test_clean_reply_with_no_tag_is_untouched(self):
+        reply = "We're called QuickBite Express. Would you like to know anything else?"
+        assert ordering_agent._strip_leaked_context_tags(reply) == reply
+
+    def test_empty_reply_is_returned_unchanged(self):
+        assert ordering_agent._strip_leaked_context_tags("") == ""
+
+
 class TestStripAdminLeak:
     """Internal license/tax/context fields must never reach a customer."""
 

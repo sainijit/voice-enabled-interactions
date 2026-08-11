@@ -369,12 +369,23 @@ _ROOT_FACT_HOURS_RE = re.compile(
 )
 # General "about the restaurant" overview questions — handled via a curated
 # structured reply (no LLM) so the model cannot echo raw KB markdown verbatim.
+# Every branch requires the object noun to actually be the restaurant/place/
+# outlet/kiosk itself. Earlier versions of the first two branches stopped at
+# "your" without requiring that noun, so "tell me about your PARKING" (or
+# seating, wifi, anything else) matched the generic overview path and got the
+# canned name/hours/delivery intro instead of an answer to what was actually
+# asked. Requiring the noun everywhere means this template only ever claims
+# genuine "about the restaurant itself" questions; every other topic — in any
+# phrasing, present or future — falls through to the grounded knowledge_lookup
+# path below, which is what actually has the relevant fact.
 _ROOT_FACT_OVERVIEW_RE = re.compile(
     r"\b(?:"
-    r"tell (?:me|us) (?:something |a bit |more )?about (?:the|this|your)|"
-    r"(?:something|anything) about (?:the|this|your)|"
+    r"tell (?:me|us) (?:something |a bit |more )?about (?:the|this|your) "
+    r"(?:restaurant|place|outlet|kiosk)|"
+    r"(?:something|anything) about (?:the|this|your) (?:restaurant|place|outlet|kiosk)|"
     r"about (?:the|this|your) (?:restaurant|place|outlet|kiosk)|"
-    r"what (?:are|is) (?:this|the) (?:restaurant|place|outlet)|"
+    r"what (?:are|is) (?:this|the) (?:restaurant|place|outlet)"
+    r"(?!'?s?\s+(?:name|called))|"
     r"what (?:kind of|type of) (?:restaurant|place)|"
     r"introduce (?:yourself|the restaurant)|"
     r"(?:give|can you give) (?:me |us )?(?:an? )?(?:overview|introduction|summary)|"

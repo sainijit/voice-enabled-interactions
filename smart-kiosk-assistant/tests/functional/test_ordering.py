@@ -354,6 +354,55 @@ class TestOrderingProductResolution:
         assert result.product is None
         assert result.candidates == []
 
+    @pytest.mark.tier1
+    def test_valid_item_embedded_in_a_noisy_compound_utterance_still_resolves(
+        self,
+        ordering_app: TestClient,
+    ):
+        """Regression for a live bug: after a compound utterance the agent
+        forwarded a noisy full-sentence reference (not a clean item name) to
+        ``place_order``, and a real, unambiguous menu item — "Paneer Tikka
+        Burger" — was rejected as off-menu. Every prior resolution step only
+        checks whether the (short) REFERENCE fits inside a (longer) product
+        NAME, never the reverse — so a reference longer than every product
+        name (because it carries filler words) could never match, no matter
+        how clearly it names a real product. The fix adds a whole-word
+        reverse-substring check: does a catalogue name appear verbatim,
+        word-bounded, inside the noisy reference?
+        """
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+        import asyncio  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        product = asyncio.run(
+            service.resolve_product(
+                "yes please go ahead and add the paneer tikka burger to my order"
+            )
+        )
+        assert product is not None
+        assert product.name == "Paneer Tikka Burger"
+
+    @pytest.mark.tier1
+    def test_reverse_substring_match_does_not_fire_on_partial_word_fragments(
+        self,
+        ordering_app: TestClient,
+    ):
+        """A product name must never match as a fragment inside an unrelated
+        longer word in the noisy reference (e.g. a name like "tea" must not
+        match inside "steak") — the reverse-substring check requires whole
+        word boundaries on both sides.
+        """
+        from kiosk_core.ordering.service import OrderingService  # noqa: PLC0415
+        from kiosk_core import config as kiosk_config  # noqa: PLC0415
+        import asyncio  # noqa: PLC0415
+
+        service = OrderingService(upsell_rules_path=kiosk_config.UPSELL_RULES_YAML_PATH)
+        result = asyncio.run(
+            service.resolve_product_detailed("I would like some grilled steak please")
+        )
+        assert result.status == "NOT_FOUND"
+
 
 
 @pytest.mark.tier1

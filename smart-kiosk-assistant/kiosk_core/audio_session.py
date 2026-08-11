@@ -36,6 +36,60 @@ _WHISPER_JUNK = re.compile(
     re.IGNORECASE,
 )
 
+# ASR homophone normalization: "cart" (the shopping cart) is routinely
+# mis-transcribed as "card" — same vowel sound, no acoustic distinction for
+# Whisper. Observed live: "remove item in my card" reached the agent
+# verbatim; "card" is a legitimately in-domain word (payment method), so no
+# existing guard caught it, and the LLM improvised a "contact customer
+# support" refusal instead of removing the item — a pure ASR-homophone
+# hallucination, not a code bug reachable by any menu/order guard. This is
+# corrected at the same layer as _WHISPER_JUNK: a deterministic transcript
+# normalization before the text ever reaches the agent.
+#
+# Scoped narrowly to avoid corrupting genuine payment-card mentions:
+#   - Only fires when "card" appears near an order-cart verb/phrase
+#     (remove/delete/clear/empty/what's in/add ... to/in my card).
+#   - Never fires if the utterance also contains a payment-context word
+#     (pay, payment, credit, debit, swipe, tap, cash, upi) anywhere, since a
+#     genuine "pay by card" / "swipe my card" must not be rewritten.
+#   - Never fires for "gift card" / "loyalty card" / "membership card",
+#     which are real nouns distinct from "cart".
+_PAYMENT_CONTEXT_RE = re.compile(
+    r"\b(?:pay|paying|payment|credit|debit|swipe|tap|paypal|upi|cash)\b",
+    re.IGNORECASE,
+)
+_CARD_CART_HOMOPHONE_RE = re.compile(
+    r"\b(?:remove|removing|delete|deleting|take out|taking out|clear|clearing|"
+    r"empty|emptying|what'?s|whats|check|show|view)\b(?:\s+\S+){0,6}?\s+"
+    r"(?<!gift\s)(?<!loyalty\s)(?<!membership\s)card\b"
+    r"|\badd(?:ing)?\b(?:\s+\S+){0,8}?\s+to\s+(?:my\s+)?"
+    r"(?<!gift\s)(?<!loyalty\s)(?<!membership\s)card\b"
+    r"|\bin\s+my\s+(?<!gift\s)(?<!loyalty\s)(?<!membership\s)card\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_card_cart_homophone(text: str) -> str:
+    """Rewrite an order-context "card" mis-transcription to "cart".
+
+    Args:
+        text: Raw (already Whisper-junk-stripped) transcript text.
+
+    Returns:
+        ``text`` unchanged unless an order-cart phrase containing "card"
+        is found and no payment-context word is present anywhere in the
+        utterance, in which case the matched "card" occurrence(s) are
+        rewritten to "cart".
+    """
+    if not text or _PAYMENT_CONTEXT_RE.search(text):
+        return text
+
+    def _swap(match: re.Match) -> str:
+        return re.sub(r"\bcard\b", "cart", match.group(0), flags=re.IGNORECASE)
+
+    return _CARD_CART_HOMOPHONE_RE.sub(_swap, text)
+
+
 # Whisper emits a short stock phrase when handed near-silence. The PyTorch
 # "openai" provider suppresses these via no_speech_prob/avg_logprob, but the
 # OpenVINO GenAI provider exposes no confidence signal at all (its `scores`
@@ -1166,6 +1220,16 @@ class BaseAudioSession:
             if text:
                 # Strip Whisper hallucination tokens (e.g. [BLANK_AUDIO], [Music])
                 text = _WHISPER_JUNK.sub("", text).strip()
+            if text:
+                # Correct the "cart" -> "card" ASR homophone before the agent
+                # ever sees the transcript (see _normalize_card_cart_homophone).
+                normalized = _normalize_card_cart_homophone(text)
+                if normalized != text:
+                    logger.info(
+                        "[CHUNK] session=%s | normalized card->cart homophone: %r -> %r",
+                        self.session_id, text[:120], normalized[:120],
+                    )
+                    text = normalized
             if text and _WHISPER_FILLER.fullmatch(text):
                 logger.info(
                     "[CHUNK] session=%s | dropping filler-only transcription: %r",

@@ -459,3 +459,109 @@ def test_quantity_refusal_replaces_a_false_addition_claim() -> None:
     assert corrected is True
     assert "338169" not in reply
     assert "how many" in reply.lower()
+
+
+# ---------------------------------------------------------------------------
+# Partial implausible-quantity rejection (kiosk-core
+# _split_implausible_quantities / _quantity_rejection_payload)
+# ---------------------------------------------------------------------------
+#
+# Live regression: "one mango lassi and 100 pepsi" — a two-item place_order
+# call — refused the ENTIRE call the moment it saw the implausible 100, so
+# even the perfectly clear "one mango lassi" was silently dropped. Once
+# kiosk-core resolves quantity implausibility per item (like it already does
+# for off-menu references), a successful call can carry BOTH ``just_added``
+# and ``quantity_rejected_items`` — the same "partial success" shape as the
+# off-menu case above, and it needs the analogous disclosure guarantee.
+
+
+def _partial_quantity_payload() -> dict:
+    """A place_order result where 1 of 2 requested items was actually added."""
+    return {
+        "order_id": 512,
+        "status": "draft",
+        "total": 89.0,
+        "items": [
+            {"product_id": "BEV-004", "product_name": "Mango Lassi (300 ml)",
+             "quantity": 1, "price": 89.0},
+        ],
+        "just_added": [
+            {"name": "Mango Lassi (300 ml)", "quantity": 1},
+        ],
+        "quantity_rejected_items": ["Pepsi (330 ml)"],
+        "quantity_rejected_message": (
+            "The quantity given for 'Pepsi (330 ml)' was implausibly large (over "
+            "20 per item) and almost certainly misheard, so was not added. Do not "
+            "guess a number for 'Pepsi (330 ml)' and do not say it was added — ask "
+            "the customer how many they would like."
+        ),
+        "max_quantity": 20,
+    }
+
+
+def test_partial_quantity_rejection_is_recorded_without_flipping_succeeded_false() -> None:
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_quantity_payload()))
+
+    state = menu_guard.current_state()
+    assert state.succeeded is True
+    assert state.has_partial_quantity_rejection is True
+    assert state.partial_quantity_refs == ["Pepsi (330 ml)"]
+    # The full-failure/off-menu fields are untouched by a partial quantity skip.
+    assert state.rejected_refs == []
+    assert state.partial_refs == []
+    assert state.quantity_refused is False
+
+
+def test_reply_ignoring_the_skipped_quantity_item_gets_disclosure_appended() -> None:
+    """The reported live bug: "1 mango lassi + 100 pepsi" — reply must not
+    imply the pepsi was added too, nor silently omit that it wasn't.
+    """
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_quantity_payload()))
+    reply = "I've added Mango Lassi to your order. Your total is now ₹89."
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is True
+    # The true claim (lassi added) is preserved, not wholesale-replaced.
+    assert corrected.startswith(reply)
+    assert "how many" in corrected.lower() or "quantity" in corrected.lower()
+
+
+def test_reply_that_already_asks_about_the_quantity_is_left_alone() -> None:
+    menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_quantity_payload()))
+    reply = (
+        "I've added your Mango Lassi. How many Pepsi did you want? "
+        "I didn't quite catch the number."
+    )
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is False
+    assert corrected == reply
+
+
+def test_garbled_quantity_reference_is_not_echoed_in_the_disclosure() -> None:
+    payload = _partial_quantity_payload()
+    payload["quantity_rejected_items"] = ["ll the burgers and 100 more"]
+    menu_guard.record_tool_result("place_order", _mcp_envelope(payload))
+    reply = "I've added Mango Lassi to your order."
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is True
+    assert "ll the burgers and 100 more" not in corrected
+    assert "one of the quantities" in corrected
+
+
+def test_both_off_menu_and_quantity_partial_rejections_are_both_disclosed() -> None:
+    """A single call can carry both shapes at once — both must be spoken."""
+    payload = _partial_success_payload()
+    payload["quantity_rejected_items"] = ["Pepsi (330 ml)"]
+    menu_guard.record_tool_result("place_order", _mcp_envelope(payload))
+    reply = "I've added your pizzas to your order. Your total is now ₹667."
+
+    corrected, changed = menu_guard.validate_reply(reply)
+
+    assert changed is True
+    assert "Chicken BBQ Pizza" in corrected  # off-menu disclosure
+    assert "how many" in corrected.lower() or "quantity" in corrected.lower()  # quantity disclosure

@@ -278,45 +278,82 @@ def _ambiguous_payload(ambiguous: list[dict[str, Any]]) -> dict[str, Any]:
 # place_order(quantity=2001), the write **succeeded**, and the kiosk announced a
 # total of ₹338,169. Every truthfulness guard stayed silent, and correctly so:
 # the claim "I've added Classic Chicken Burger" was true. What was missing is
-# not honesty but plausibility. This check runs before any write, so the order
-# is left untouched and no "added" claim is possible for the turn.
+# not honesty but plausibility. This check runs before any write, so the
+# implausible line is left untouched and no "added" claim is possible for it.
 MAX_ITEM_QUANTITY = 20
 
 
-def _implausible_quantity_payload(
+def _split_implausible_quantities(
     items: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    """Reject an order line whose quantity is too large to be genuine.
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split ``items`` into plausible-quantity and implausible-quantity lines.
+
+    Deliberately **per item**, mirroring ``_resolve_items`` below. An earlier
+    version aborted the ENTIRE call the moment any single line exceeded
+    ``MAX_ITEM_QUANTITY`` — observed live: "one mango lassi and 100 pepsi"
+    refused the whole request, silently dropping the perfectly clear "one
+    mango lassi" along with the implausible "100 pepsi". A misheard number on
+    one line is not a reason to also discard every other line the customer
+    was clear about.
 
     Args:
         items: Raw item dicts as supplied by the model.
 
     Returns:
-        An error payload naming the offending reference and quantity, or
-        ``None`` when every quantity is plausible.
+        ``(plausible, implausible)``. ``plausible`` holds every item whose
+        quantity is within bounds (or unparsable, treated as trusted rather
+        than silently dropped), unchanged and ready for the normal resolve
+        path. ``implausible`` holds ``{reference, quantity}`` for every item
+        whose quantity was too large to be genuine.
     """
+    plausible: list[dict[str, Any]] = []
+    implausible: list[dict[str, Any]] = []
     for it in items:
         ref = it.get("product_id") or it.get("name") or it.get("product") or "that item"
         try:
             qty = int(it.get("quantity", 1))
         except (TypeError, ValueError):
+            plausible.append(it)
             continue
         if qty > MAX_ITEM_QUANTITY:
             logger.warning(
-                "[MCP-SERVER] implausible quantity %d for '%s' — refusing before write",
+                "[MCP-SERVER] implausible quantity %d for '%s' — skipping this line only",
                 qty, ref,
             )
-            return {
-                "error": (
-                    f"A quantity of {qty} for '{ref}' exceeds the limit of "
-                    f"{MAX_ITEM_QUANTITY} per item and was almost certainly "
-                    f"misheard. Nothing was added to the order. Ask the customer "
-                    f"how many '{ref}' they would like — do not guess a number, "
-                    f"and do not say anything was added."
-                ),
-                "max_quantity": MAX_ITEM_QUANTITY,
-            }
-    return None
+            implausible.append({"reference": ref, "quantity": qty})
+        else:
+            plausible.append(it)
+    return plausible, implausible
+
+
+def _quantity_rejection_payload(implausible: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe skipped implausible-quantity lines for the agent.
+
+    Mirrors ``_rejection_payload`` for off-menu items: the message spells out
+    exactly which reference(s) were skipped and why, inside the sentence
+    itself, so the model cannot silently drop it and either claim success or
+    tell the customer to "try again" (retrying the same misheard number fails
+    identically).
+    """
+    refs = ", ".join(f"'{r['reference']}'" for r in implausible)
+    plural = "were" if len(implausible) > 1 else "was"
+    message = (
+        f"The quantity given for {refs} {plural} implausibly large (over "
+        f"{MAX_ITEM_QUANTITY} per item) and almost certainly misheard, so "
+        f"{plural} not added. Do not guess a number for {refs} and do not "
+        f"say it was added — ask the customer how many they would like."
+    )
+    return {
+        "quantity_rejected_items": [r["reference"] for r in implausible],
+        "quantity_rejected_message": message,
+        "max_quantity": MAX_ITEM_QUANTITY,
+    }
+
+
+def _nothing_resolved_quantity_error(implausible: list[dict[str, Any]]) -> dict[str, Any]:
+    """Error payload for a call where every item had an implausible quantity."""
+    payload = _quantity_rejection_payload(implausible)
+    return {"error": payload["quantity_rejected_message"], **payload}
 
 
 def _rejection_payload(rejected: list[dict[str, Any]]) -> dict[str, Any]:
@@ -565,15 +602,17 @@ async def place_order(
     """
     from kiosk_core.ordering.models import CreateOrderRequest, OrderItemIn
 
-    implausible = _implausible_quantity_payload(items)
-    if implausible is not None:
-        return implausible
+    plausible_items, implausible_qty = _split_implausible_quantities(items)
+    if not plausible_items:
+        return _nothing_resolved_quantity_error(implausible_qty)
 
-    resolved, rejected, ambiguous, resolved_display = await _resolve_items(items, dietary=dietary)
+    resolved, rejected, ambiguous, resolved_display = await _resolve_items(plausible_items, dietary=dietary)
     if not resolved:
         if ambiguous:
             return _ambiguous_payload(ambiguous)
-        return _nothing_resolved_error(rejected)
+        if rejected:
+            return _nothing_resolved_error(rejected)
+        return _nothing_resolved_quantity_error(implausible_qty)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
         req = CreateOrderRequest(user_id=user_id, items=item_list)
@@ -590,6 +629,16 @@ async def place_order(
                 user_id, len(resolved), [r["reference"] for r in rejected],
             )
             result.update(_rejection_payload(rejected))
+        if implausible_qty:
+            # Same shape as the off-menu partial rejection above: some items
+            # really were added in this same call, an implausible-quantity
+            # line was skipped, and the caller must disclose it rather than
+            # imply everything requested was added.
+            logger.warning(
+                "[MCP-SERVER] place_order user=%s added %d item(s), skipped implausible qty %s",
+                user_id, len(resolved), [r["reference"] for r in implausible_qty],
+            )
+            result.update(_quantity_rejection_payload(implausible_qty))
         if ambiguous:
             result.update(_ambiguous_payload(ambiguous))
         return result
@@ -617,15 +666,17 @@ async def update_order(
     """
     from kiosk_core.ordering.models import OrderItemIn
 
-    implausible = _implausible_quantity_payload(items)
-    if implausible is not None:
-        return implausible
+    plausible_items, implausible_qty = _split_implausible_quantities(items)
+    if not plausible_items:
+        return _nothing_resolved_quantity_error(implausible_qty)
 
-    resolved, rejected, ambiguous, resolved_display = await _resolve_items(items, dietary=dietary)
+    resolved, rejected, ambiguous, resolved_display = await _resolve_items(plausible_items, dietary=dietary)
     if not resolved:
         if ambiguous:
             return _ambiguous_payload(ambiguous)
-        return _nothing_resolved_error(rejected)
+        if rejected:
+            return _nothing_resolved_error(rejected)
+        return _nothing_resolved_quantity_error(implausible_qty)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
         order = await _svc().update_order_items(order_id, item_list)
@@ -640,6 +691,12 @@ async def update_order(
                 order_id, len(resolved), [r["reference"] for r in rejected],
             )
             result.update(_rejection_payload(rejected))
+        if implausible_qty:
+            logger.warning(
+                "[MCP-SERVER] update_order order_id=%d added %d item(s), skipped implausible qty %s",
+                order_id, len(resolved), [r["reference"] for r in implausible_qty],
+            )
+            result.update(_quantity_rejection_payload(implausible_qty))
         if ambiguous:
             result.update(_ambiguous_payload(ambiguous))
         return result

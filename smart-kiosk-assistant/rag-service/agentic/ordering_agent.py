@@ -837,7 +837,79 @@ def _strip_context_breadcrumb(reply: str) -> str:
     return cleaned if cleaned else reply
 
 
-# Internal/administrative fields from the knowledge-base root section
+# `chat()` prefixes the CUSTOMER'S turn with an internal signal tag the model
+# is never meant to read aloud — `[customer_name=X]`, `[user_id=X]`,
+# `[dietary=X]` (see the tag injection below and the "Message tags" section
+# of the system prompt, which already says explicitly: "never speak any tag,
+# bracket, or the words customer_name, user_id, or dietary aloud"). The
+# smaller quantised model periodically ignores that instruction anyway —
+# observed live on ~4% of turns — sometimes echoing the exact injected
+# bracket form (`[customer_name=Paris]: Goodbye!`) and sometimes paraphrasing
+# it into an XML-style tag it invented itself
+# (`<customer_name>Arjun</customer_name>`), occasionally with nothing else in
+# the reply at all. This is the same failure class as the "[Context: ...]"
+# breadcrumb and citation-marker leaks above, fixed the same way: a
+# deterministic guard, not more prompt wording, since the prompt already says
+# not to do this.
+#
+# Unlike `_strip_admin_leak`, the leaked VALUE (the customer's own name) is
+# harmless to speak — only the tag syntax is the problem — so this rewrites
+# in place rather than substituting a refusal.
+_CUSTOMER_NAME_TAG_RE = re.compile(
+    r"\[customer_name=([^\]]*)\]:?\s*"
+    r"|<customer_name>\s*([^<]*?)\s*</customer_name>",
+    re.IGNORECASE,
+)
+_USER_ID_TAG_RE = re.compile(
+    r"\[user_id=[^\]]*\]:?\s*|<user_id>.*?</user_id>\s*",
+    re.IGNORECASE,
+)
+_DIETARY_TAG_RE = re.compile(
+    r"\[dietary=[^\]]*\]:?\s*|<dietary>.*?</dietary>\s*",
+    re.IGNORECASE,
+)
+_CONTEXT_TAG_ONLY_FALLBACK = "Got it. What would you like?"
+
+
+def _strip_leaked_context_tags(reply: str) -> str:
+    """Remove a leaked ``[customer_name=X]``/``[user_id=X]``/``[dietary=X]`` tag.
+
+    Args:
+        reply: Model output, already stripped of markdown/tool syntax and the
+            "[Context: ...]" breadcrumb.
+
+    Returns:
+        The reply with any leaked scaffold tag removed. If the ENTIRE reply
+        was just a leaked tag with nothing else spoken (observed live: a bare
+        ``<customer_name>Arjun</customer_name>``), a minimal natural sentence
+        using the captured name is substituted instead of sending an empty
+        string, a bare word, or a raw tag to TTS.
+    """
+    if not reply:
+        return reply
+    name_match = _CUSTOMER_NAME_TAG_RE.search(reply)
+    cleaned = _CUSTOMER_NAME_TAG_RE.sub("", reply)
+    cleaned = _USER_ID_TAG_RE.sub("", cleaned)
+    cleaned = _DIETARY_TAG_RE.sub("", cleaned)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    if cleaned:
+        if cleaned != reply.strip():
+            logger.warning(
+                "[AGENT] Reply leaked a customer_name/user_id/dietary scaffold "
+                "tag — stripping in place | raw=%r", reply[:160],
+            )
+        return cleaned
+    name = (name_match.group(1) or name_match.group(2)) if name_match else None
+    logger.warning(
+        "[AGENT] Reply was ENTIRELY a leaked scaffold tag — substituting a "
+        "minimal reply | raw=%r", reply[:160],
+    )
+    if name and name.strip():
+        return f"Got it, {name.strip()}."
+    return _CONTEXT_TAG_ONLY_FALLBACK
+
+
+
 # (FSSAI food-safety license, GST tax registration, internal outlet code,
 # parent-company legal name) that must NEVER be read to a customer regardless
 # of what question triggered them. Observed live: a "where can I find
@@ -2393,6 +2465,7 @@ class OrderingAgent:
         reply, forged_knowledge = _strip_knowledge_markers(reply, pregrounded=pregrounded)
         reply = _strip_citation_markers(reply)
         reply = _strip_context_breadcrumb(reply)
+        reply = _strip_leaked_context_tags(reply)
         reply = _dedupe_repeated_sentences(reply)
         reply = _strip_admin_leak(reply)
         reply = _strip_leaked_directives(reply)

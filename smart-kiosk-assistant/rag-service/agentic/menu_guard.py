@@ -159,6 +159,16 @@ class _TurnState:
             four were added without ever mentioning the refusal.
         partial_alternatives: Grounded ``{name, price}`` rows for
             ``partial_refs``.
+        partial_quantity_refs: Product references whose quantity was refused
+            as implausible by a call that also resolved and added at least
+            one other item in the *same* call (kiosk-core's
+            ``_split_implausible_quantities`` is per-item — see
+            ``mcp_server.py`` — so ``place_order``/``update_order`` can
+            return both ``just_added`` and ``quantity_rejected_items`` on one
+            success). Kept separate from ``partial_refs`` because the two
+            need different spoken disclosures: an off-menu refusal offers
+            real alternatives, a quantity refusal asks the customer to
+            repeat the number instead.
     """
 
     succeeded: bool = False
@@ -167,6 +177,7 @@ class _TurnState:
     partial_refs: list[str] = field(default_factory=list)
     partial_alternatives: list[dict[str, Any]] = field(default_factory=list)
     quantity_refused: bool = False
+    partial_quantity_refs: list[str] = field(default_factory=list)
 
     @property
     def has_rejection(self) -> bool:
@@ -177,6 +188,11 @@ class _TurnState:
     def has_partial_rejection(self) -> bool:
         """True when an otherwise-successful call also refused an item."""
         return bool(self.partial_refs)
+
+    @property
+    def has_partial_quantity_rejection(self) -> bool:
+        """True when an otherwise-successful call also skipped an implausible quantity."""
+        return bool(self.partial_quantity_refs)
 
 
 _turn_state: contextvars.ContextVar[_TurnState | None] = contextvars.ContextVar(
@@ -274,6 +290,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
         # disclosed.
         payload = result.data if isinstance(result.data, dict) else {}
         _record_rejection(state, payload.get("unavailable_items"), payload.get("available_products"))
+        _record_quantity_rejection(state, payload.get("quantity_rejected_items"))
         return
 
     payload = result.data
@@ -353,6 +370,32 @@ def _record_rejection(
         len(unavailable_items),
         unavailable_items,
         [a["name"] for a in state.partial_alternatives],
+    )
+
+
+def _record_quantity_rejection(state: _TurnState, quantity_rejected_items: Any) -> None:
+    """Record a partial implausible-quantity skip alongside a successful mutation.
+
+    Populates ``state.partial_quantity_refs`` — the quantity analogue of
+    ``_record_rejection`` above. Kept as its own list (not merged into
+    ``partial_refs``) because the spoken disclosure differs: an off-menu
+    refusal offers real menu alternatives, a quantity refusal has none to
+    offer — it just needs the customer to repeat the number.
+
+    Args:
+        state: The current turn's tool-outcome state.
+        quantity_rejected_items: ``payload["quantity_rejected_items"]`` — the
+            references whose quantity kiosk-core judged implausible, if any.
+    """
+    if not quantity_rejected_items:
+        return
+    for ref in quantity_rejected_items:
+        state.partial_quantity_refs.append(str(ref) if ref else "")
+    logger.warning(
+        "[MENU-GUARD] Partial success: mutating call also skipped %d item(s) for "
+        "an implausible quantity | refs=%s",
+        len(quantity_rejected_items),
+        quantity_rejected_items,
     )
 
 
@@ -438,6 +481,23 @@ def _partial_success_disclosed(reply: str, state: _TurnState) -> bool:
     return bool(_DISCLOSURE_HINT_RE.search(reply))
 
 
+# Same intent as _DISCLOSURE_HINT_RE, plus "how many"/"quantity" phrasing —
+# the natural way a reply asks the customer to repeat an implausible number,
+# which does not necessarily use "wasn't added" wording.
+_QUANTITY_DISCLOSURE_HINT_RE = re.compile(
+    r"\b(?:unavailable|not available|don'?t have|do\s+not\s+have|"
+    r"not\s+on\s+(?:the\s+)?menu|could\s?n'?t\s+(?:add|find)|"
+    r"can'?t\s+add|wasn'?t\s+added|weren'?t\s+added|not\s+added|"
+    r"how\s+many|\bquantity\b)\b",
+    re.IGNORECASE,
+)
+
+
+def _partial_quantity_disclosed(reply: str) -> bool:
+    """True when ``reply`` already tells the customer a quantity was unclear."""
+    return bool(_QUANTITY_DISCLOSURE_HINT_RE.search(reply))
+
+
 def _format_partial_disclosure(state: _TurnState) -> str:
     """Compose a short spoken sentence disclosing a partially-rejected item.
 
@@ -492,10 +552,57 @@ def _reconcile_partial_success(reply: str, state: _TurnState) -> tuple[str, bool
     return f"{reply.rstrip()} {disclosure}", True
 
 
+def _format_partial_quantity_disclosure(state: _TurnState) -> str:
+    """Compose a short spoken sentence disclosing a skipped implausible quantity.
+
+    No alternatives to offer here (the item is real, only the number was
+    unclear) — the customer just needs to be asked to repeat the quantity.
+    """
+    item = next(
+        (ref for ref in state.partial_quantity_refs if ref and _looks_like_item_name(ref)), ""
+    )
+    if item:
+        return f"One note: I didn't catch how many {item} you wanted, so that wasn't added yet."
+    return "One note: I didn't catch one of the quantities you wanted, so that wasn't added yet."
+
+
+def _reconcile_partial_outcomes(reply: str, state: _TurnState) -> tuple[str, bool]:
+    """Append disclosures for every partial-rejection shape a turn hit.
+
+    A single ``place_order``/``update_order`` call can carry both an
+    off-menu partial rejection and an implausible-quantity partial rejection
+    at once (e.g. one fabricated item AND one absurd quantity in the same
+    multi-item request) — both must be disclosed, not just whichever the
+    guard happens to check first.
+
+    Each disclosure-already-present check is run against the model's
+    ORIGINAL reply, not a reply already amended by the other disclosure:
+    the off-menu disclosure text itself contains "wasn't added", which also
+    matches the quantity hint pattern — checking the amended reply would
+    make the quantity check see a false disclosure it never actually made.
+    """
+    original = reply
+    corrected = False
+    if state.has_partial_rejection:
+        reply, changed = _reconcile_partial_success(reply, state)
+        corrected = corrected or changed
+    if state.has_partial_quantity_rejection and not _partial_quantity_disclosed(original):
+        disclosure = _format_partial_quantity_disclosure(state)
+        logger.warning(
+            "[MENU-GUARD] Reply after a PARTIAL success did not disclose the skipped "
+            "implausible-quantity item(s) (refs=%s) — appending disclosure to: %r",
+            state.partial_quantity_refs,
+            original[:160],
+        )
+        reply = f"{reply.rstrip()} {disclosure}"
+        corrected = True
+    return reply, corrected
+
+
 def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bool]:
     """Reconcile a reply against a real off-menu/ambiguous-item rejection.
 
-    Three failure shapes are corrected, all stemming from the same root cause
+    Four failure shapes are corrected, all stemming from the same root cause
     (the model narrating a turn it did not fully understand):
 
     1. A false "added"/"confirmed" claim after every mutating call was
@@ -510,6 +617,10 @@ def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bo
        succeeded. Unlike (1) and (2), the reply is not wholesale-replaced
        here (its claims about what *did* succeed are true); only the missing
        disclosure is appended (see ``_reconcile_partial_success``).
+    4. The quantity analogue of (3): some items were added, but one line's
+       quantity was implausible (e.g. ASR mis-hearing) and was skipped rather
+       than aborting the whole call — the reply must disclose that too (see
+       ``_reconcile_partial_outcomes``).
 
     Args:
         reply: The assistant's drafted reply, after the other text guards.
@@ -523,8 +634,8 @@ def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bo
         return reply, False
 
     state = state if state is not None else current_state()
-    if state.has_partial_rejection:
-        return _reconcile_partial_success(reply, state)
+    if state.has_partial_rejection or state.has_partial_quantity_rejection:
+        return _reconcile_partial_outcomes(reply, state)
     if state.succeeded or not state.has_rejection:
         return reply, False
 
