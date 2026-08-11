@@ -62,14 +62,19 @@ _CAMERA_DEVICE_RAW     = $(strip $(CAMERA_DEVICE))
 _RTSP_CAMERA_DEVICE    = $(if $(_RTSP_LIVE_ON),$(_CAMERA_DEVICE_RAW),/dev/null)
 COMPOSE_BASE           = RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) docker compose -f $(COMPOSE_FILE)
 
-define RUN_COMPOSE_WITH_RUNTIME_NPU
+# Defined as a single-line macro (each physical line ends with "\", which make
+# condenses into ONE shell command). It must NOT use define/endef: that would keep
+# embedded newlines in the value, and because this Makefile has no .ONESHELL each
+# newline would run in a separate shell, breaking the shared set -e / variables
+# across the NPU detection + validation + compose flow.
+RUN_COMPOSE_WITH_RUNTIME_NPU = \
 set -e; \
 ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
-ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
-ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
+ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/\#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
+ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/\#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
 ACCEL_MOUNT_PATH=""; \
 if [ "$$ASR_CFG_PROVIDER" = "openvino" ] && [ "$$ASR_CFG_DEVICE" = "NPU" ]; then \
-	NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -1); \
+	NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -n 1); \
 	if [ -z "$$NPU_NODE" ]; then \
 		echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=NPU in $$ASR_CFG_PATH, but no Intel NPU was detected.$(NC)"; \
 		echo "    Please select device=CPU/GPU or install/enable the Intel NPU driver and runtime."; \
@@ -98,7 +103,6 @@ if [ "$$ASR_CFG_PROVIDER" = "openvino" ] && [ "$$ASR_CFG_DEVICE" = "NPU" ]; then
 	echo "  $(GREEN)✓ Intel NPU detected and validated inside the container$(NC) ($$NPU_NODE)"; \
 fi; \
 RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) ACCEL_MOUNT_PATH="$$ACCEL_MOUNT_PATH" $(1) docker compose -f $(COMPOSE_FILE) $(2)
-endef
 
 # Services with fully local build contexts
 LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui queue-service rtsp-streamer
@@ -318,7 +322,7 @@ check-env: ## Validate .env and all required variables before running the stack
 				if [ "$$ASR_CFG_DEVICE" = "CPU" ]; then \
 					echo "  $(GREEN)✓ OpenVINO ASR CPU mode selected$(NC)"; \
 				elif [ "$$ASR_CFG_DEVICE" = "GPU" ]; then \
-					GPU_RENDER_NODE=$$(ls /dev/dri/renderD* 2>/dev/null | head -1); \
+					GPU_RENDER_NODE=$$(ls /dev/dri/renderD* 2>/dev/null | head -n 1); \
 					if [ -z "$$GPU_RENDER_NODE" ]; then \
 						echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=GPU in $$ASR_CFG_PATH, but no Intel GPU was detected.$(NC)"; \
 						echo "    Please select device=CPU or install/enable the Intel GPU runtime."; \
@@ -339,7 +343,7 @@ check-env: ## Validate .env and all required variables before running the stack
 						fi; \
 					fi; \
 				elif [ "$$ASR_CFG_DEVICE" = "NPU" ]; then \
-					NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -1); \
+					NPU_NODE=$$(ls /dev/accel/accel* 2>/dev/null | head -n 1); \
 					if [ -z "$$NPU_NODE" ]; then \
 						echo "  $(RED)✗ ERROR: OpenVINO ASR is configured with device=NPU in $$ASR_CFG_PATH, but no Intel NPU was detected.$(NC)"; \
 						echo "    Please select device=CPU/GPU or install/enable the Intel NPU driver and runtime."; \
@@ -416,7 +420,7 @@ check-env: ## Validate .env and all required variables before running the stack
 			echo "  $(YELLOW)⚠ TARGET_DEVICE=GPU but no /dev/dri/renderD* device found$(NC)"; \
 			echo "    Install Intel GPU drivers or set TARGET_DEVICE=CPU in .env"; \
 		else \
-			echo "  $(GREEN)✓ GPU device node found$(NC) ($$(ls /dev/dri/renderD* 2>/dev/null | head -1))"; \
+			echo "  $(GREEN)✓ GPU device node found$(NC) ($$(ls /dev/dri/renderD* 2>/dev/null | head -n 1))"; \
 		fi; \
 	fi; \
 	\
@@ -449,10 +453,14 @@ show-config: ## Print resolved configuration
 	@echo "  OVMS_MODEL_NAME   = $(OVMS_MODEL_NAME)"
 	@echo "  RENDER_GID        = $(RENDER_GID)"
 	@ASR_CFG_PATH="configs/audio-analyzer/config.yaml"; \
-	ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
-	ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
-	echo "  ASR_CFG_PROVIDER  = $$ASR_CFG_PROVIDER (from $$ASR_CFG_PATH)"; \
-	echo "  ASR_CFG_DEVICE    = $$ASR_CFG_DEVICE (from $$ASR_CFG_PATH)"
+	if [ ! -f "$$ASR_CFG_PATH" ]; then \
+		echo "  $(RED)✗ $$ASR_CFG_PATH not found$(NC)"; \
+	else \
+		ASR_CFG_PROVIDER=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*provider:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*provider:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print tolower(line); exit}' "$$ASR_CFG_PATH"); \
+		ASR_CFG_DEVICE=$$(awk '/^[[:space:]]*models:[[:space:]]*$$/{m=1;next} m&&/^[[:space:]]*asr:[[:space:]]*$$/{a=1;next} m&&a&&/^[[:space:]]*device:[[:space:]]*/{line=$$0; sub(/#.*/,"",line); sub(/^[[:space:]]*device:[[:space:]]*/,"",line); gsub(/[[:space:]]/,"",line); print toupper(line); exit}' "$$ASR_CFG_PATH"); \
+		echo "  ASR_CFG_PROVIDER  = $$ASR_CFG_PROVIDER (from $$ASR_CFG_PATH)"; \
+		echo "  ASR_CFG_DEVICE    = $$ASR_CFG_DEVICE (from $$ASR_CFG_PATH)"; \
+	fi
 	@echo ""
 	@echo "$(YELLOW)Authentication:$(NC)"
 	@echo "  HF_TOKEN          = $$([ -n '$(HF_TOKEN)' ] && echo '***set***' || echo 'NOT SET')"

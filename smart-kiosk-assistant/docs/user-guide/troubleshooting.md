@@ -71,7 +71,7 @@ For `audio-analyzer` specifically, check the effective provider/device
 selection from `configs/audio-analyzer/config.yaml`:
 
 ```bash
-grep -n "provider:\|device:" configs/audio-analyzer/config.yaml
+grep -nE "provider:|device:" configs/audio-analyzer/config.yaml
 ```
 
 and verify startup behavior:
