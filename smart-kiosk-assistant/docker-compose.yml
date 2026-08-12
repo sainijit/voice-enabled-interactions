@@ -505,6 +505,17 @@ services:
       # vars on audio-analyzer above, which are the actual fix for pyannote
       # loading fully offline from its already-complete local cache.
       KIOSK_CORE_DIARIZATION_ENABLED: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
+      # Consecutive rejected turns (speaker filter dropped every segment as
+      # non-primary) required before the kiosk speaks
+      # KIOSK_CORE_UNRECOGNIZED_SPEAKER_PROMPT instead of staying silent.
+      # Default upstream is 2 (tolerate a one-off Whisper hallucination/TTS
+      # echo). Observed live in this offline deployment: the primary speaker
+      # lock flips mid-conversation (diarization/embedding instability), so a
+      # single genuine question gets silently dropped with zero feedback
+      # before a 2nd consecutive rejection ever happens. Set to 1 here so the
+      # customer is never left in silence — see kiosk_core/config.py for the
+      # full trade-off.
+      KIOSK_CORE_CONSECUTIVE_REJECTION_THRESHOLD: ${KIOSK_CORE_CONSECUTIVE_REJECTION_THRESHOLD:-2}
       # Ordering & agent routing
       KIOSK_CORE_ORDERING_ENABLED: "true"
       KIOSK_CORE_AGENT_URL:        http://rag-service:8020/api/v1/agent/chat
