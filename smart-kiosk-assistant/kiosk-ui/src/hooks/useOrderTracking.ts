@@ -64,16 +64,21 @@ export function useOrderTracking(active: boolean): OrderTracking {
       return;
     }
 
-    // No draft. If we were showing one, it was just confirmed — fetch the frozen
-    // confirmed order by id and keep it on screen as a receipt instead of blanking.
+    // No draft. If we were showing one, it either just got confirmed (fetch by
+    // id succeeds — keep the frozen receipt on screen instead of blanking) or
+    // just got cancelled (the row was deleted, not frozen, so the same fetch
+    // 404s/returns null). Both must actually update the display: only a
+    // receipt already shown for a CONFIRMED order should be left untouched,
+    // since there is nothing left to poll it against.
     const shown = shownOrderRef.current;
     if (shown && shown.status !== 'confirmed') {
       const confirmed = await fetchOrder(shown.order_id);
       if (!mountedRef.current) return;
-      if (confirmed) {
-        await applyOrder(confirmed);
-        return;
-      }
+      // `confirmed` is null when the draft was cancelled rather than
+      // confirmed — clear the display instead of leaving the stale cart on
+      // screen forever.
+      await applyOrder(confirmed);
+      return;
     }
     // Already showing a confirmed receipt (or nothing) — leave it untouched.
     if (!shown) {
