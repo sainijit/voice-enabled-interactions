@@ -403,6 +403,18 @@ _ROOT_FACT_OVERVIEW_RE = re.compile(
 # from the ENTIRE fast path (not just the unmatched fact) so the full
 # pre-grounded LLM path sees and answers the whole question.
 _HOURS_HINT_RE = re.compile(r"\b(?:hours?|timing\w*|open(?:ing)?|clos(?:e|ing|ed))\b", re.IGNORECASE)
+# "Address" is not a structured root fact this module formats — it lives only
+# in the free-form KB text, answered via knowledge_lookup. But
+# _ROOT_FACT_OVERVIEW_RE's "what is the restaurant" branch only excludes a
+# trailing "'s name/called" in its lookahead, so "what is the restaurant
+# address?" still matched it and got the canned name/hours/delivery intro
+# with the address silently omitted. Same failure mode as the hours-hint
+# case above for compound questions like "the restaurant address and its
+# operating hours" — matched only "hours" and dropped address. Abstaining
+# the whole fast path whenever "address"/"located"/"location" is mentioned
+# routes to the full pre-grounded LLM path, which now answers correctly
+# since the KB has the Address field.
+_ADDRESS_HINT_RE = re.compile(r"\baddress\b|\blocated?\b|\blocation\b", re.IGNORECASE)
 
 
 def classify_root_facts(utterance: str) -> list[str]:
@@ -420,6 +432,12 @@ def classify_root_facts(utterance: str) -> list[str]:
         rather than risk answering only part of a compound question.
     """
     if not utterance:
+        return []
+    # Address questions are never a structured root fact — abstain the whole
+    # fast path so the grounded knowledge_lookup path answers them (and any
+    # fact asked alongside them) instead of the overview template silently
+    # omitting the address or a compound question losing half its answer.
+    if _ADDRESS_HINT_RE.search(utterance):
         return []
     # General overview questions take priority — they absorb the whole reply
     # so there is no need to check individual fact patterns.

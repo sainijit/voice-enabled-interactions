@@ -351,3 +351,42 @@ class TestClassifyRootFactsCompoundQuestions:
             "tell me when you usually close for the evening and also the restaurant name"
         )
         assert out == []
+
+
+class TestClassifyRootFactsAddressQuestions:
+    """Regression: address questions must abstain to the grounded LLM path.
+
+    Live bug: "What is the restaurant address?" matched
+    _ROOT_FACT_OVERVIEW_RE's "what is the restaurant" branch (only "'s
+    name/called" was excluded from its lookahead), so the fast path spoke the
+    canned name/hours/delivery intro and silently dropped the address. A
+    compound "address and hours" question lost the address the same way the
+    hours-hint case above loses "name" — matching only "hours" and never
+    routing the address half anywhere. Address is not a structured root fact
+    this module formats (it lives only in free-form KB text), so any address
+    mention must abstain the whole fast path and let knowledge_lookup answer.
+    """
+
+    def test_address_question_abstains(self):
+        assert rt.classify_root_facts("What is the restaurant address?") == []
+
+    def test_tell_me_about_the_restaurant_address_abstains(self):
+        # Would otherwise match _ROOT_FACT_OVERVIEW_RE's "tell me about the
+        # restaurant" branch and get the canned overview intro instead.
+        assert rt.classify_root_facts(
+            "Can you tell me about the restaurant address?"
+        ) == []
+
+    def test_compound_address_and_hours_abstains_entirely(self):
+        out = rt.classify_root_facts(
+            "Can you tell me the restaurant address and its operating hours?"
+        )
+        assert out == []
+
+    def test_located_phrasing_abstains(self):
+        assert rt.classify_root_facts("Where is the restaurant located?") == []
+
+    def test_plain_overview_question_is_unaffected(self):
+        # Sanity check: a genuine overview question with no address mention
+        # must still take the fast path.
+        assert rt.classify_root_facts("Tell me about the restaurant") == ["overview"]
