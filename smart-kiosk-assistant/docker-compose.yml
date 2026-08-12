@@ -213,6 +213,20 @@ services:
       # ./.cache mount persists every model cache the service uses
       # (huggingface, openai-whisper, torch hub, etc.).
       HF_HOME: /app/audio_analyzer/.cache/huggingface
+      # Force fully offline operation for HF model/tokenizer loading. The
+      # pyannote diarization pipeline's local files (segmentation, embedding,
+      # plda incl. xvec_transform.npz) are already fully cached under
+      # ./models by ensure_model.py — but without these flags,
+      # huggingface_hub still makes a live metadata/revision check on every
+      # load even when local files are present, which crashes/silently
+      # disables diarization when there is no network/proxy access at all.
+      # Confirmed fix: with HF_HUB_OFFLINE=1 forced, PyannoteDiarizer loads
+      # successfully from local cache with zero network calls.
+      # Set HF_HUB_OFFLINE=0 / TRANSFORMERS_OFFLINE=0 in .env if this
+      # environment has working internet/proxy access and you want live
+      # Hub checks (e.g. picking up a newly-released model revision).
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
       # HuggingFace token — required by Pyannote speaker diarization.
       # Set HF_TOKEN in .env (single source of truth).
       HF_TOKEN: ${HF_TOKEN:-}
@@ -343,6 +357,16 @@ services:
       # brake on spoken answer length: the model paraphrases whatever it is
       # given, so 2000 chars of context produced a 20-second spoken reply.
       RAG_MAX_CONTEXT_CHARS: ${RAG_MAX_CONTEXT_CHARS:-1800}
+      # Force fully offline operation for HF tokenizer/model loading — the
+      # tokenizer is already cached in the rag_service_hf_cache volume, and
+      # newer `transformers` versions otherwise make a live Hub call
+      # (list_repo_templates) even when local files exist, which crashes
+      # startup when there is no network/proxy access at all.
+      # Set HF_HUB_OFFLINE=0 / TRANSFORMERS_OFFLINE=0 in .env if this
+      # environment has working internet/proxy access and you want live
+      # Hub checks (e.g. picking up a newly-released model revision).
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
       # Bypass corporate proxy for all intra-cluster traffic so that
       # requests to ovms-llm, kiosk-core, etc. go directly on the
       # Docker bridge network instead of through the Intel proxy.
@@ -469,7 +493,18 @@ services:
       # Diarization — re-enable once HF terms are accepted for pyannote models.
       # Accept terms at: https://huggingface.co/pyannote/speaker-diarization-3.1
       #                  https://huggingface.co/pyannote/segmentation-3.0
-      KIOSK_CORE_DIARIZATION_ENABLED: "true"
+      # Was hardcoded to "true" here, which silently ignored any
+      # KIOSK_CORE_DIARIZATION_ENABLED=false set in the shell/.env — only
+      # audio-analyzer's AUDIO_ANALYZER__MODELS__ASR__DIARIZATION override
+      # (below, in the audio-analyzer service) actually read the variable.
+      # Parameterized so setting the env var once takes effect on both
+      # services (e.g. as a fallback toggle if diarization ever needs to be
+      # disabled in an environment where the pyannote model cache is
+      # genuinely incomplete). Under normal offline operation, diarization
+      # should stay enabled — see the HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE
+      # vars on audio-analyzer above, which are the actual fix for pyannote
+      # loading fully offline from its already-complete local cache.
+      KIOSK_CORE_DIARIZATION_ENABLED: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
       # Ordering & agent routing
       KIOSK_CORE_ORDERING_ENABLED: "true"
       KIOSK_CORE_AGENT_URL:        http://rag-service:8020/api/v1/agent/chat
