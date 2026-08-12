@@ -344,6 +344,21 @@ _ORDER_STATUS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A reset intent ("start a new order", "start over", "let's start fresh",
+# "begin a new order") — the customer wants the current draft cleared, not a
+# complaint-style cancellation. Rule 6b in the system prompt already names
+# "start over" as a cancel_order trigger, but only as prompt guidance with no
+# deterministic backstop, the same gap _ORDER_STATUS_RE closed for status
+# phrasing. Distinct from _ORDER_ACTION_RE's bare "cancel" — none of these
+# phrases contain that word, so this regex cannot double-fire against it; it
+# routes to the same cancel_order tool via _ORDER_NUDGE.
+_START_OVER_RE = re.compile(
+    r"start\s+(?:over|fresh|a\s+new\s+order|again)|"
+    r"begin\s+(?:a\s+)?new\s+order|"
+    r"new\s+order\s+please",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Scope guard
 # ---------------------------------------------------------------------------
@@ -561,6 +576,7 @@ _ORDER_NUDGE = (
     "You described a change to the order without calling a tool, so nothing was "
     "actually recorded and any order id or total you stated is invented. Call the "
     "correct tool now — confirm_active_order to confirm (or confirm_order if you have the id), update_order to change items, "
+    "cancel_order to clear the whole cart (including a request to start over/start a new order), "
     "get_current_order to read the current order (never guess an order_id for this) "
     "— and reply using ONLY its result. "
     "Never list an upsell suggestion as if the customer had ordered it."
@@ -637,7 +653,7 @@ def _needs_tool_retry(reply: str, message: str) -> tuple[bool, str]:
         return True, _TOOL_SYNTAX_NUDGE
     if (
         _ORDER_ACTION_RE.search(message) and not _HISTORY_QUERY_RE.search(message)
-    ) or _ORDER_STATUS_RE.search(message) or _ORDER_CLAIM_RE.search(reply):
+    ) or _ORDER_STATUS_RE.search(message) or _START_OVER_RE.search(message) or _ORDER_CLAIM_RE.search(reply):
         return True, _ORDER_NUDGE
     if _CATALOGUE_QUERY_RE.search(message):
         return True, _CATALOGUE_NUDGE
@@ -1725,9 +1741,9 @@ Every turn must call a tool first unless the customer is only being social ("hi"
    - cart_empty + replacement also requested (Rule 6c): do NOT pause — proceed to place_order for the replacement.
    - Never use update_order to remove.
 
-6b. CANCEL ORDER ("cancel my order", "start over", "cancel everything") → cancel_order. Not remove_from_order.
-   - cancelled=true: tell them it's cancelled, ask if they want to start fresh.
-   - error (no open order): say there's nothing to cancel.
+6b. CANCEL ORDER / START OVER ("cancel my order", "cancel everything", "start over", "start a new order", "start fresh", "begin a new order") → cancel_order. Not remove_from_order.
+   - cancelled=true: if the customer said "cancel", tell them it's cancelled and ask if they want to start fresh. If they said "start over"/"start a new order" instead, skip the word "cancelled" — just confirm the cart is cleared and ask what they'd like to order.
+   - error (no open order): if the customer said "cancel", say there's nothing to cancel. If they said "start over"/"start a new order" (nothing to clear, or a confirmed order already exists untouched), treat it as them simply beginning to order — do not say "nothing to cancel"; ask what they'd like.
 
 6c. SWAP / REMOVE-AND-ADD ("remove X and add Y", "swap X for Y") → call remove_from_order for X AND place_order for Y in the SAME turn. Never stop after the removal. Y goes in place_order, never in remove_from_order.
 
@@ -2405,7 +2421,9 @@ class OrderingAgent:
             # removal_guard's stock failure text — "wasn't able to remove
             # that" — was spoken as the "status" answer). tool_calls is
             # non-empty there, so the no-tool-call branch above never fires;
-            # the wrong-tool case needs its own check.
+            # the wrong-tool case needs its own check. A "start over"/"start a
+            # new order" request gets the identical treatment against
+            # cancel_order for the same reason.
             should_retry, nudge_text = (
                 _needs_tool_retry("".join(reply_parts), message)
                 if not pregrounded and (
@@ -2413,6 +2431,10 @@ class OrderingAgent:
                     or (
                         _ORDER_STATUS_RE.search(message)
                         and "get_current_order" not in tool_calls
+                    )
+                    or (
+                        _START_OVER_RE.search(message)
+                        and "cancel_order" not in tool_calls
                     )
                 )
                 else (False, "")

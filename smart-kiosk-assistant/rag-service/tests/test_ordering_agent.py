@@ -414,6 +414,56 @@ class TestNeedsToolRetryHistoryQuestion:
         assert nudge == ordering_agent._ORDER_NUDGE
 
 
+class TestNeedsToolRetryStartOver:
+    """"Start a new order"/"start over" must force a cancel_order retry.
+
+    Regression for a live gap: this phrasing was only ever prompt guidance
+    (Rule 6b named "start over" as a cancel_order trigger) with no
+    deterministic backstop, the same gap _ORDER_STATUS_RE closed for status
+    questions. If the model answered without calling any tool, there was
+    nothing to force a retry.
+    """
+
+    def test_start_new_order_retries(self):
+        reply = "Sure thing!"
+        message = "I would like to start a new order"
+        should_retry, nudge = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is True
+        assert nudge == ordering_agent._ORDER_NUDGE
+
+    def test_start_over_retries(self):
+        reply = "Okay, let's do that."
+        message = "Let's start over"
+        should_retry, nudge = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is True
+        assert nudge == ordering_agent._ORDER_NUDGE
+
+    def test_start_fresh_retries(self):
+        reply = "No problem."
+        message = "Can we start fresh please"
+        should_retry, nudge = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is True
+        assert nudge == ordering_agent._ORDER_NUDGE
+
+    def test_begin_new_order_retries(self):
+        reply = "Sure."
+        message = "I want to begin a new order"
+        should_retry, nudge = ordering_agent._needs_tool_retry(reply, message)
+        assert should_retry is True
+        assert nudge == ordering_agent._ORDER_NUDGE
+
+    def test_status_question_does_not_match_start_over(self):
+        # Negative control: must not double-fire against _ORDER_STATUS_RE's
+        # own phrasing — both regexes route to the same nudge anyway, but
+        # they must each be scoped to their own phrasing, not overlap.
+        assert not ordering_agent._START_OVER_RE.search("What is the status of my order?")
+
+    def test_plain_cancel_does_not_match_start_over(self):
+        # Negative control: bare "cancel" is _ORDER_ACTION_RE's job, not this
+        # regex's — confirms no accidental keyword overlap between the two.
+        assert not ordering_agent._START_OVER_RE.search("Cancel my order")
+
+
 class TestMutatingToolsNeverTakeTemplatingShortcut:
     """Cart-mutating tools must never end the ADK turn via `skip_summarization`.
 
