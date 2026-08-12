@@ -326,6 +326,24 @@ _ORDER_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A read-only order-status query ("what is the status of my order?", "track my
+# order", "did my order go through?"). Distinct from _ORDER_ACTION_RE, which
+# only recognises mutation/confirmation verbs — none of which appear here, so
+# this phrasing previously matched no intent regex at all. Observed live: with
+# no tool call and no pre-grounding, the model either produced an ungrounded
+# reply that fell through to the generic out-of-scope refusal, or on a later
+# turn picked the wrong tool entirely (remove_from_order) for the identical
+# question. Rule 5 in the system prompt names get_current_order for "show my
+# order"/"what's my total" but never for "status" phrasing — this regex closes
+# that gap by forcing the same _ORDER_NUDGE retry (which already names
+# get_current_order) whenever the model answers one of these without a tool.
+_ORDER_STATUS_RE = re.compile(
+    r"status\s+of\s+(?:my|the|this)\s+order|track\s+(?:my|the)\s+order|"
+    r"how(?:'s| is)\s+(?:my|the)\s+order|did\s+(?:my|the)\s+order\s+go\s+through|"
+    r"what(?:'s| is)\s+happening\s+with\s+(?:my|the)\s+order",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Scope guard
 # ---------------------------------------------------------------------------
@@ -619,7 +637,7 @@ def _needs_tool_retry(reply: str, message: str) -> tuple[bool, str]:
         return True, _TOOL_SYNTAX_NUDGE
     if (
         _ORDER_ACTION_RE.search(message) and not _HISTORY_QUERY_RE.search(message)
-    ) or _ORDER_CLAIM_RE.search(reply):
+    ) or _ORDER_STATUS_RE.search(message) or _ORDER_CLAIM_RE.search(reply):
         return True, _ORDER_NUDGE
     if _CATALOGUE_QUERY_RE.search(message):
         return True, _CATALOGUE_NUDGE
@@ -1091,10 +1109,26 @@ def _strip_tool_syntax(reply: str) -> str:
     if cleaned == reply.strip() and not _TOOL_MENTION_RE.search(cleaned):
         return reply
     # A prose mention ("I will call the list_categories tool...") survives the
-    # JSON strip above but is still unspeakable, and there is no reliable way to
-    # rewrite it into a real answer here — the turn produced no tool result to
-    # answer from. Substitute wholesale rather than speak a tool name.
+    # JSON strip above but is still unspeakable. Usually this means the turn
+    # produced no tool result to answer from, so wholesale substitution is
+    # correct. But observed live: a real tool DID run and the model prefixed
+    # a genuine, grounded answer with throwaway narration, e.g.
+    #     "Call `get_current_order` to check the status of the order.
+    #      Your cart is empty. Would you like to start a new order?"
+    # Wholesale substitution there discards a truthful answer. Drop only the
+    # sentence(s) naming a tool and keep the rest if anything speakable
+    # remains; fall back wholesale only when nothing does.
     if _TOOL_MENTION_RE.search(cleaned):
+        sentences = [s.strip() for s in _SENTENCE_END_RE.split(cleaned) if s.strip()]
+        kept = [s for s in sentences if not _TOOL_MENTION_RE.search(s)]
+        remainder = " ".join(kept).strip()
+        if remainder and re.search(r"[A-Za-z]{3,}", remainder):
+            logger.warning(
+                "[AGENT] Reply narrated a tool name alongside a real answer — "
+                "dropping the narration sentence | raw=%r kept=%r",
+                reply[:160], remainder[:160],
+            )
+            return remainder
         logger.warning(
             "[AGENT] Reply narrated a tool name instead of calling it — "
             "substituting fallback | raw=%r", reply[:160],
@@ -1683,7 +1717,7 @@ Every turn must call a tool first unless the customer is only being social ("hi"
 
 4c. OPEN SUGGESTION ("suggest something to drink", "what do you recommend", "what's your most ordered dish", "show me your favourites/bestsellers") with no specific item and nothing in the cart to base a pairing on → get_popular_products(category), inferring category from what they named (drink/beverage → beverages) or omitting it for a restaurant-wide answer. List returned items with name and price. Never call get_upsell_suggestions here — that tool requires real cart product_ids and fabricates a result without them. Empty result: say nothing is flagged popular in that category, ask what they'd like instead. Never state a dish or price that is not in the result.
 
-5. MANAGE / CONFIRM — "show my order", "what's my total" → get_current_order(user_id). "confirm / yes / place it" → confirm_active_order. Only say the order is confirmed after the tool returns successfully; read back the order_id exactly as the tool returned it. Never invent or reformat an order_id.
+5. MANAGE / CONFIRM — "show my order", "what's my total", "status of my order", "track my order", "did my order go through" → get_current_order(user_id). "confirm / yes / place it" → confirm_active_order. Only say the order is confirmed after the tool returns successfully; read back the order_id exactly as the tool returned it. Never invent or reformat an order_id.
 
 6. REMOVE ("remove X", "take off X", "drop X", "I don't want X") → remove_from_order, all named items in ONE call.
    - Reply with what removed lists and the new total. If not_in_cart is non-empty, say those weren't in the order.
