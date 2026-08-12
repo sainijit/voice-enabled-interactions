@@ -4,6 +4,7 @@
 
 - **Brand Name**: QuickBite Express | **Tagline**: "Fresh. Fast. Flavourful."
 - **Outlet Type**: Quick Service Restaurant (QSR)
+- **Address**: 24, Anna Salai, Teynampet, Chennai, Tamil Nadu 600018
 - **Cuisine**: Indian + Continental Fusion
 - **Hours**: Mon–Thu 8 AM–11 PM · Fri–Sat 8 AM–12 AM · Sun 9 AM–11 PM
 - **Breakfast Hours**: 8 AM–11 AM daily | **All-Day Menu**: 11 AM onwards
