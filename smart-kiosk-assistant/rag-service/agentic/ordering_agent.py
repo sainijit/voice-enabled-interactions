@@ -2397,9 +2397,24 @@ class OrderingAgent:
             # already put in front of the model, so "no tool call" is the
             # intended outcome here, not a grounding failure. Retrying would
             # spend two more inferences reaching the same answer.
+            #
+            # A status query is retried even when a tool WAS called, as long
+            # as it wasn't get_current_order. Observed live: right after a
+            # cancel, "Can you tell me the status of my order?" made the model
+            # call remove_from_order instead (there was nothing to remove, so
+            # removal_guard's stock failure text — "wasn't able to remove
+            # that" — was spoken as the "status" answer). tool_calls is
+            # non-empty there, so the no-tool-call branch above never fires;
+            # the wrong-tool case needs its own check.
             should_retry, nudge_text = (
                 _needs_tool_retry("".join(reply_parts), message)
-                if not tool_calls and not pregrounded
+                if not pregrounded and (
+                    not tool_calls
+                    or (
+                        _ORDER_STATUS_RE.search(message)
+                        and "get_current_order" not in tool_calls
+                    )
+                )
                 else (False, "")
             )
             if agent_cfg.RETRY_ON_MISSING_TOOL_CALL and should_retry:
