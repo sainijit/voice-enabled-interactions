@@ -51,7 +51,8 @@ The device field lives in the per-service pinned config (see
 does not appear in the logs:
 
 - Check the value is supported for that model (e.g. `audio-analyzer`
-  ASR supports `CPU` and `GPU` only).
+  ASR supports `CPU` for `provider: openai`, and `CPU|GPU|NPU` for
+  `provider: openvino`).
 - For `GPU`: confirm `/dev/dri` exists and the Intel OpenVINO GPU
   runtime is installed.
 - Restart the affected service after the change:
@@ -65,6 +66,105 @@ does not appear in the logs:
   ```bash
   docker compose logs <service-name> | grep -i -E "device|compiling|GPU|CPU"
   ```
+
+For `audio-analyzer` specifically, check the effective provider/device
+selection from `configs/audio-analyzer/config.yaml`:
+
+```bash
+grep -nE "provider:|device:" configs/audio-analyzer/config.yaml
+```
+
+and verify startup behavior:
+
+```bash
+docker logs audio-analyzer
+```
+
+`docker-compose.yml` is the single Compose file and should not override
+ASR provider/device. The ASR selection is read only from
+`configs/audio-analyzer/config.yaml`.
+
+For `openvino + NPU`, `audio-analyzer` uses `ACCEL_MOUNT_PATH` to map the
+host NPU device node into `/dev/accel/accel0` inside the container. The
+checked-in Compose file defaults that mapping to `/dev/null` so CPU/GPU-only
+hosts stay safe. `make up` auto-detects and validates the host NPU node when
+the ASR config requests OpenVINO + NPU; for direct `docker compose up`, set
+`ACCEL_MOUNT_PATH` in `.env` or the shell first.
+
+Operational distinction:
+
+- `make up` automatically detects `/dev/accel/accel*`, validates container
+  OpenVINO NPU visibility, and passes the detected node through
+  `ACCEL_MOUNT_PATH`.
+- `docker compose up` does not run that Makefile detection logic; when
+  `provider=openvino` and `device=NPU` are configured, provide
+  `ACCEL_MOUNT_PATH` explicitly.
+
+`audio-analyzer` does not need `privileged: true` for this path; explicit
+`/dev/dri` plus the NPU device mapping and Level Zero runtime libraries are
+the least-privilege contract the image expects.
+
+Before startup, run:
+
+```bash
+make check-env
+```
+
+`make check-env` enforces provider/device support and host hardware
+availability:
+
+- `openai + CPU` allowed
+- `openai + GPU/NPU` rejected
+- `openvino + CPU` allowed
+- `openvino + GPU` requires Intel GPU detection
+- `openvino + NPU` requires Intel NPU detection and successful container
+  visibility of the mapped device
+
+If requested GPU/NPU hardware is missing, startup is rejected early with
+an actionable error. No silent fallback is performed.
+
+### Error: OpenVINO does not report an NPU device
+
+If startup fails with:
+
+```text
+OpenVINO does not report an NPU device
+```
+
+use this sequence:
+
+```bash
+ls -l /dev/accel/
+make check-env
+```
+
+For direct Compose runs, start with an explicit host NPU mapping (example):
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d audio-analyzer
+```
+
+`/dev/accel/accel0` is a common path, but the host node may differ by
+platform. Use the node discovered on your host.
+
+### OpenAI + GPU/NPU Fails for Whisper ASR
+
+The current OpenAI/PyTorch Whisper backend supports `CPU` only.
+
+- Unsupported: `provider: openai` + `device: GPU`
+- Unsupported: `provider: openai` + `device: NPU`
+- Supported NPU path: `provider: openvino` + `device: NPU`
+- Supported GPU path: `provider: openvino` + `device: GPU`
+
+If you hit startup/model-load errors with `openai + GPU/NPU`, switch to
+`openvino + GPU/NPU` (or use `openai + CPU`) and recreate `audio-analyzer`:
+
+```bash
+docker compose down
+docker compose up -d audio-analyzer
+docker logs audio-analyzer
+curl http://localhost:8010/health
+```
 
 ## Permission Errors on Mounted Folders
 

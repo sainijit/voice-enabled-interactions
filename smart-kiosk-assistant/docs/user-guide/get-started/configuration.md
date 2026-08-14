@@ -31,7 +31,7 @@ The **Devices** column lists the supported inference devices for each:
 
 | Service | Field | Default (validated) | Other examples | Devices |
 |---|---|---|---|---|
-| `audio-analyzer` ASR | `models.asr.name` | `whisper-base` | `whisper-tiny`, `whisper-small`, `whisper-medium`, `whisper-large` | `CPU`, `GPU` (`GPU` requires `provider: openvino`) |
+| `audio-analyzer` ASR | `models.asr.name` | `whisper-base` | `whisper-tiny`, `whisper-small`, `whisper-medium`, `whisper-large` | `CPU`, `GPU`, `NPU` (`GPU`/`NPU` require `provider: openvino`) |
 | `audio-analyzer` sentiment | `sentiment.model` | `speechbrain/emotion-recognition-wav2vec2-IEMOCAP` | other SpeechBrain emotion-recognition models | `CPU`, `GPU` (disabled by default) |
 | `text-to-speech` | `models.tts.name` | `microsoft/speecht5_tts` (SpeechT5) | `Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice` (Qwen-TTS) | `CPU`, `GPU` (`int4` on iGPU produces noise; use `fp16` or `int8` on GPU) |
 | `rag-service` LLM | `models.llm.hf_id` | `Qwen/Qwen3-4B-Instruct-2507` | other OpenVINO-exportable instruct LLMs | `CPU`, `GPU` (`GPU` recommended for acceptable latency) |
@@ -71,7 +71,7 @@ Each model-hosting service reads its device from a pinned config file:
 The supported devices for each model are listed in the
 [Supported / validated models](#supported--validated-models) table above.
 
-Use uppercase device names (`CPU`, `GPU`). `rag-service` expects
+Use uppercase device names (`CPU`, `GPU`, `NPU`). `rag-service` expects
 them as quoted strings; `audio-analyzer` and `text-to-speech` unquoted.
 
 After editing, restart the affected service and confirm OpenVINO picked
@@ -88,6 +88,165 @@ OpenVINO prints a `Compiling model on <DEVICE>` line on first load.
 > service. Whether a given model actually runs on GPU and how it
 > performs depends on the OpenVINO version and operator coverage for
 > that model.
+
+## Audio Analyzer ASR Provider/Device (`config.yaml`)
+
+For ASR provider/device selection, use:
+
+1. `configs/audio-analyzer/config.yaml`
+
+This repository treats it as the single source of truth. Configure:
+
+- `models.asr.provider`
+- `models.asr.device`
+
+There is exactly one checked-in Compose file in this project: `docker-compose.yml`.
+No checked-in hardware-specific Compose override files are used (the Makefile may generate a temporary runtime override under `/tmp` to inject `/dev/accel` for the OpenVINO+NPU case).
+`docker-compose.yml` provides container runtime access, while ASR
+provider/device selection remains in `config.yaml` only. Provider/device
+is validated before startup by `make check-env`; startup is rejected early
+with actionable errors when configured hardware is unavailable.
+
+The NPU device mapping is controlled by `ACCEL_MOUNT_PATH` in the Compose
+environment. The checked-in Compose file defaults that mapping to
+`/dev/null`, so CPU/GPU-only hosts can start cleanly. For OpenVINO + NPU,
+`make up` auto-detects the host Intel NPU node, validates that OpenVINO can
+see it inside the container, and exports that path for the Compose run.
+For direct `docker compose up`, set `ACCEL_MOUNT_PATH` in `.env` or the
+shell to the host NPU device node first.
+
+Recommended workflow for OpenVINO + NPU:
+
+```bash
+make check-env
+make up
+```
+
+When `models.asr.provider=openvino` and `models.asr.device=NPU`, `make`
+automatically detects a host NPU node under `/dev/accel/accel*` (for
+example `/dev/accel/accel0`) and passes it to Compose through
+`ACCEL_MOUNT_PATH`.
+
+Direct Compose workflow (no Makefile wrapper):
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d audio-analyzer
+```
+
+`/dev/accel/accel0` is a common host path on Meteor Lake systems, but the
+host path may differ by platform. `ACCEL_MOUNT_PATH` always refers to the
+host NPU device node and is mapped into the container as
+`/dev/accel/accel0`.
+
+### Enable OpenVINO Whisper on NPU
+
+Edit `configs/audio-analyzer/config.yaml`:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: NPU
+```
+
+Then restart `audio-analyzer`:
+
+```bash
+make check-env
+make up
+```
+
+If you intentionally run Compose directly (without `make`), provide the NPU
+host device path explicitly:
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d audio-analyzer
+```
+
+Verify effective environment and health:
+
+```bash
+docker exec audio-analyzer env | grep AUDIO_ANALYZER
+docker logs audio-analyzer
+curl http://localhost:8010/health
+```
+
+Also verify that compose is not injecting ASR provider/device overrides:
+
+```bash
+docker compose config | grep AUDIO_ANALYZER__MODELS__ASR__
+```
+
+The provider/device override keys should not be present.
+
+Hardware checks happen before startup:
+
+- `provider=openvino, device=CPU` does not require GPU/NPU nodes.
+- `provider=openvino, device=GPU` requires Intel GPU detection.
+- `provider=openvino, device=NPU` requires Intel NPU detection and
+  container-level OpenVINO visibility.
+- Missing requested hardware fails during `make check-env` (no fallback).
+
+`ACCEL_MOUNT_PATH` drives NPU passthrough for `audio-analyzer`.
+CPU/GPU paths do not require `/dev/accel`; the Compose default maps
+`/dev/null` instead.
+
+Look for startup log lines showing OpenVINO Whisper loaded on `NPU`
+(for example `Loading Model: model name=whisper-base, device=NPU`) and
+`Application startup complete.`
+
+### Other Supported ASR Configurations
+
+OpenAI + CPU:
+
+```yaml
+models:
+  asr:
+    provider: openai
+    device: CPU
+```
+
+OpenVINO + GPU:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: GPU
+```
+
+OpenVINO + CPU:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: CPU
+```
+
+### Unsupported Combinations: OpenAI + GPU/NPU
+
+`models.asr.provider=openai` supports `CPU` only in this stack.
+The following are not supported by the current OpenAI/PyTorch Whisper backend:
+
+- `models.asr.provider=openai` with `models.asr.device=GPU`
+- `models.asr.provider=openai` with `models.asr.device=NPU`
+
+- Use `openvino + NPU` for NPU execution.
+- Use `openvino + GPU` for GPU execution.
+- For OpenAI/PyTorch Whisper, use a supported device such as `CPU`.
+
+### ASR Support Matrix
+
+| Provider | CPU | GPU | NPU |
+|---|---|---|---|
+| `openai` | Yes | No | No |
+| `whispercpp` | Yes | No | No |
+| `openvino` | Yes | Yes (Intel GPU required) | Yes (Intel NPU required, and `ACCEL_MOUNT_PATH` must point at the host NPU device for Compose runs) |
+
+If `GPU` or `NPU` is configured and unavailable on the host,
+`make check-env` fails before any container startup. The stack does not
+silently fall back to another device.
 
 ## Environment Variables
 
