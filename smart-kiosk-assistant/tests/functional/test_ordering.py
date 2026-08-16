@@ -128,6 +128,8 @@ class TestOrderingProducts:
             "name": "Crispy Veg Patty Burger",
             "category": "burgers",
             "price": 129.0,
+            "is_bestseller": True,
+            "is_veg": True,
         }
 
         missing = ordering_app.get("/api/v1/products/DOES-NOT-EXIST")
