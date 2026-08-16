@@ -98,7 +98,7 @@ services:
       - ./queue-service/src:/app/queue-service/src:ro
     devices:
       - /dev/dri:/dev/dri
-      - /dev/accel/accel0:/dev/accel/accel0
+      - ${ACCEL_MOUNT_PATH:-/dev/null}:/dev/accel/accel0
     group_add:
       - video
       - "${RENDER_GID:-992}"
