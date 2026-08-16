@@ -142,7 +142,7 @@ services:
     #
     # The tag is suffixed to make clear this is a locally built artifact and
     # to avoid shadowing the published 2026.1.0 image with different content.
-    image: ${REGISTRY:-intel}/hl-ai-metrics-collector:2026.1.0-local
+    image: ${REGISTRY:-intel}/metrics-collector:${RELEASE_TAG:-2026.1.0}
     container_name: metrics-collector
     privileged: true
     pid: host
@@ -253,7 +253,7 @@ services:
     restart: unless-stopped
 
   text-to-speech:
-    image: ${REGISTRY:-intel}/text-to-speech:2026.2.0-rc2
+    image: ${REGISTRY:-intel}/text-to-speech:${RELEASE_TAG:-latest}
     container_name: text-to-speech
     user: "1000:1000"
     ports:
