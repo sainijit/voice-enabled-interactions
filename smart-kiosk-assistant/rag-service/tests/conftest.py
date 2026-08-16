@@ -47,11 +47,9 @@ def reset_mcp_state() -> None:
 
     mcp_client._servers.clear()
     mcp_client._tools.clear()
-    mcp_client._session_ids.clear()
     yield
     mcp_client._servers.clear()
     mcp_client._tools.clear()
-    mcp_client._session_ids.clear()
 
 
 @pytest.fixture(autouse=True)
