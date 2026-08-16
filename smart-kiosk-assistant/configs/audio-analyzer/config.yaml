@@ -8,11 +8,10 @@ models:
   asr:
     provider: openvino # openai | openvino | whispercpp
     name: whisper-small  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
-                        # whisper-small OpenVINO IR (INT8) converted to models/openvino/whisper-small__ov/
-                        # whisper-base OpenVINO IR is pre-converted at models/openvino/whisper-base__ov/
-                        # Use whisper-base on GPU (iGPU Arc) — measured RTF on CPU was ~0.61-1.3x (1.2-3.5s/chunk);
+                        # whisper-small OpenVINO IR (INT8) converted to models/openvino/whisper-small-int8/
+                        # Use whisper-base on CPU/NPU; whisper-small on GPU for better accuracy.
                         # OpenVINO GPU target: <300ms for typical 1-2s kiosk commands.
-    device: GPU # CPU recommended; CPU only for whispercpp, CPU or GPU for openvino provider
+    device: GPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
     weight_format: null # OpenVINO: int8 | fp16 | null. whispercpp: null | q5 | q5_0 | q5_1 | q8 | q8_0 | int5 | int8
     temperature: 0.0
     diarization: True        # set True to enable pyannote speaker diarization

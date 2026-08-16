@@ -19,9 +19,28 @@ as a WAV file. No host audio device is passed into the containers.
 From `smart-kiosk-assistant/`:
 
 ```bash
-docker compose build
-docker compose up -d
+make check-env
+make up
 ```
+
+For OpenVINO + NPU (`models.asr.provider=openvino`,
+`models.asr.device=NPU`), this is the recommended path because the Makefile:
+
+- detects the host NPU node under `/dev/accel/accel*`
+- validates that OpenVINO can see `NPU` inside the `audio-analyzer` container
+- passes the detected host node through `ACCEL_MOUNT_PATH`
+
+Direct Compose behavior is different: it does not run Makefile detection. If
+you intentionally run Compose directly with OpenVINO + NPU, set
+`ACCEL_MOUNT_PATH` yourself:
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d audio-analyzer
+```
+
+`ACCEL_MOUNT_PATH` is the host NPU device node. The value above is a common
+example; actual host path may vary. Compose maps it into the container at
+`/dev/accel/accel0`.
 
 | Container | Port | Purpose |
 |---|---|---|
