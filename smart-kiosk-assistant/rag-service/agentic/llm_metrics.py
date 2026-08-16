@@ -59,6 +59,11 @@ _guard_stats: ContextVar[Dict[str, float] | None] = ContextVar("_guard_stats", d
 # for this turn. Read alongside ``llm_calls`` to see the optimisation working.
 _template_stats: ContextVar[Dict[str, float] | None] = ContextVar("_template_stats", default=None)
 
+# Stores the spoken text produced by the most recent template render this turn.
+# When skip_summarization=True, ADK emits no model text event, so reply_parts
+# would be empty. This var lets chat() recover the template text as the reply.
+_template_reply: ContextVar[str] = ContextVar("_template_reply", default="")
+
 
 def reset() -> None:
     """Begin a fresh measurement window for the current turn."""
@@ -67,6 +72,7 @@ def reset() -> None:
     _mcp_stats.set({"ms": 0.0, "calls": 0})
     _guard_stats.set({"ms": 0.0, "calls": 0})
     _template_stats.set({"ms": 0.0, "calls": 0})
+    _template_reply.set("")
 
 
 def record(elapsed_ms: float, ttft_ms: float | None = None) -> None:
@@ -193,3 +199,18 @@ def snapshot() -> Dict[str, Any]:
         "ttft_ms": round(stats["ttft_ms"], 1),
         "calls": int(stats["calls"]),
     }
+
+
+def set_template_reply(text: str) -> None:
+    """Store the spoken text produced by a template render for this turn.
+
+    Called inside the MCP tool callback when skip_summarization=True is set.
+    Because ADK emits no model text event in that case, chat() would otherwise
+    assemble an empty reply. chat() reads this back as the authoritative reply.
+    """
+    _template_reply.set(text)
+
+
+def get_template_reply() -> str:
+    """Return the template-rendered reply stored for this turn, or empty string."""
+    return _template_reply.get()

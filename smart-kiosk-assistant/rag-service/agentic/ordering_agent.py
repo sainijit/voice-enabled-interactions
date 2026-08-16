@@ -2104,6 +2104,7 @@ class OrderingAgent:
                         spoken[:160],
                     )
                     tool_context.actions.skip_summarization = True
+                    llm_metrics.set_template_reply(spoken)
                     return spoken
 
             result = _compress_tool_result(tool_name, result)
@@ -2539,6 +2540,19 @@ class OrderingAgent:
         reply = _strip_leaked_context_tags(reply)
         reply = _dedupe_repeated_sentences(reply)
         reply = _strip_admin_leak(reply)
+
+        # When skip_summarization=True, ADK emits no model text event after the
+        # tool call, so reply_parts is empty (or all content was stripped).
+        # Recover the deterministic template text stored by _mcp_fn.
+        if not reply.strip():
+            tpl_reply = llm_metrics.get_template_reply()
+            if tpl_reply:
+                logger.info(
+                    "[AGENT] reply was empty after stripping — using template reply | "
+                    "session=%s template_reply=%r",
+                    session_id, tpl_reply[:160],
+                )
+                reply = tpl_reply
         reply = _strip_leaked_directives(reply)
         if _ERROR_PAYLOAD_RE.search(reply):
             logger.error(
