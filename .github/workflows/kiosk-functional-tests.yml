@@ -355,6 +355,28 @@ jobs:
             sleep 10
           done
 
+      - name: Warm up OVMS LLM (first-inference kernel compile)
+        timeout-minutes: 10
+        working-directory: smart-kiosk-assistant
+        run: |
+          # OVMS compiles GPU/CPU kernels on the first inference request.
+          # Send a lightweight agent/chat call and wait up to 8 min so the
+          # per-test timeout in test_full_stack.py never hits a cold kernel.
+          echo "Sending warmup request to rag-service agent..."
+          for i in $(seq 1 48); do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST http://localhost:8020/api/v1/agent/chat \
+              -H "Content-Type: application/json" \
+              -d '{"transcription":"hello","session_id":"warmup"}' \
+              --max-time 15 2>/dev/null)
+            if [ "$HTTP" = "200" ]; then
+              echo "✓ OVMS warmup complete (attempt $i)"
+              break
+            fi
+            echo "Attempt $i/48 — HTTP $HTTP, waiting 10s..."
+            sleep 10
+          done
+
       - name: Show service logs (pre-test snapshot)
         if: always()
         run: |
@@ -372,7 +394,7 @@ jobs:
             --tb=short \
             --strict-markers \
             -v \
-            --timeout=360 \
+            --timeout=480 \
             --junitxml=test-results/tier2-stack-results.xml
 
       - name: Show service logs (post-test)
