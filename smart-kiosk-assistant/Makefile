@@ -62,8 +62,8 @@ _CAMERA_DEVICE_RAW     = $(strip $(CAMERA_DEVICE))
 _RTSP_CAMERA_DEVICE    = $(if $(_RTSP_LIVE_ON),$(_CAMERA_DEVICE_RAW),/dev/null)
 COMPOSE_BASE           = RTSP_SOURCE_MODE=$(_RTSP_SOURCE_MODE) RTSP_CAMERA_DEVICE=$(_RTSP_CAMERA_DEVICE) docker compose -f $(COMPOSE_FILE)
 
-# Services with fully local build contexts
-LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui rtsp-streamer
+# Services with fully local build contexts (built from source in this repo)
+LOCAL_ONLY_SERVICES := metrics-collector rag-service kiosk-core kiosk-ui rtsp-streamer queue-service
 
 # Identity feature (profile-gated). Driven by KIOSK_CORE_IDENTITY_ENABLED in
 # .env by default — set it to true there to build/start the identity-service
@@ -82,10 +82,8 @@ _IDENTITY_PROFILE  = $(if $(_IDENTITY_ON),--profile identity,)
 _IDENTITY_SVC      = $(if $(_IDENTITY_ON),identity-service,)
 export KIOSK_CORE_IDENTITY_ENABLED = $(if $(_IDENTITY_ON),true,false)
 
-# audio-analyzer and text-to-speech live in the edge-ai-libraries repository
-# at /home/intel/sainijit/edge-ai-libraries/microservices/. Build contexts are
-# wired in docker-compose.yml so they are always built from source locally.
-EDGE_AI_SERVICES := audio-analyzer text-to-speech queue-service
+# audio-analyzer and text-to-speech are published to Docker Hub by the
+# edge-ai-libraries CI pipeline and are always pulled — never built here.
 
 # Colors
 RED    := \033[0;31m
@@ -352,8 +350,8 @@ build: check-env ## Build (REGISTRY=false) or pull (REGISTRY=true) all images
 			REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build identity-service; \
 		fi; \
 	fi; \
-	echo "$(YELLOW)  Building audio-analyzer, text-to-speech from edge-ai-libraries source...$(NC)"; \
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build $(EDGE_AI_SERVICES)
+	echo "$(YELLOW)  Pulling audio-analyzer and text-to-speech from registry...$(NC)"; \
+	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull audio-analyzer text-to-speech
 	@echo "$(GREEN)✓ Images ready$(NC)"
 
 # =============================================================================

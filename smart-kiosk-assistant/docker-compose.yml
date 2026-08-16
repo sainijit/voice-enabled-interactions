@@ -173,9 +173,6 @@ services:
 
   audio-analyzer:
     image: ${REGISTRY:-intel}/audio-analyzer:${RELEASE_TAG:-latest}
-    build:
-      context: /home/intel/sainijit/edge-ai-libraries/microservices/audio-analyzer
-      dockerfile: Dockerfile
     container_name: audio-analyzer
     # Hardcoded to match the image's baked-in app user and the
     # ownership of the named volumes. Do not change.
@@ -257,9 +254,6 @@ services:
 
   text-to-speech:
     image: ${REGISTRY:-intel}/text-to-speech:2026.2.0-rc2
-    build:
-      context: /home/intel/sainijit/edge-ai-libraries/microservices/text-to-speech
-      dockerfile: Dockerfile
     container_name: text-to-speech
     user: "1000:1000"
     ports:
