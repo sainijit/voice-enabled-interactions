@@ -11,7 +11,8 @@ models:
                         # whisper-small OpenVINO IR (INT8) converted to models/openvino/whisper-small-int8/
                         # Use whisper-base on CPU/NPU; whisper-small on GPU for better accuracy.
                         # OpenVINO GPU target: <300ms for typical 1-2s kiosk commands.
-    device: GPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
+    device: CPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
+                # Change to GPU or NPU for hardware-accelerated inference.
     weight_format: int8 # OpenVINO: int8 | fp16 | null; int8 for whisper-small-int8 OV model
     temperature: 0.0
     diarization: True        # set True to enable pyannote speaker diarization
