@@ -356,26 +356,34 @@ jobs:
           done
 
       - name: Warm up OVMS LLM (first-inference kernel compile)
-        timeout-minutes: 10
+        timeout-minutes: 12
         working-directory: smart-kiosk-assistant
         run: |
-          # OVMS compiles GPU/CPU kernels on the first inference request.
-          # Send a lightweight agent/chat call and wait up to 8 min so the
-          # per-test timeout in test_full_stack.py never hits a cold kernel.
+          # OVMS compiles CPU kernels on the first inference request.
+          # Allow up to ~10 min (8 attempts × 75s max-time) so kernels are
+          # compiled before test_agent_list_menu runs.
+          # curl exit codes (28=timeout, 7=connect refused) are absorbed with
+          # || true so bash -e never kills this step prematurely.
           echo "Sending warmup request to rag-service agent..."
-          for i in $(seq 1 48); do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+          WARMED=false
+          for i in $(seq 1 8); do
+            echo "Warmup attempt $i/8 (max-time 75s)..."
+            HTTP=$(curl -s -o /tmp/warmup_resp.txt -w "%{http_code}" \
               -X POST http://localhost:8020/api/v1/agent/chat \
               -H "Content-Type: application/json" \
               -d '{"transcription":"hello","session_id":"warmup"}' \
-              --max-time 15 2>/dev/null)
+              --max-time 75 2>/dev/null || echo "000")
+            echo "  → HTTP $HTTP"
             if [ "$HTTP" = "200" ]; then
               echo "✓ OVMS warmup complete (attempt $i)"
+              WARMED=true
               break
             fi
-            echo "Attempt $i/48 — HTTP $HTTP, waiting 10s..."
-            sleep 10
+            cat /tmp/warmup_resp.txt 2>/dev/null || true
           done
+          if [ "$WARMED" = "false" ]; then
+            echo "⚠ Warmup did not return 200 — tests will proceed anyway (first inference may be slow)"
+          fi
 
       - name: Show service logs (pre-test snapshot)
         if: always()
