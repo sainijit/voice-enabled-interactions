@@ -126,20 +126,38 @@ Content-Type: multipart/form-data
 
 Feeds an uploaded audio file through the same chunking, ASR, RAG, and TTS pipeline as a session started through `/api/v1/sessions/start`. Useful for testing without capture hardware.
 
+> **Async operation** — the POST returns immediately with `"status": "running"`. The audio is processed in the background. Poll `GET /api/v1/sessions/{session_id}` until `status` is `"completed"` or `"failed"`, then read the `transcript` and `response` fields. See the [Polling Pattern](#polling-pattern) section for a ready-to-use shell loop.
+
+**Audio format requirements** — the uploaded WAV must match the `sample_rate` parameter:
+
+| Requirement | Value |
+|---|---|
+| Format | WAV (16-bit PCM) |
+| Sample rate | Must match `sample_rate` form field (default `16000` Hz) |
+| Channels | Mono or stereo (stereo is down-mixed automatically) |
+
+If your recording is 44100 Hz or another rate, convert it first:
+```bash
+ffmpeg -i input.wav -ar 16000 -ac 1 -sample_fmt s16 question.wav
+```
+
+If the WAV sample rate does not match, the session ends with `"status": "failed"` and the `error` field contains the mismatch details and the conversion command.
+
 **Form Fields**
 
 Accepts the same fields as [Start Microphone Session](#start-microphone-session) plus:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `file` | binary | required | Audio file to process (WAV recommended) |
-| `realtime_factor` | `float` | `1.0` | Playback speed multiplier for simulated real-time pacing (`0.0`–`100.0`). Set to a large value (e.g. `10.0`) to process as fast as possible. |
+| `file` | binary | required | 16-bit PCM WAV audio file |
+| `realtime_factor` | `float` | `1.0` | Playback speed multiplier (`0.0`–`100.0`). Set to `10.0` to process as fast as possible. |
 
-**Example**
+**Example** — upload a file and poll for the response
 
 ```bash
-curl --noproxy '*' -X POST http://127.0.0.1:8012/api/v1/sessions/start-file \
-  -F "file=@/path/to/question.wav" \
+# Step 1 — upload and capture the session_id
+SESSION=$(curl -s --noproxy '*' -X POST http://127.0.0.1:8012/api/v1/sessions/start-file \
+  -F "file=@question.wav" \
   -F "sample_rate=16000" \
   -F "chunk_seconds=4" \
   -F "silence_timeout_seconds=1.5" \
@@ -147,10 +165,23 @@ curl --noproxy '*' -X POST http://127.0.0.1:8012/api/v1/sessions/start-file \
   -F "silence_threshold=900" \
   -F "language=en" \
   -F "temperature=0.0" \
-  -F "realtime_factor=10.0"
+  -F "realtime_factor=10.0" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])")
+echo "Session: $SESSION"
+
+# Step 2 — wait for completion
+while true; do
+  SNAP=$(curl -s --noproxy '*' http://127.0.0.1:8012/api/v1/sessions/$SESSION)
+  STATUS=$(echo $SNAP | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+  echo "Status: $STATUS"
+  [[ "$STATUS" == "completed" || "$STATUS" == "failed" ]] && break
+  sleep 1
+done
+
+# Step 3 — read the result
+echo $SNAP | python3 -c "import sys,json; d=json.load(sys.stdin); print('Transcript:', d['transcript']); print('Response:', d['response'])"
 ```
 
-**Response** — initial session snapshot with `"status": "running"`.
+**Response** — initial session snapshot with `"status": "running"`. The `response` and `transcript` fields will be empty until the session completes; use the polling loop above or `GET /api/v1/sessions/{session_id}`.
 
 ---
 

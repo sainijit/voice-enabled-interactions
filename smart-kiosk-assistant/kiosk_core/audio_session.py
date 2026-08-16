@@ -1624,7 +1624,11 @@ class FileAudioSession(BaseAudioSession):
                 raise ValueError("Only 16-bit PCM WAV files are supported for file-based testing")
             if sample_rate != self.request.sample_rate:
                 raise ValueError(
-                    f"Uploaded WAV sample rate {sample_rate} does not match requested sample_rate {self.request.sample_rate}"
+                    f"Uploaded WAV sample rate {sample_rate} Hz does not match the "
+                    f"session sample_rate parameter ({self.request.sample_rate} Hz). "
+                    f"Either convert the file to {self.request.sample_rate} Hz 16-bit mono PCM "
+                    f"(e.g. ffmpeg -i input.wav -ar {self.request.sample_rate} -ac 1 -sample_fmt s16 output.wav) "
+                    f"or pass sample_rate={sample_rate} when starting the session."
                 )
 
             while not self._stop_event.is_set():

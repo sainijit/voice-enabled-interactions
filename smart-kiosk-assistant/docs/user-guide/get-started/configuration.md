@@ -314,3 +314,105 @@ Most deployments should leave these values unchanged. Override them only when `k
 ## Session Parameters
 
 Session parameters (chunk duration, silence threshold, etc.) can also be provided per-request in the POST body for `/api/v1/sessions/start` and `/api/v1/sessions/start-file`. Per-request values take precedence over the environment variable defaults.
+
+---
+
+## NPU Deployment Workflow
+
+This section provides a complete step-by-step workflow to run the Smart Kiosk Assistant with Intel NPU acceleration for Whisper ASR.
+
+> **Which services support NPU?**
+> Only `audio-analyzer` supports NPU (`provider: openvino, device: NPU`). All other services use CPU (kiosk-core, rag-service, text-to-speech) or GPU (ovms-llm). Do not set NPU on other services — they will fail to start.
+
+### 1 — System requirements
+
+| Requirement | Details |
+|---|---|
+| Hardware | Intel Core Ultra (Meteor Lake or later) with integrated NPU |
+| Host driver | Intel NPU driver (`intel-npu-driver`) installed and loaded |
+| User-space runtime | `intel-level-zero-npu` package |
+| Host device | `/dev/accel/accel0` (or similar) present and accessible |
+| OpenVINO | Container image already bundles the correct runtime |
+
+Verify the NPU device node is present before proceeding:
+```bash
+ls /dev/accel/
+# Expected: accel0   accelmon0
+```
+
+### 2 — Install the Intel NPU driver (if not already installed)
+
+Refer to the Intel NPU driver repository: <https://github.com/intel/linux-npu-driver/releases>. Installation varies by distribution. After installation:
+
+```bash
+# Verify kernel driver is loaded
+lsmod | grep intel_vpu
+# Verify device node exists
+ls -la /dev/accel/accel0
+```
+
+### 3 — Set NPU device in audio-analyzer config
+
+Edit `smart-kiosk-assistant/configs/audio-analyzer/config.yaml`:
+
+```yaml
+models:
+  asr:
+    provider: openvino
+    device: NPU
+    name: whisper-base  # whisper-tiny recommended for NPU latency targets
+    weight_format: null  # NPU uses FP16 by default; INT8 is not required
+```
+
+> **Model recommendation for NPU:** Use `whisper-tiny` or `whisper-base`. Larger models increase NPU compiler warmup time on first inference.
+
+### 4 — Start the stack
+
+The recommended path is `make up`, which auto-detects the NPU device node and validates OpenVINO visibility before starting:
+
+```bash
+cd smart-kiosk-assistant
+make check-env
+make up
+```
+
+`make` automatically:
+- Detects `/dev/accel/accel*` on the host
+- Sets `ACCEL_MOUNT_PATH` to the detected device node
+- Passes `ACCEL_MOUNT_PATH` into the Compose invocation
+
+If you use `docker compose` directly, set `ACCEL_MOUNT_PATH` yourself:
+
+```bash
+ACCEL_MOUNT_PATH=/dev/accel/accel0 docker compose up -d
+```
+
+### 5 — Verify NPU is active
+
+```bash
+# Check audio-analyzer started healthy
+docker ps --filter "name=audio-analyzer" --format "{{.Names}}\t{{.Status}}"
+
+# Confirm NPU device is visible to OpenVINO inside the container
+docker exec audio-analyzer python3 -c "import openvino as ov; print(ov.Core().available_devices)"
+# Expected output includes: NPU
+
+# Check the service is using the NPU provider
+curl -s http://localhost:8010/v1/model-info | python3 -m json.tool
+# Look for: "provider": "openvino", "device": "NPU"
+
+# Check logs for successful NPU model load
+docker logs audio-analyzer 2>&1 | grep -i "npu\|compile"
+```
+
+### 6 — Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Container unhealthy, `NPU not in available_devices` | NPU driver not loaded or `/dev/accel/accel0` not mapped | Verify host driver and set `ACCEL_MOUNT_PATH` |
+| `libopenvino_intel_npu_compiler_loader.so` missing | NPU compiler not in image | Rebuild the `audio-analyzer` image with NPU user-space packages |
+| Slow first inference (20–60 s) | NPU compiler cache is empty (cold start) | Normal on first run; subsequent requests will be fast |
+| Non-NPU containers unhealthy after NPU config change | NPU-unrelated services picking up wrong env | Only modify `configs/audio-analyzer/config.yaml`; do not add `ASR_DEVICE=NPU` to `.env` (affects all services) |
+
+> **Cold-start note:** The OpenVINO NPU compiler caches compiled kernels inside the container under `/tmp/ov_cache/`. The first inference after a container restart takes significantly longer (20–60 s) while the cache warms up. This is expected behavior.
+
