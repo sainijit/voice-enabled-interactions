@@ -30,11 +30,28 @@ async def _warmup_agent_tools() -> None:
         logger.warning("[STARTUP] Agent MCP warmup failed (non-fatal): %s", exc)
 
 
+def _warmup_rag_models() -> None:
+    """Run one throwaway query so embeddings, reranker, and the LLM/OVMS backend
+    compile their kernels before the first real turn (otherwise it is ~cold)."""
+    from pipeline import get_shared_pipeline
+
+    get_shared_pipeline().answer_question("warmup", max_tokens=8)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_model()
     preload_models()
     logger.info("smart-kiosk-assistant rag-service initialized")
+
+    # Warm the inference path (embeddings + reranker + LLM/OVMS) with one
+    # throwaway query so the first real turn does not pay kernel-compile cost.
+    # Bounded so a slow/unready backend can never stall startup indefinitely.
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_warmup_rag_models), timeout=60)
+        logger.info("[STARTUP] RAG model warmup complete ✓")
+    except Exception as exc:  # noqa: BLE001  (includes TimeoutError → lazy fallback)
+        logger.warning("[STARTUP] RAG model warmup skipped/failed (non-fatal): %s", exc)
 
     # Bootstrap the ordering agent (discovers MCP tools from kiosk-core)
     try:
