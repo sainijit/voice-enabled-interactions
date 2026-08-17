@@ -1,0 +1,37 @@
+# Smart Kiosk — spoken reply templates for the ordering agent
+#
+# The rag-service reply_templates.py engine reads these strings at startup
+# from domain_config and uses them to build deterministic responses without
+# calling the LLM a second time. All kiosk-specific phrasing and currency
+# formatting lives here; the template engine itself is generic.
+
+# Currency symbol prepended to prices (e.g. ₹129)
+currency_symbol: "₹"
+
+# Spoken when list_categories returns the menu overview
+# Placeholders: {categories} — Oxford-comma joined category names with counts
+category_list: "We have {categories}. Which category would you like to explore?"
+
+# Spoken when list_products returns items in a category
+# Placeholders: {products} — Oxford-comma joined "Name (₹price)" strings
+product_list: "We have {products}. Which one would you like to try?"
+
+# Spoken when the customer asks for a category the kiosk doesn't carry
+# Placeholders: {requested} — what the customer asked for
+#               {categories} — Oxford-comma joined available category names
+not_found: "Sorry, we don't have {requested} on the menu. We do serve {categories}. Which would you like to see?"
+
+# Spoken after a single-item add (place_order / update_order templated path)
+# Placeholders: {items} — Oxford-comma joined item names just added
+#               {total} — numeric total (currency_symbol prepended automatically)
+item_added: "I've added {items} to your order. Your total is now {currency}{total}."
+
+# Spoken when confirm_order succeeds
+# Placeholders: {order_id} — order identifier
+#               {total}    — numeric total (currency_symbol prepended automatically)
+order_confirmed: "Your order is confirmed! Order number {order_id}, total {currency}{total}. Thank you!"
+
+# Spoken when remove_from_order succeeds
+# Placeholders: {items} — Oxford-comma joined item names removed
+#               {total} — numeric remaining total (currency_symbol prepended automatically)
+item_removed: "I've removed {items}. Your new total is {currency}{total}."

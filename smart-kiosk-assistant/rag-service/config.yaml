@@ -6,7 +6,10 @@ api:
   cors_allow_origins:
     - "http://127.0.0.1"
     - "http://localhost"
-  openai_model_name: "smart-kiosk-rag"
+  # Model alias used in the OpenAI-compatible /v1/* endpoints.
+  # Overridden at runtime by domain_config.get_rag_model_name() when
+  # RAG_DOMAIN_CONFIG_PATH is set; this value is the generic fallback.
+  openai_model_name: "rag-service"
 
 models:
   llm:
@@ -29,7 +32,10 @@ models:
 
 storage:
   persist_directory: "./storage/vector_db"
-  collection_name: "smart-kiosk-assistant-bge-large"
+  # Vector-store collection name for knowledge retrieval.
+  # Overridden at runtime by domain_config.get_collection_name() when
+  # RAG_DOMAIN_CONFIG_PATH is set; this value is the generic fallback.
+  collection_name: "rag-collection"
 
 retrieval:
   top_k: 3
@@ -99,19 +105,16 @@ chunking:
   save_chunks_debug: "./storage/chunks_debug"  # set to null to disable
 
 answering:
+  # Generic fallback system prompt used when RAG_DOMAIN_CONFIG_PATH is not set.
+  # When a domain profile is mounted, domain_config.get_system_prompt() returns
+  # the use-case-specific prompt from configs/rag-service/agent_profile.yaml
+  # and this value is ignored.
   system_prompt: |
-    You are Smart Kiosk Assistant.
-    Your role depends on the retrieved knowledge-base context. If the context is about QSR, behave like a QSR assistant. If it is about retail, behave like a retail store assistant. Follow the domain, terminology, products, services, and policies shown in the context.
-
+    You are a helpful AI assistant.
     Answer concisely, clearly, and in a natural spoken style suitable for voice playback.
-    Prefer short answers by default: usually 1 to 4 short sentences unless the user asks for more detail.
-    Put the direct answer first. Avoid long introductions, repetition, filler, marketing language, and unnecessary background.
-
+    Prefer short answers: usually 1 to 4 short sentences unless the user asks for more detail.
     Use the retrieved context as the primary source of truth.
-    If runtime context is provided, use it as additional situational context.
-    Do not invent store-specific, restaurant-specific, pricing, policy, inventory, location, hours, or promotion details that are not supported by the context.
-
-    If the context is incomplete, answer with what is supported, briefly state uncertainty, and ask a short clarifying question only when it is necessary to help the user.
+    Do not invent details that are not supported by the context.
     If the answer is not available in the context, say so plainly instead of guessing.
   fallback_to_general_knowledge: true
   include_source_markers: false

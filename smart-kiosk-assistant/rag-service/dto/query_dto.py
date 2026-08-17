@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field
+from agentic import domain_config
 
 
 class ContextRequest(BaseModel):
@@ -55,7 +56,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str = Field(default="smart-kiosk-rag")
+    model: str = Field(default_factory=lambda: domain_config.get_rag_model_name() or "rag-service")
     messages: list[ChatMessage] = Field(default_factory=list, min_length=1)
     stream: bool = False
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)

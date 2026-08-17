@@ -1,8 +1,12 @@
-# Agent configuration — QuickBite Express ordering agent
+# Agent configuration — generic defaults
+#
+# Kiosk-specific identity (name, description) is loaded at runtime from
+# configs/rag-service/agent_profile.yaml via domain_config.  These values
+# are used only when RAG_DOMAIN_CONFIG_PATH is not set.
 
 agent:
-  name: kiosk_ordering_agent
-  description: "AI ordering assistant for QuickBite Express kiosk"
+  name: rag_agent
+  description: "RAG-powered AI assistant"
   # OVMS model (overridden by AGENT_LLM_MODEL env var)
   model: Qwen3-4B
   # Generation parameters passed to LiteLlm

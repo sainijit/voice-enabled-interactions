@@ -32,6 +32,7 @@ from agentic import action_result
 from agentic import cart_state_guard
 from agentic import config as agent_cfg
 from agentic import confirm_guard
+from agentic import domain_config
 from agentic import item_intent_guard
 from agentic import llm_metrics
 from agentic import menu_guard
@@ -267,7 +268,7 @@ _REFUSAL_RE = re.compile(
 # real hours differ every day. Unlike a refusal this reads as authoritative,
 # so it cannot be detected from the reply text alone; it is detected from the
 # question instead.
-_KNOWLEDGE_QUERY_RE = re.compile(
+_KNOWLEDGE_QUERY_RE = domain_config.build_knowledge_regex() or re.compile(
     r"\b(?:open(?:ing)?|clos(?:e|ing)|hours?|timing|breakfast|"
     r"restaurant name|name of (?:the|your) restaurant|address|located?|location|"
     r"parking|deliver(?:y|ies)?|takeaway|dine[- ]?in|wifi|contact|phone|"
@@ -295,7 +296,7 @@ _KNOWLEDGE_NUDGE = (
 # customer tries to order an item that does not exist and every subsequent
 # place_order fails. Neither _PROMISE_RE nor _REFUSAL_RE catches this, because a
 # hallucinated menu neither promises a lookup nor refuses one.
-_CATALOGUE_QUERY_RE = re.compile(
+_CATALOGUE_QUERY_RE = domain_config.build_catalogue_regex() or re.compile(
     r"\b(?:menu|item|items|dish|dishes|serve|serves|offer|offers|available|"
     r"option|options|price|prices|cost|costs|how much|rate|rates|"
     r"burger|burgers|pizza|pizzas|wrap|wraps|side|sides|dessert|desserts|"
@@ -387,7 +388,7 @@ _QUESTION_RE = re.compile(
 # purpose: classifying a turn in-domain merely leaves it on today's path, while
 # classifying it out-of-domain refuses it. The asymmetry is resolved in the
 # customer's favour, so this list errs towards inclusion.
-_IN_DOMAIN_RE = re.compile(
+_IN_DOMAIN_RE = domain_config.build_domain_regex() or re.compile(
     r"\b(?:order|orders|cart|bill|total|checkout|pay|payment|price|cost|"
     r"menu|item|items|food|eat|drink|drinks|meal|combo|snack|"
     r"restaurant|outlet|kiosk|store|shop|kitchen|staff|table|"
@@ -422,10 +423,8 @@ _SMALLTALK_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-_OUT_OF_SCOPE_FALLBACK = (
-    "I'm the ordering assistant for this restaurant, so I can only help with "
-    "our menu and your order. Would you like to hear what we serve?"
-)
+_OUT_OF_SCOPE_FALLBACK = domain_config.get_out_of_scope_fallback()
+
 
 
 def _is_out_of_scope(message: str) -> bool:
@@ -609,7 +608,7 @@ _NUDGE_NAMES[id(_KNOWLEDGE_NUDGE)] = "knowledge"
 # never be resolved by auto-confirming.
 # Singular forms are enough: kiosk-core's list_products normalises singulars
 # and synonyms ("drink" -> beverages) before querying.
-_CATEGORY_KEYWORDS = (
+_CATEGORY_KEYWORDS = domain_config.get_category_names() or (
     "burger", "pizza", "wrap", "side", "beverage", "drink", "dessert", "fries",
 )
 
@@ -630,11 +629,8 @@ _CONFIRM_INTENT_RE = re.compile(
 # guard, so a new order-related tool only needs to be added in one place.
 _ORDER_TOOLS = action_result.ORDER_TOOLS
 
-_ORDER_CLAIM_FALLBACK = (
-    "Sorry, I could not complete that just now and I don't want to tell you it "
-    "went through when it hasn't. Please say \"confirm my order\" once more, or "
-    "ask a member of staff."
-)
+_ORDER_CLAIM_FALLBACK = domain_config.get_order_claim_fallback()
+
 
 
 def _needs_tool_retry(reply: str, message: str) -> tuple[bool, str]:
@@ -1827,9 +1823,9 @@ class OrderingAgent:
         # 3. Create ADK agent
         model = create_adk_model()
         self._agent = LlmAgent(
-            name="kiosk_ordering_agent",
+            name=domain_config.get_agent_name(),
             model=model,
-            description="Kiosk ordering assistant — handles menu Q&A and order management",
+            description=domain_config.get_agent_description(),
             instruction=_AGENT_INSTRUCTION,
             tools=adk_tools,
         )
@@ -1869,9 +1865,9 @@ class OrderingAgent:
 
         model = create_adk_model()
         self._agent = LlmAgent(
-            name="kiosk_ordering_agent",
+            name=domain_config.get_agent_name(),
             model=model,
-            description="Kiosk ordering assistant — handles menu Q&A and order management",
+            description=domain_config.get_agent_description(),
             instruction=_AGENT_INSTRUCTION,
             tools=adk_tools,
         )

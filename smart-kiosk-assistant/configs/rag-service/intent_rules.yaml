@@ -1,0 +1,215 @@
+# Smart Kiosk — intent keyword rules for the ordering agent
+#
+# These lists drive the regex patterns built dynamically in ordering_agent.py
+# at startup (domain_config.build_*_regex()). They are QSR/food-specific and
+# must be replaced or extended when the rag-service is used in another domain
+# (healthcare, education, retail) via a different mounted config.
+
+# Words that signal the customer is asking about menu items, prices, or
+# availability. Triggers _CATALOGUE_QUERY_RE recovery guard and pre-grounding.
+catalogue_keywords:
+  - menu
+  - item
+  - items
+  - dish
+  - dishes
+  - serve
+  - serves
+  - offer
+  - offers
+  - available
+  - option
+  - options
+  - price
+  - prices
+  - cost
+  - costs
+  - how much
+  - rate
+  - rates
+  - burger
+  - burgers
+  - pizza
+  - pizzas
+  - wrap
+  - wraps
+  - side
+  - sides
+  - dessert
+  - desserts
+  - sweet
+  - sweets
+  - beverage
+  - beverages
+  - drink
+  - drinks
+  - combo
+  - combos
+
+# Words that signal an order-mutation intent. Triggers _ORDER_ACTION_RE guard.
+order_action_keywords:
+  - confirm
+  - confirmed
+  - place the order
+  - place my order
+  - checkout
+  - check out
+  - finalize
+  - finalise
+  - proceed
+  - that's all
+  - that's it
+  - i'm done
+  - cancel
+  - remove
+  - pay
+
+# Broad vocabulary that marks a turn as "in-domain" for the kiosk.
+# Kept deliberately wide — false positives merely stay on today's path;
+# false negatives trigger the out-of-scope guard.
+domain_keywords:
+  - order
+  - orders
+  - cart
+  - bill
+  - total
+  - checkout
+  - pay
+  - payment
+  - price
+  - cost
+  - menu
+  - item
+  - items
+  - food
+  - eat
+  - drink
+  - drinks
+  - meal
+  - combo
+  - snack
+  - restaurant
+  - outlet
+  - kiosk
+  - store
+  - shop
+  - kitchen
+  - staff
+  - table
+  - seat
+  - seats
+  - seating
+  - sit
+  - sitting
+  - add
+  - added
+  - remove
+  - cancel
+  - confirm
+  - serve
+  - serves
+  - recommend
+  - suggest
+  - veg
+  - vegan
+  - vegetarian
+  - halal
+  - allergen
+  - gluten
+  - spicy
+  - calorie
+  - calories
+  - burger
+  - burgers
+  - pizza
+  - pizzas
+  - wrap
+  - wraps
+  - fries
+  - dessert
+  - desserts
+  - beverage
+  - beverages
+  - coffee
+  - lassi
+  - soda
+  - pepsi
+  - roll
+  - rolls
+  - open
+  - opening
+  - close
+  - closing
+  - hours
+  - timing
+  - address
+  - location
+  - parking
+  - wifi
+  - delivery
+  - takeaway
+  - offer
+  - offers
+  - discount
+  - washroom
+  - restroom
+  - toilet
+  - water
+  - napkin
+  - straw
+  - takeout
+  - parcel
+
+# Outlet/knowledge-base query words (hours, address, facilities).
+# Triggers _KNOWLEDGE_QUERY_RE pre-grounding.
+knowledge_keywords:
+  - open
+  - opening
+  - closing
+  - hours
+  - timing
+  - breakfast
+  - restaurant name
+  - address
+  - located
+  - location
+  - parking
+  - delivery
+  - deliveries
+  - takeaway
+  - dine-in
+  - wifi
+  - contact
+  - phone
+  - halal
+  - vegetarian
+  - vegan
+  - allergen
+  - gluten
+  - ingredient
+  - spicy
+  - payment
+  - upi
+  - card
+  - cash
+  - policy
+  - refund
+  - restrooms
+  - bathrooms
+  - washrooms
+  - toilets
+  - wheelchair
+  - seating
+
+# Category names the model uses when routing _force_catalogue() calls.
+# Each entry is a string the customer might say to identify a category,
+# mapped to what list_products(category=...) accepts.
+category_names:
+  - burger
+  - pizza
+  - wrap
+  - side
+  - beverage
+  - drink
+  - dessert
+  - fries

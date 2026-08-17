@@ -355,10 +355,21 @@ services:
       # Docker bridge network instead of through the Intel proxy.
       NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,172.16.0.0/12,10.0.0.0/8"
       no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,172.16.0.0/12,10.0.0.0/8"
+      # Domain-specific config (identity, intent rules, reply templates) is
+      # mounted from the consuming application rather than baked into the image.
+      # Non-kiosk deployments override this path (or leave it unset for
+      # generic RAG-only mode).
+      RAG_DOMAIN_CONFIG_PATH: /app/rag-service/domain-config
+      # Enable or disable the ordering-agent subsystem. Set to "false" for
+      # pure-RAG deployments (healthcare, education) to skip MCP bootstrap.
+      ORDERING_AGENT_ENABLED: ${ORDERING_AGENT_ENABLED:-true}
     volumes:
       - rag_service_models:/app/rag-service/models
       - rag_service_storage:/app/rag-service/storage
       - rag_service_hf_cache:/app/rag-service/.cache/huggingface
+      # Mount kiosk-specific domain config into the container at the path
+      # declared above so the generic image becomes kiosk-aware at runtime.
+      - ./configs/rag-service:/app/rag-service/domain-config:ro
     # start_period covers first-run model download + OpenVINO INT8 export
     # (~2-3 min for Qwen3-4B + embeddings + reranker). Cached runs are fast.
     healthcheck:

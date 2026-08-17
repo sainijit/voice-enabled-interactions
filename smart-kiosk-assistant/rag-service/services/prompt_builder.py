@@ -44,7 +44,7 @@ class PromptBuilder:
         )
 
         fallback_hint = (
-            "If the retrieved kiosk context is insufficient, you may use limited general domain knowledge, but state uncertainty clearly and do not invent business-specific facts."
+            "If the retrieved context is insufficient, you may use limited general domain knowledge, but state uncertainty clearly and do not invent business-specific facts."
             if self.fallback_to_general_knowledge
             else "If the context is insufficient, say you do not have enough knowledge-base context to answer confidently."
         )

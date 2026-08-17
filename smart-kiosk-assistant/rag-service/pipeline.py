@@ -26,6 +26,7 @@ from services import (
 )
 from utils.config_loader import config
 from utils.ensure_model import ensure_llm_model, ensure_reranker_model, get_llm_model_path
+from agentic import domain_config
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,9 @@ class RagPipeline:
 
         storage_cfg = config.storage
         self.persist_directory = storage_cfg.persist_directory
-        self.collection_name = storage_cfg.collection_name
+        # collection_name: prefer domain profile (agent_profile.yaml) over
+        # config.yaml generic fallback so each application has its own KB.
+        self.collection_name = domain_config.get_collection_name() or storage_cfg.collection_name
 
         if _llm_backend == "ovms":
             self._llm_service: LLMService | OVMSLLMService = OVMSLLMService(
@@ -113,7 +116,9 @@ class RagPipeline:
             rerank_score_threshold=getattr(config.retrieval, "rerank_score_threshold", None),
         )
         self._prompt_builder = PromptBuilder(
-            system_prompt=config.answering.system_prompt,
+            # system_prompt: domain profile takes precedence over config.yaml
+            # generic fallback so each application controls its own identity.
+            system_prompt=domain_config.get_system_prompt() or config.answering.system_prompt,
             max_context_chars=int(getattr(config.retrieval, "max_context_chars", 16000)),
             history_turns=int(getattr(config.answering, "history_turns", 2)),
             include_source_markers=bool(getattr(config.answering, "include_source_markers", False)),

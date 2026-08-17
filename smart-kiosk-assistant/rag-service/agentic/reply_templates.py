@@ -41,6 +41,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from agentic import domain_config
 from agentic.action_result import unwrap, unwrap_any
 
 # How many upsell/alternative suggestions to mention in one spoken sentence.
@@ -115,6 +116,9 @@ def speak_catalogue(payload: Any) -> str | None:
         requested = str(payload.get("requested") or "").strip()
         if not categories or not requested:
             return None
+        tpl = domain_config.get_reply_template("not_found")
+        if tpl:
+            return tpl.format(requested=requested, categories=_join_names(categories))
         return (
             f"Sorry, we don't have {requested} on the menu. "
             f"We do serve {_join_names(categories)}. "
@@ -138,6 +142,9 @@ def speak_catalogue(payload: Any) -> str | None:
             else str(e["category"])
             for e in payload
         ]
+        tpl = domain_config.get_reply_template("category_list")
+        if tpl:
+            return tpl.format(categories=_join_names(parts))
         return (
             f"We have {_join_names(parts)}. "
             f"Which category would you like to explore?"
@@ -149,7 +156,11 @@ def speak_catalogue(payload: Any) -> str | None:
         isinstance(e, dict) and e.get("name") and e.get("price") is not None
         for e in payload
     ):
-        parts = [f"{e['name']} (₹{_money(e['price'])})" for e in payload]
+        currency = domain_config.get_currency_symbol()
+        parts = [f"{e['name']} ({currency}{_money(e['price'])})" for e in payload]
+        tpl = domain_config.get_reply_template("product_list")
+        if tpl:
+            return tpl.format(products=_join_names(parts))
         return f"We have {_join_names(parts)}. Which one would you like to try?"
 
     return None
@@ -184,7 +195,12 @@ def speak_order_mutation(payload: dict[str, Any]) -> str | None:
     if not names:
         return None
 
-    sentence = f"I've added {names} to your order. Your total is now ₹{_money(total)}."
+    currency = domain_config.get_currency_symbol()
+    tpl = domain_config.get_reply_template("item_added")
+    if tpl:
+        sentence = tpl.format(items=names, total=_money(total), currency=currency)
+    else:
+        sentence = f"I've added {names} to your order. Your total is now {currency}{_money(total)}."
 
     upsell = payload.get("upsell_suggestions") or []
     if upsell and isinstance(upsell[0], dict) and upsell[0].get("display"):
@@ -213,8 +229,12 @@ def speak_confirm(payload: dict[str, Any]) -> str | None:
     total = payload.get("total")
     if order_id is None or total is None or payload.get("status") != "confirmed":
         return None
+    currency = domain_config.get_currency_symbol()
+    tpl = domain_config.get_reply_template("order_confirmed")
+    if tpl:
+        return tpl.format(order_id=order_id, total=_money(total), currency=currency)
     return (
-        f"Your order is confirmed! Order number {order_id}, total ₹{_money(total)}. "
+        f"Your order is confirmed! Order number {order_id}, total {currency}{_money(total)}. "
         f"Thank you!"
     )
 
@@ -240,9 +260,13 @@ def speak_removal(payload: dict[str, Any]) -> str | None:
         return None
 
     names = _join_names(removed)
+    currency = domain_config.get_currency_symbol()
     if payload.get("cart_empty"):
         return f"I've removed {names}. Your cart is now empty."
-    return f"I've removed {names}. Your new total is ₹{_money(total)}."
+    tpl = domain_config.get_reply_template("item_removed")
+    if tpl:
+        return tpl.format(items=names, total=_money(total), currency=currency)
+    return f"I've removed {names}. Your new total is {currency}{_money(total)}."
 
 
 # Dispatch table used by ordering_agent.py — keeps the "which tools are

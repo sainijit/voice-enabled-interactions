@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from dto.query_dto import ChatCompletionRequest
 from pipeline import get_shared_pipeline
 from utils.config_loader import config
+from agentic import domain_config
 
 
 router = APIRouter()
@@ -57,7 +58,7 @@ def _extract_prompt(request: ChatCompletionRequest) -> tuple[str, str | None, li
 def create_chat_completion(request: ChatCompletionRequest):
     pipeline = get_shared_pipeline()
     prompt, system_prompt, history = _extract_prompt(request)
-    model_name = config.api.openai_model_name
+    model_name = domain_config.get_rag_model_name() or config.api.openai_model_name
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
