@@ -65,13 +65,12 @@ _user_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 # Tools that accept user_id and have it injected server-side.  user_id is
 # stripped from their ADK schema so the model never generates it.
-_USER_ID_INJECTED_TOOLS = frozenset({
-    "place_order",
-    "remove_from_order",
-    "cancel_order",
-    "confirm_active_order",
-    "get_current_order",
-})
+# Defaults match Smart Kiosk tool names; updated in-place after MCP bootstrap
+# via classify_discovered_tools() using role patterns from agent_profile.yaml.
+_USER_ID_INJECTED_TOOLS: action_result._MutableToolSet = action_result._MutableToolSet(
+    frozenset({"place_order", "remove_from_order", "cancel_order",
+               "confirm_active_order", "get_current_order"})
+)
 
 # Tools where dietary is always injected server-side from _dietary_ctx and
 # stripped from the model-visible schema.  Without stripping, the model fills
@@ -83,9 +82,10 @@ _USER_ID_INJECTED_TOOLS = frozenset({
 # a vegetarian/vegan preference gets a veg-only catalogue/bestseller list for
 # open-ended "suggest me some dishes"/"what are your favourites" questions,
 # without the model needing to ask again or filter free-hand.
-_DIETARY_INJECTED_TOOLS = frozenset({
-    "place_order", "update_order", "list_products", "get_popular_products",
-})
+# Defaults match Smart Kiosk; updated in-place after MCP bootstrap.
+_DIETARY_INJECTED_TOOLS: action_result._MutableToolSet = action_result._MutableToolSet(
+    frozenset({"place_order", "update_order", "list_products", "get_popular_products"})
+)
 
 # The current turn's raw customer utterance (untouched by the
 # ``[customer_name=...]``/``[dietary=...]`` tag prefixes), read by ``_mcp_fn``
@@ -683,21 +683,16 @@ def _strip_thinking(reply: str) -> str:
     return cleaned
 
 
-# Tools the model may name. Used only to recognise a tool call that was
-# emitted as *prose* instead of being executed.
-_TOOL_NAMES = (
+# Tools the model may name. Defaults to Smart Kiosk tool names; rebuilt after
+# MCP bootstrap by _apply_bootstrap_tool_classification() so a domain that
+# adds a new MCP tool automatically gets it guarded against prose leakage.
+# knowledge_lookup is always included (it is never in a cart category).
+_TOOL_NAMES: tuple[str, ...] = (
     "knowledge_lookup",
-    "list_categories",
-    "list_products",
-    "get_popular_products",
-    "place_order",
-    "update_order",
-    "get_order",
-    "get_current_order",
-    "confirm_order",
-    "confirm_active_order",
-    "remove_from_order",
-    "cancel_order",
+    "place_order", "update_order", "remove_from_order", "cancel_order",
+    "confirm_order", "confirm_active_order",
+    "get_order", "get_current_order",
+    "list_categories", "list_products", "get_popular_products", "get_product_details",
     "get_upsell_suggestions",
 )
 
@@ -732,6 +727,49 @@ _TOOL_SYNTAX_FALLBACK = (
     "I can help with our menu, opening hours, and taking your order. "
     "What would you like?"
 )
+
+
+def _apply_bootstrap_tool_classification(discovered_tool_names: list[str]) -> None:
+    """Classify MCP-discovered tools by role patterns and update all module globals.
+
+    Called once after MCP bootstrap with the full list of tool names returned
+    by the MCP server(s).  Uses ``domain_config.classify_discovered_tools()``
+    to match names against the role patterns in ``agent_profile.yaml``'s
+    ``tool_roles`` section.  All mutable holders (_USER_ID_INJECTED_TOOLS,
+    _DIETARY_INJECTED_TOOLS, action_result.CLAIM_TOOLS) are updated in-place so
+    guards that captured a reference at import time see the new contents
+    automatically.  Regex globals (_TOOL_NAMES, _TOOL_MENTION_RE,
+    _TOOL_SYNTAX_RE) are rebound since re.Pattern is immutable.
+
+    This eliminates the need to list MCP tool names in agent_profile.yaml —
+    the only per-domain knowledge required is the role patterns (regex), not
+    the exact tool names that the MCP server exposes.
+    """
+    global _TOOL_NAMES, _TOOL_MENTION_RE, _TOOL_SYNTAX_RE  # noqa: PLW0603
+
+    classified = domain_config.classify_discovered_tools(discovered_tool_names)
+
+    # 1. Update action_result guards (CLAIM_TOOLS, MUTATING_TOOLS, ORDER_TOOLS)
+    action_result.update_claim_tools_from_classified(classified)
+
+    # 2. Update injection sets in-place (mutable holders — guards hold a ref)
+    if classified.get("user_id_injected"):
+        _USER_ID_INJECTED_TOOLS.update(classified["user_id_injected"])
+    if classified.get("dietary_injected"):
+        _DIETARY_INJECTED_TOOLS.update(classified["dietary_injected"])
+
+    # 3. Rebuild tool-leak regexes from the complete discovered set
+    new_names = domain_config.get_all_tool_names_from_classification(classified)
+    if new_names:
+        _TOOL_NAMES = new_names
+        _TOOL_MENTION_RE = re.compile("|".join(_TOOL_NAMES))
+        _TOOL_SYNTAX_RE = re.compile(
+            r"(?:^|\n)\s*(?:```[a-zA-Z]*\s*)?(?:functions[.:]\s*)?"
+            r"(?:" + "|".join(_TOOL_NAMES) + r")"
+            r"\s*(?:\(\s*)?\{.*?\}\s*\)?\s*(?:```)?",
+            re.DOTALL,
+        )
+        logger.info("[AGENT] Tool regexes rebuilt for %d tool names", len(_TOOL_NAMES))
 
 
 _MD_BOLD_RE = re.compile(r"(\*\*|__)(.+?)\1", re.DOTALL)
@@ -1700,69 +1738,35 @@ def _extract_dietary_pref(message: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Agent instruction prompt
 # ---------------------------------------------------------------------------
+# The instruction is assembled from three sources:
+#   1. Domain sections (YAML)  : persona, tool_rules, domain_tags
+#      Owned by the consuming application — swap these to port to a new domain
+#      (healthcare, education, retail) without touching any Python file.
+#   2. Core framework (code)   : multi-action turns, knowledge block,
+#      tool error handling, output format constraints.
+#      Domain-agnostic and always present; rag-service owns and maintains it.
+#
+# See configs/rag-service/agent_profile.yaml → agent_instruction section.
+# See agentic/domain_config.py → get_agent_instruction() for assembly logic.
 
-_AGENT_INSTRUCTION = """
-You are the ordering assistant for QuickBite Express, a QSR voice kiosk.
-You have NO memory of this restaurant — every name, price, and fact must come from a tool result in THIS conversation. Never guess, recall, or invent.
-Every turn must call a tool first unless the customer is only being social ("hi", "thanks", "bye") or you are asking a clarifying question.
-
-## Rules (apply in order)
-
-0. NO CATEGORY ("show me the menu", "what do you serve") → list_categories. Never list products here.
-
-0.5. TENTATIVE ("I was thinking of", "maybe a", "I might want", "what about a", "I'm considering", "I was going to get", "possibly a") → NOT an order. Call list_products for the named category and ask which item they want. "ordering" inside a tentative phrase does not trigger Rule 1.
-
-0.6. DIETARY STATEMENT ONLY ("I'm vegetarian", "I'm vegan", "I eat meat", "I'm not vegetarian" with no item, category, or question attached) → NOT an order, NOT a request for suggestions. Do not call any tool. Acknowledge briefly in one short sentence and ask what they'd like (e.g. "Got it — what can I get you?"). Never output a tag, bracket, or the word "dietary" as your reply.
-
-1. DIRECT ORDER ("I want X", "add X", "order X", "get me X") → place_order (or update_order if a draft exists). Do NOT call list_products first.
-   - error + available_products: offer those by name and price, ask which they want.
-   - success: reply with NAME and PRICE from the result, copy every upsell display string verbatim, then ask to confirm. Never state any name or price not in the result.
-
-2. PRICE / AVAILABILITY ("how much is X", "what X do you have", "is X available") → list_products. Never answer from memory or knowledge_lookup.
-   - category_not_found: say we don't carry it; name the real categories from the result.
-
-3. INFO (hours, allergens, ingredients, address, Wi-Fi, offers, policy) → if the turn already has [knowledge]…[/knowledge], answer from it directly. Otherwise call knowledge_lookup first.
-
-4. BROWSE CATEGORY ("show me burgers") → list_products(category). List EVERY returned item with name and price in one sentence, ask which they want.
-
-4b. BROWSE WHOLE MENU → list_categories (not list_products). Name the categories, ask which to see.
-
-4c. OPEN SUGGESTION ("suggest something to drink", "what do you recommend", "what's your most ordered dish", "show me your favourites/bestsellers") with no specific item and nothing in the cart to base a pairing on → get_popular_products(category), inferring category from what they named (drink/beverage → beverages) or omitting it for a restaurant-wide answer. List returned items with name and price. Never call get_upsell_suggestions here — that tool requires real cart product_ids and fabricates a result without them. Empty result: say nothing is flagged popular in that category, ask what they'd like instead. Never state a dish or price that is not in the result.
-
-5. MANAGE / CONFIRM — "show my order", "what's my total", "status of my order", "track my order", "did my order go through" → get_current_order(user_id). "confirm / yes / place it" → confirm_active_order. Only say the order is confirmed after the tool returns successfully; read back the order_id exactly as the tool returned it. Never invent or reformat an order_id.
-
-6. REMOVE ("remove X", "take off X", "drop X", "I don't want X") → remove_from_order, all named items in ONE call.
-   - Reply with what removed lists and the new total. If not_in_cart is non-empty, say those weren't in the order.
-   - cart_empty + no replacement: say cart is empty, ask what they'd like.
-   - cart_empty + replacement also requested (Rule 6c): do NOT pause — proceed to place_order for the replacement.
-   - Never use update_order to remove.
-
-6b. CANCEL ORDER / START OVER ("cancel my order", "cancel everything", "start over", "start a new order", "start fresh", "begin a new order") → cancel_order. Not remove_from_order.
-   - cancelled=true: if the customer said "cancel", tell them it's cancelled and ask if they want to start fresh. If they said "start over"/"start a new order" instead, skip the word "cancelled" — just confirm the cart is cleared and ask what they'd like to order.
-   - error (no open order): if the customer said "cancel", say there's nothing to cancel. If they said "start over"/"start a new order" (nothing to clear, or a confirmed order already exists untouched), treat it as them simply beginning to order — do not say "nothing to cancel"; ask what they'd like.
-
-6c. SWAP / REMOVE-AND-ADD ("remove X and add Y", "swap X for Y") → call remove_from_order for X AND place_order for Y in the SAME turn. Never stop after the removal. Y goes in place_order, never in remove_from_order.
-
+_CORE_FRAMEWORK = """
 ## Multi-action turns
 After each tool result, check whether another requested action remains. Call the next tool. Speak only after ALL actions are complete.
 
 ## [knowledge] block
 When [knowledge]…[/knowledge] is present, answer from it directly — do not call knowledge_lookup. Never read the tags or "[1]" markers aloud. Summarise in 1–2 sentences.
 
-## Message tags
-[customer_name=X]: use the name sparingly — at most once per reply. Never let it imply an order was placed or confirmed.
-[dietary=X]: X is the customer's known dietary preference (vegetarian, vegan, or non-veg-only). Use it silently to steer suggestions; it does not change which rule applies. Never pass dietary as a tool argument yourself — it is injected automatically.
-These tags appear only when a preference is already known — if you don't see one, none is known; never invent, guess, or output a tag yourself, and never speak any tag, bracket, or the words "customer_name", "user_id", or "dietary" aloud.
-
 ## Tool errors
-{"error": …, "available_products": […]} means the item is not on the menu. Never say "try again". Offer the available_products alternatives by name and price.
+{"error": …, "available_products": […]} means the requested item is not available. Never say "try again". Offer the available_products alternatives by name and price.
 knowledge_lookup returns excerpts, not a finished answer — write the reply yourself in 1–2 sentences from those excerpts only.
 
 ## Output
-Spoken aloud at ~14 chars/sec. Keep replies UNDER 200 characters except Rule 4 (full product list) and Rule 1 success (item + price + upsell + confirm ask).
+Responses are spoken aloud. Keep replies concise — under 200 characters for routine turns, longer only when listing catalogue items or confirming a completed transaction.
 Never open with "Sure!", "Of course!", or restate the question. Start with the answer.
-Only use names, prices, and order_ids that appeared in a tool result this turn.
+Only use names, prices, and transaction IDs that appeared in a tool result this turn.
 """.strip()
+
+_AGENT_INSTRUCTION: str = domain_config.get_agent_instruction(_CORE_FRAMEWORK)
 
 
 # ---------------------------------------------------------------------------
@@ -1809,6 +1813,11 @@ class OrderingAgent:
         mcp_tools = await bootstrap_mcp_tools(agent_cfg.MCP_CONFIG_PATH)
         logger.info("[AGENT] MCP tools: %s", list(mcp_tools))
 
+        # Classify discovered tools into semantic roles and update all guards.
+        # Tool names come exclusively from the MCP server — agent_profile.yaml
+        # only provides the role patterns (regex) for classification.
+        _apply_bootstrap_tool_classification(list(mcp_tools.keys()))
+
         # 2. Build ADK FunctionTools
         from google.adk.agents import LlmAgent
         from google.adk.tools import FunctionTool
@@ -1854,6 +1863,9 @@ class OrderingAgent:
             return
 
         logger.info("[AGENT] MCP re-discovery succeeded: %s", list(mcp_tools))
+
+        # Re-classify newly discovered tools and update guards + injection sets.
+        _apply_bootstrap_tool_classification(list(mcp_tools.keys()))
 
         # Rebuild the agent with the newly discovered tools
         from google.adk.agents import LlmAgent

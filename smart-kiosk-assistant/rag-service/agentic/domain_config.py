@@ -248,3 +248,144 @@ def get_reply_template(name: str) -> str | None:
     _load()
     value = _templates.get(name)
     return str(value) if value is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Tool role accessors (Phase 1 decoupling)
+# ---------------------------------------------------------------------------
+# The rag-service never hardcodes MCP tool names. Tool names are discovered
+# at bootstrap from the MCP server (mcp_client.bootstrap_mcp_tools). The
+# domain application only defines REGEX PATTERNS in agent_profile.yaml under
+# `tool_roles` that classify discovered names into semantic roles.
+#
+# This eliminates duplication between agent_profile.yaml and the MCP server
+# configuration — tool names live in exactly one place: the MCP server.
+
+# Fallback role patterns preserving Smart Kiosk semantics when no domain
+# config is mounted — ensures zero behaviour change for existing deployments.
+_FALLBACK_ROLE_PATTERNS: dict[str, str] = {
+    "cart_mutate":      r"^(place|update)_order$",
+    "cart_remove":      r"^(remove_from|cancel)_order$",
+    "cart_confirm":     r"^confirm",
+    "cart_read":        r"^get_(order|current_order)$",
+    "catalogue_read":   r"^(list_|get_popular|get_product)",
+    "upsell_read":      r"^get_upsell",
+    "user_id_injected": r"^(place|remove_from|cancel)_order$|^confirm_active_order$|^get_current_order$",
+    "dietary_injected": r"^(place|update)_order$|^(list_products|get_popular_products)$",
+}
+
+
+def get_tool_role_patterns() -> dict[str, str]:
+    """Return role → regex pattern mapping for classifying discovered MCP tools.
+
+    Patterns come from ``tool_roles`` in agent_profile.yaml.  Falls back to
+    Smart Kiosk defaults when no domain config is mounted.  Empty-string
+    patterns disable a role (e.g. ``dietary_injected: ""`` for healthcare).
+    """
+    _load()
+    raw = _profile.get("tool_roles") or {}
+    if not raw:
+        return _FALLBACK_ROLE_PATTERNS
+    merged = dict(_FALLBACK_ROLE_PATTERNS)
+    for key, val in raw.items():
+        merged[key] = str(val) if val is not None else ""
+    return merged
+
+
+def classify_discovered_tools(tool_names: list[str]) -> dict[str, frozenset[str]]:
+    """Classify a list of MCP-discovered tool names into semantic role buckets.
+
+    Called once after MCP bootstrap with the full list of tool names returned
+    by the server.  Returns a dict of role → frozenset so callers can update
+    ``action_result.CLAIM_TOOLS`` and the injection sets in ordering_agent.
+
+    Args:
+        tool_names: All tool names discovered from the MCP server(s).
+
+    Returns:
+        Dict mapping each role key (e.g. ``cart_mutate``) to the frozenset
+        of tool names whose name matches that role's pattern.  A role with
+        an empty or None pattern matches nothing (empty frozenset).
+    """
+    patterns = get_tool_role_patterns()
+    result: dict[str, set[str]] = {role: set() for role in patterns}
+
+    for name in tool_names:
+        for role, pattern in patterns.items():
+            if pattern and re.search(pattern, name):
+                result[role].add(name)
+
+    classified = {role: frozenset(names) for role, names in result.items()}
+    logger.info(
+        "[domain_config] Tool classification from %d discovered tools: %s",
+        len(tool_names),
+        {k: sorted(v) for k, v in classified.items() if v},
+    )
+    return classified
+
+
+def get_all_tool_names_from_classification(classified: dict[str, frozenset[str]]) -> tuple[str, ...]:
+    """Deduplicate all tool names across roles for ``_TOOL_MENTION_RE`` etc.
+
+    ``knowledge_lookup`` is prepended — it is a rag-service internal tool
+    never appearing in the MCP server's tool list.
+    """
+    seen: set[str] = set()
+    names: list[str] = ["knowledge_lookup"]
+    for tools in classified.values():
+        for t in tools:
+            if t not in seen:
+                seen.add(t)
+                names.append(t)
+    return tuple(names)
+
+
+# ---------------------------------------------------------------------------
+# Agent instruction accessors (Phase 2 decoupling)
+# ---------------------------------------------------------------------------
+# The agent instruction is assembled from three sources:
+#   1. domain sections (this file): persona, tool_rules, domain_tags
+#   2. core framework (code):       multi-action turns, knowledge block,
+#                                   tool errors, output format
+#
+# Each section is optional — if absent the caller uses its own fallback.
+
+def get_agent_instruction_section(section: str) -> str:
+    """Return one named section of the agent instruction from domain config.
+
+    Args:
+        section: One of ``persona``, ``tool_rules``, ``domain_tags``.
+
+    Returns:
+        The section string stripped of leading/trailing whitespace, or an
+        empty string when the section is absent.
+    """
+    _load()
+    raw = _profile.get("agent_instruction", {})
+    if not isinstance(raw, dict):
+        return ""
+    value = raw.get(section, "")
+    return str(value).strip() if value else ""
+
+
+def get_agent_instruction(core_framework: str) -> str:
+    """Assemble the full agent instruction for the LLM.
+
+    Combines domain-owned sections (persona, tool_rules, domain_tags) with
+    the generic core_framework string provided by ordering_agent.py.  The
+    generic section is never domain-specific and is always present; the domain
+    sections can be empty (returns core_framework only).
+
+    Args:
+        core_framework: The generic, always-present instruction block baked
+            into the service code (multi-action turns, knowledge block usage,
+            tool error handling, output format constraints).
+
+    Returns:
+        The assembled instruction string, ready to pass to LlmAgent.
+    """
+    persona = get_agent_instruction_section("persona")
+    tool_rules = get_agent_instruction_section("tool_rules")
+    domain_tags = get_agent_instruction_section("domain_tags")
+    parts = [p for p in (persona, tool_rules, core_framework, domain_tags) if p]
+    return "\n\n".join(parts).strip()

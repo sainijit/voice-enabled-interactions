@@ -94,7 +94,9 @@ services:
       ZE_ENABLE_ALT_DRIVERS: libze_intel_npu.so
     volumes:
       - ./queue-service/conf:/app/queue-service/conf:ro
-      - ./queue-service/models:/app/queue-service/models
+      # models/ is NOT mounted — the IR is baked into the image at build time.
+      # Run ./setup_models.sh first to download yolo26n IR to queue-service/models/,
+      # then docker compose build to bake it in. See setup_models.sh for details.
       - ./queue-service/src:/app/queue-service/src:ro
     devices:
       - /dev/dri:/dev/dri

@@ -45,32 +45,142 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Claim-type -> tool-name policy.
-#
-# This is the CLAIM_POLICIES registry: the single place that says "these
-# tools' results are what legitimise this kind of claim". Every guard and
-# _SentenceGate must read tool sets from here, not redefine them.
+# Claim-type constants (stable identifiers — never change these).
 # ---------------------------------------------------------------------------
 
 ITEM_ADDED = "ITEM_ADDED"
 ITEM_REMOVED = "ITEM_REMOVED"
 ORDER_CONFIRMED = "ORDER_CONFIRMED"
 
-CLAIM_TOOLS: dict[str, frozenset[str]] = {
-    ITEM_ADDED: frozenset({"place_order", "update_order"}),
-    ITEM_REMOVED: frozenset({"remove_from_order", "cancel_order"}),
-    ORDER_CONFIRMED: frozenset({"confirm_order", "confirm_active_order"}),
+
+# ---------------------------------------------------------------------------
+# Claim-type → tool-name policy.
+#
+# CLAIM_TOOLS maps claim type → _MutableToolSet.  The sets start with Safe
+# Smart Kiosk defaults (so guards work before MCP bootstrap completes) and
+# are updated in-place after bootstrap via update_claim_tools_from_classified().
+#
+# Guards snapshot the _MutableToolSet OBJECT at module load, not its contents.
+# Because _MutableToolSet is a mutable container, in-place updates via
+# .update() are immediately visible to every guard that holds a reference —
+# this is the same mutable-holder pattern used by _TemplateReplyHolder in
+# llm_metrics.py.
+# ---------------------------------------------------------------------------
+
+class _MutableToolSet:
+    """Set-like container whose contents can be updated after MCP bootstrap.
+
+    Supports ``in``, ``len``, and iteration so it is a drop-in replacement for
+    the plain frozenset that guards previously snapshotted.
+    """
+
+    def __init__(self, initial: frozenset[str] = frozenset()) -> None:
+        self._names: set[str] = set(initial)
+
+    # Membership test used by guards: ``tool_name not in _MUTATING_TOOLS``
+    def __contains__(self, item: object) -> bool:
+        return item in self._names
+
+    def __iter__(self):
+        return iter(self._names)
+
+    def __len__(self) -> int:
+        return len(self._names)
+
+    def __repr__(self) -> str:
+        return f"_MutableToolSet({sorted(self._names)})"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _MutableToolSet):
+            return self._names == other._names
+        if isinstance(other, (frozenset, set)):
+            return self._names == other
+        return NotImplemented
+
+    def __hash__(self) -> None:  # type: ignore[override]
+        raise TypeError(f"unhashable type: {type(self).__name__!r}")
+
+    def update(self, names) -> None:
+        """Replace the current contents with *names*."""
+        self._names = set(names)
+
+    def union(self, other) -> frozenset[str]:
+        """Return a plain frozenset union (used to build ORDER_TOOLS)."""
+        return frozenset(self._names | set(other))
+
+    def __sub__(self, other) -> frozenset[str]:
+        return frozenset(self._names - set(other))
+
+    def __rsub__(self, other) -> frozenset[str]:
+        return frozenset(set(other) - self._names)
+
+    def __or__(self, other) -> frozenset[str]:
+        return frozenset(self._names | set(other))
+
+    def __ror__(self, other) -> frozenset[str]:
+        return frozenset(set(other) | self._names)
+
+    def __and__(self, other) -> frozenset[str]:
+        return frozenset(self._names & set(other))
+
+
+# Defaults match the original Smart Kiosk tool names so existing deployments
+# that don't mount a domain config see zero behaviour change.
+CLAIM_TOOLS: dict[str, _MutableToolSet] = {
+    ITEM_ADDED:      _MutableToolSet(frozenset({"place_order", "update_order"})),
+    ITEM_REMOVED:    _MutableToolSet(frozenset({"remove_from_order", "cancel_order"})),
+    ORDER_CONFIRMED: _MutableToolSet(frozenset({"confirm_order", "confirm_active_order"})),
 }
 
-# Union of every claim-bearing tool. This replaces ordering_agent.py's
-# _ORDER_TOOLS (which also includes the read-only get_order — kept as an
-# explicit superset below rather than folded into CLAIM_TOOLS, since
-# get_order legitimises "here is your order" claims but not a mutation claim).
-MUTATING_TOOLS: frozenset[str] = frozenset(
-    tool for tools in CLAIM_TOOLS.values() for tool in tools
-)
+# Read-only order-state tools (not a mutation claim, so not in CLAIM_TOOLS).
+ORDER_READ_TOOLS: _MutableToolSet = _MutableToolSet(frozenset({"get_order", "get_current_order"}))
 
-ORDER_TOOLS: frozenset[str] = MUTATING_TOOLS | frozenset({"get_order", "get_current_order"})
+# Union of all CLAIM_TOOLS + ORDER_READ_TOOLS.  Rebuilt after bootstrap.
+def _make_mutating() -> _MutableToolSet:
+    combined: set[str] = set()
+    for ts in CLAIM_TOOLS.values():
+        combined.update(ts)
+    return _MutableToolSet(frozenset(combined))
+
+MUTATING_TOOLS: _MutableToolSet = _make_mutating()
+
+def _make_order_tools() -> _MutableToolSet:
+    return _MutableToolSet(frozenset(MUTATING_TOOLS) | frozenset(ORDER_READ_TOOLS))
+
+ORDER_TOOLS: _MutableToolSet = _make_order_tools()
+
+
+def update_claim_tools_from_classified(classified: dict[str, frozenset[str]]) -> None:
+    """Update CLAIM_TOOLS and derived sets in-place from MCP-discovered tools.
+
+    Called once by ordering_agent.bootstrap() after MCP tool discovery.
+    Because the sets are mutable holders (not snapshots), all guards that hold
+    a reference to CLAIM_TOOLS[...] / MUTATING_TOOLS / ORDER_TOOLS will see
+    the updated contents immediately with no re-import required.
+
+    Args:
+        classified: Output of ``domain_config.classify_discovered_tools()``.
+    """
+    if classified.get("cart_mutate"):
+        CLAIM_TOOLS[ITEM_ADDED].update(classified["cart_mutate"])
+    if classified.get("cart_remove"):
+        CLAIM_TOOLS[ITEM_REMOVED].update(classified["cart_remove"])
+    if classified.get("cart_confirm"):
+        CLAIM_TOOLS[ORDER_CONFIRMED].update(classified["cart_confirm"])
+    if classified.get("cart_read"):
+        ORDER_READ_TOOLS.update(classified["cart_read"])
+
+    # Rebuild derived sets from the now-updated sources.
+    MUTATING_TOOLS.update(t for ts in CLAIM_TOOLS.values() for t in ts)
+    ORDER_TOOLS.update(frozenset(MUTATING_TOOLS) | frozenset(ORDER_READ_TOOLS))
+
+    logger.info(
+        "[action_result] CLAIM_TOOLS updated from MCP bootstrap — "
+        "ITEM_ADDED=%s ITEM_REMOVED=%s ORDER_CONFIRMED=%s",
+        sorted(CLAIM_TOOLS[ITEM_ADDED]),
+        sorted(CLAIM_TOOLS[ITEM_REMOVED]),
+        sorted(CLAIM_TOOLS[ORDER_CONFIRMED]),
+    )
 
 
 def unwrap(raw: Any) -> dict[str, Any] | None:
