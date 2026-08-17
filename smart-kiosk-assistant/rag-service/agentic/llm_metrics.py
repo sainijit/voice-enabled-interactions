@@ -59,10 +59,31 @@ _guard_stats: ContextVar[Dict[str, float] | None] = ContextVar("_guard_stats", d
 # for this turn. Read alongside ``llm_calls`` to see the optimisation working.
 _template_stats: ContextVar[Dict[str, float] | None] = ContextVar("_template_stats", default=None)
 
-# Stores the spoken text produced by the most recent template render this turn.
-# When skip_summarization=True, ADK emits no model text event, so reply_parts
-# would be empty. This var lets chat() recover the template text as the reply.
-_template_reply: ContextVar[str] = ContextVar("_template_reply", default="")
+
+class _TemplateReplyHolder:
+    """Mutable container for the template-rendered reply text this turn.
+
+    ADK executes tool calls as sibling ``asyncio.Task`` coroutines that each
+    snapshot the current context at task-creation time.  A ``ContextVar[str]``
+    ``.set()`` inside such a task is invisible to the parent ``chat()`` because
+    it only modifies the task's own context copy.  Using a mutable object
+    (the same pattern as ``_ToolCallCounter``) sidesteps this: every task
+    holds a *reference* to the same instance, so mutating ``holder.text``
+    is immediately visible to the parent.
+    """
+
+    __slots__ = ("text",)
+
+    def __init__(self) -> None:
+        self.text: str = ""
+
+
+# Holds the spoken text produced when a reply template fires and
+# skip_summarization=True is set, making ADK emit no model text event.
+# chat() reads this back as the authoritative reply when reply_parts is empty.
+_template_reply: ContextVar[_TemplateReplyHolder | None] = ContextVar(
+    "_template_reply", default=None
+)
 
 
 def reset() -> None:
@@ -72,7 +93,7 @@ def reset() -> None:
     _mcp_stats.set({"ms": 0.0, "calls": 0})
     _guard_stats.set({"ms": 0.0, "calls": 0})
     _template_stats.set({"ms": 0.0, "calls": 0})
-    _template_reply.set("")
+    _template_reply.set(_TemplateReplyHolder())
 
 
 def record(elapsed_ms: float, ttft_ms: float | None = None) -> None:
@@ -207,10 +228,20 @@ def set_template_reply(text: str) -> None:
     Called inside the MCP tool callback when skip_summarization=True is set.
     Because ADK emits no model text event in that case, chat() would otherwise
     assemble an empty reply. chat() reads this back as the authoritative reply.
+
+    Mutates the holder object rather than calling ContextVar.set() so that the
+    change is visible to the parent chat() task.  ADK executes tool calls as
+    sibling asyncio tasks that snapshot the context at creation — a .set()
+    call from inside such a task only updates the task's own context copy and
+    is invisible to the parent.  Mutating the holder attribute crosses that
+    boundary because every task holds a reference to the *same* object.
     """
-    _template_reply.set(text)
+    holder = _template_reply.get()
+    if holder is not None:
+        holder.text = text
 
 
 def get_template_reply() -> str:
     """Return the template-rendered reply stored for this turn, or empty string."""
-    return _template_reply.get()
+    holder = _template_reply.get()
+    return holder.text if holder is not None else ""
