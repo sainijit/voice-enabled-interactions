@@ -361,7 +361,7 @@ services:
       # mounted from the consuming application rather than baked into the image.
       # Non-kiosk deployments override this path (or leave it unset for
       # generic RAG-only mode).
-      RAG_DOMAIN_CONFIG_PATH: /app/rag-service/domain-config
+      RAG_DOMAIN_CONFIG_PATH: /app/rag-service/domain-config/agent_profile.yaml
       # Enable or disable the ordering-agent subsystem. Set to "false" for
       # pure-RAG deployments (healthcare, education) to skip MCP bootstrap.
       ORDERING_AGENT_ENABLED: ${ORDERING_AGENT_ENABLED:-true}
@@ -369,9 +369,14 @@ services:
       - rag_service_models:/app/rag-service/models
       - rag_service_storage:/app/rag-service/storage
       - rag_service_hf_cache:/app/rag-service/.cache/huggingface
-      # Mount kiosk-specific domain config into the container at the path
-      # declared above so the generic image becomes kiosk-aware at runtime.
+      # Mount kiosk-specific domain config into the container.
+      # Generic image → kiosk-aware at runtime via this mount.
       - ./configs/rag-service:/app/rag-service/domain-config:ro
+      # Mount kiosk domain plugins (ordering agent, guards) from the consuming
+      # application. The rag-service image has an empty plugins/ mount point;
+      # all domain Python code lives here in the smart-kiosk-assistant repo.
+      # When rag-service moves to edge-ai-libraries, only this line changes.
+      - ./plugins:/app/rag-service/plugins:ro
     # start_period covers first-run model download + OpenVINO INT8 export
     # (~2-3 min for Qwen3-4B + embeddings + reranker). Cached runs are fast.
     healthcheck:

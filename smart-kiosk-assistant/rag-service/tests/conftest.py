@@ -13,6 +13,17 @@ RAG_SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(RAG_SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(RAG_SERVICE_ROOT))
 
+# When plugins/ is mounted at rag-service/plugins/ (docker-compose / docker run
+# with a volume), sys.path above already covers it.
+# When running tests directly from the smart-kiosk-assistant tree (e.g. a
+# developer running pytest from outside the container), plugins/ lives one
+# directory above rag-service/ — add that parent so `from plugins.kiosk import`
+# resolves correctly without needing a volume mount.
+_PARENT = RAG_SERVICE_ROOT.parent
+_PLUGINS_VIA_PARENT = _PARENT / "plugins"
+if _PLUGINS_VIA_PARENT.is_dir() and str(_PARENT) not in sys.path:
+    sys.path.insert(0, str(_PARENT))
+
 
 try:
     import aiohttp  # noqa: F401
