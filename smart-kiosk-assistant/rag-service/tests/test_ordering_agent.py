@@ -9,10 +9,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agentic import ordering_agent
-from agentic import action_result, reply_templates
+from plugins.kiosk import ordering_agent
+from agentic import action_result
+from plugins.kiosk import reply_templates
 from agentic.mcp_client import MCPTool
-from agentic.ordering_agent import OrderingAgent
+from plugins.kiosk.ordering_agent import OrderingAgent
 
 
 def _run(coro: Any) -> Any:
@@ -781,7 +782,7 @@ class TestIsSingleAddUtterance:
         "Can I get the fries?",
     ])
     def test_single_add_returns_true(self, utt):
-        from agentic.ordering_agent import _is_single_add_utterance
+        from plugins.kiosk.ordering_agent import _is_single_add_utterance
         assert _is_single_add_utterance(utt) is True, f"Expected True for: {utt!r}"
 
     @pytest.mark.parametrize("utt", [
@@ -797,7 +798,7 @@ class TestIsSingleAddUtterance:
         "No more fries, I want a burger.",
     ])
     def test_compound_returns_false(self, utt):
-        from agentic.ordering_agent import _is_single_add_utterance
+        from plugins.kiosk.ordering_agent import _is_single_add_utterance
         assert _is_single_add_utterance(utt) is False, f"Expected False for: {utt!r}"
 
 

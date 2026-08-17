@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from agentic import menu_guard
+from plugins.kiosk import menu_guard
 
 
 def _mcp_envelope(payload: dict) -> dict:
@@ -205,7 +205,7 @@ def test_garbled_reference_falls_back_to_generic_refusal() -> None:
 
     assert changed is True
     assert "ll the burgers to my cart" not in corrected
-    assert corrected == menu_guard._REFUSAL_GENERIC
+    assert corrected == menu_guard._REFUSAL_GENERIC_DEFAULT
 
 
 def test_short_clean_reference_is_still_named_in_the_refusal() -> None:
@@ -245,7 +245,7 @@ def test_empty_reply_is_untouched() -> None:
 
 def test_sentence_gate_withholds_unbacked_addition_claim() -> None:
     """Speech cannot be recalled, so the gate must not release the false claim."""
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     menu_guard.record_tool_result("place_order", _mcp_envelope(_off_menu_payload()))
     spoken: list[str] = []
@@ -257,7 +257,7 @@ def test_sentence_gate_withholds_unbacked_addition_claim() -> None:
 
 
 def test_sentence_gate_releases_backed_addition_claim() -> None:
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     menu_guard.record_tool_result("place_order", _mcp_envelope(_success_payload()))
     spoken: list[str] = []
@@ -402,7 +402,7 @@ def test_sentence_gate_withholds_sentences_on_partial_success_turn() -> None:
     """Speech cannot be recalled — no sentence may release before the
     disclosure requirement is known to be satisfied or not.
     """
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     menu_guard.record_tool_result("place_order", _mcp_envelope(_partial_success_payload()))
     spoken: list[str] = []

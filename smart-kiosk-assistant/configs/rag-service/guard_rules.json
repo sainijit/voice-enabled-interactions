@@ -1,0 +1,38 @@
+{
+  "menu_guard": {
+    "claim_patterns": [
+      "\\bI(?:'ve| have)\\s+added\\b",
+      "\\bI(?:'ve| have)\\s+put\\b.{0,60}?\\b(?:in|into|on)\\s+your\\s+order\\b",
+      "\\b(?:has|have|is|are)\\s+been\\s+added\\b",
+      "\\badded\\s+(?:the|a|an|\\d+)\\b.{0,60}?\\bto\\s+your\\s+(?:order|cart)\\b",
+      "\\b(?:that(?:'s| is)|it(?:'s| is))\\s+(?:now\\s+)?(?:been\\s+)?added\\b",
+      "\\badded\\s+to\\s+your\\s+(?:order|cart)\\b",
+      "\\byour\\s+(?:order|cart)\\s+now\\s+(?:contains|has|includes)\\b"
+    ],
+    "refusal_with_alternatives": "Sorry, we don't have {item} on the menu at the moment. Please choose from our menu — we do have {alternatives}. Would you like one of those?",
+    "refusal_plain": "Sorry, we don't have {item} on the menu at the moment. Please choose an item from our menu — what would you like instead?",
+    "refusal_generic": "Sorry, that isn't on our menu at the moment. Please choose an item from our menu — what would you like instead?",
+    "refusal_quantity": "Sorry, I didn't catch how many you'd like, so I haven't added anything yet. How many would you like?"
+  },
+  "removal_guard": {
+    "claim_patterns": [
+      "\\bI(?:'ve| have)\\s+removed\\b",
+      "\\bI(?:'ve| have)\\s+taken\\b.{0,60}?\\boff\\b",
+      "\\b(?:has|have)\\s+been\\s+removed\\b",
+      "\\bremoved\\s+(?:the|a|an|\\d+)\\b.{0,60}?\\bfrom\\s+your\\s+(?:order|cart)\\b",
+      "\\btaken\\s+(?:the|a|an|\\d+)\\b.{0,60}?\\boff\\s+your\\s+(?:order|cart)\\b",
+      "\\b(?:that(?:'s| is)|it(?:'s| is))\\s+(?:now\\s+)?(?:been\\s+)?removed\\b",
+      "\\bno\\s+longer\\s+in\\s+your\\s+(?:order|cart)\\b",
+      "\\bI(?:'ve| have)\\s+cancel(?:l)?ed\\s+(?:your|the)\\s+(?:entire\\s+|whole\\s+|complete\\s+)?order\\b",
+      "\\byour\\s+order\\s+(?:has\\s+been\\s+|is\\s+now\\s+)?cancel(?:l)?ed\\b",
+      "\\bI(?:'ve| have)\\s+cleared\\s+your\\s+(?:order|cart)\\b",
+      "\\byour\\s+(?:order|cart)\\s+(?:has\\s+been\\s+|is\\s+now\\s+)?(?:cleared|emptied)\\b"
+    ],
+    "refusal_with_cart": "Sorry, I couldn't find {item} in your order. Your order currently has {cart_items}. Which of those would you like removed?",
+    "refusal_generic": "Sorry, I wasn't able to remove that — it doesn't look like it's in your order. What would you like me to take off?",
+    "refusal_no_open_order": "You don't have an open order to cancel right now. Would you like to start one?"
+  },
+  "confirm_guard": {
+    "refusal_generic": "Sorry, I couldn't confirm your order just now. Please say \"confirm my order\" once more, or ask a member of staff."
+  }
+}

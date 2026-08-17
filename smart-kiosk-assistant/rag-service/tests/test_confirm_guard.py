@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from agentic import confirm_guard
+from plugins.kiosk import confirm_guard
 
 
 def _mcp_envelope(payload: dict) -> dict:
@@ -136,7 +136,7 @@ def test_build_refusal_never_echoes_raw_tool_error() -> None:
 
 def test_false_confirmation_after_hallucinated_id_is_replaced_with_refusal() -> None:
     """The exact live repro: confirm_order(12345) fails, reply still claims success."""
-    from agentic.ordering_agent import _strip_false_confirmation
+    from plugins.kiosk.ordering_agent import _strip_false_confirmation
 
     confirm_guard.record_tool_result("confirm_order", _mcp_envelope(_not_found_payload()))
     reply = "Your order is confirmed!"
@@ -150,7 +150,7 @@ def test_false_confirmation_after_hallucinated_id_is_replaced_with_refusal() -> 
 
 def test_false_confirmation_with_no_attempt_uses_generic_tail() -> None:
     """No confirm tool ran at all this turn — different wording from a failed attempt."""
-    from agentic.ordering_agent import _strip_false_confirmation, _UNCONFIRMED_TAIL
+    from plugins.kiosk.ordering_agent import _strip_false_confirmation, _UNCONFIRMED_TAIL
 
     reply = "Your order is confirmed!"
 
@@ -161,7 +161,7 @@ def test_false_confirmation_with_no_attempt_uses_generic_tail() -> None:
 
 
 def test_genuine_confirmation_is_left_alone() -> None:
-    from agentic.ordering_agent import _strip_false_confirmation
+    from plugins.kiosk.ordering_agent import _strip_false_confirmation
 
     confirm_guard.record_tool_result("confirm_active_order", _mcp_envelope(_success_payload()))
     reply = "Your order is confirmed! Thank you for ordering with us."
@@ -174,7 +174,7 @@ def test_genuine_confirmation_is_left_alone() -> None:
 
 def test_confirm_invoked_but_failed_is_not_treated_as_confirm_tool_presence() -> None:
     """Regression guard: mere tool-name presence in tool_calls must not bypass the check."""
-    from agentic.ordering_agent import _strip_false_confirmation
+    from plugins.kiosk.ordering_agent import _strip_false_confirmation
 
     confirm_guard.record_tool_result("confirm_order", _mcp_envelope(_not_found_payload()))
     reply = "All set — your order is confirmed and on its way!"
@@ -194,7 +194,7 @@ def test_confirm_invoked_but_failed_is_not_treated_as_confirm_tool_presence() ->
 
 def test_sentence_gate_withholds_unbacked_confirmation_claim() -> None:
     """Speech cannot be recalled, so the gate must not release the false claim."""
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     confirm_guard.record_tool_result("confirm_order", _mcp_envelope(_not_found_payload()))
     spoken: list[str] = []
@@ -210,7 +210,7 @@ def test_sentence_gate_releases_backed_confirmation_claim() -> None:
     utterance (the whole reply may still be replaced by _force_confirm()), so this
     uses a neutral message to isolate condition (c2) — a genuinely successful
     confirm tool result must not be gated on its own."""
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     confirm_guard.record_tool_result("confirm_active_order", _mcp_envelope(_success_payload()))
     spoken: list[str] = []

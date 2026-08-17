@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentic import action_result
+from agentic import domain_config
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ _REMOVAL_TOOLS = action_result.CLAIM_TOOLS[action_result.ITEM_REMOVED]
 # Claims that an item was taken out of the cart. Kept broad, in the same
 # spirit as ``menu_guard._ADDED_PATTERNS``: the model has seen a tool result by
 # this point and phrases success confidently and variously.
-_REMOVED_PATTERNS: tuple[re.Pattern[str], ...] = (
+_REMOVED_PATTERNS_DEFAULT: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bI(?:'ve| have)\s+removed\b", re.IGNORECASE),
     re.compile(r"\bI(?:'ve| have)\s+taken\b.{0,60}?\boff\b", re.IGNORECASE),
     re.compile(r"\b(?:has|have)\s+been\s+removed\b", re.IGNORECASE),
@@ -65,17 +66,37 @@ _REMOVED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\byour\s+(?:order|cart)\s+(?:has\s+been\s+|is\s+now\s+)?(?:cleared|emptied)\b", re.IGNORECASE),
 )
 
-_REFUSAL_WITH_CART = (
+_REFUSAL_WITH_CART_DEFAULT = (
     "Sorry, I couldn't find {item} in your order. "
     "Your order currently has {cart_items}. Which of those would you like removed?"
 )
 
-_REFUSAL_GENERIC = (
+_REFUSAL_GENERIC_DEFAULT = (
     "Sorry, I wasn't able to remove that — it doesn't look like it's in your "
     "order. What would you like me to take off?"
 )
 
 _MAX_CART_ITEMS = 3
+
+_removed_patterns: tuple[re.Pattern[str], ...] | None = None
+
+
+def _get_refusal(key: str, default: str) -> str:
+    return domain_config.get_guard_rule("removal_guard", key, default) or default
+
+
+def _build_removed_patterns() -> tuple[re.Pattern[str], ...]:
+    patterns = domain_config.get_guard_patterns("removal_guard")
+    if patterns:
+        return tuple(re.compile(p, re.IGNORECASE) for p in patterns)
+    return _REMOVED_PATTERNS_DEFAULT
+
+
+def _get_removed_patterns() -> tuple[re.Pattern[str], ...]:
+    global _removed_patterns
+    if _removed_patterns is None:
+        _removed_patterns = _build_removed_patterns()
+    return _removed_patterns
 
 
 @dataclass
@@ -212,7 +233,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
 
 def claims_removal(text: str) -> bool:
     """Return True when ``text`` tells the customer an item left their cart."""
-    return bool(text) and any(pattern.search(text) for pattern in _REMOVED_PATTERNS)
+    return bool(text) and any(pattern.search(text) for pattern in _get_removed_patterns())
 
 
 def _format_cart(cart_items: list[str]) -> str:
@@ -225,7 +246,7 @@ def _format_cart(cart_items: list[str]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
-_REFUSAL_NO_OPEN_ORDER = (
+_REFUSAL_NO_OPEN_ORDER_DEFAULT = (
     "You don't have an open order to cancel right now. Would you like to start one?"
 )
 
@@ -241,11 +262,13 @@ def build_refusal(state: _TurnState | None = None) -> str:
     """
     state = state if state is not None else current_state()
     if state.no_open_order:
-        return _REFUSAL_NO_OPEN_ORDER
+        return _get_refusal("refusal_no_open_order", _REFUSAL_NO_OPEN_ORDER_DEFAULT)
     item = next((ref for ref in state.rejected_refs if ref), "")
     if not item or not state.cart_items:
-        return _REFUSAL_GENERIC
-    return _REFUSAL_WITH_CART.format(item=item, cart_items=_format_cart(state.cart_items))
+        return _get_refusal("refusal_generic", _REFUSAL_GENERIC_DEFAULT)
+    return _get_refusal("refusal_with_cart", _REFUSAL_WITH_CART_DEFAULT).format(
+        item=item, cart_items=_format_cart(state.cart_items)
+    )
 
 
 def validate_reply(reply: str, state: _TurnState | None = None) -> tuple[str, bool]:

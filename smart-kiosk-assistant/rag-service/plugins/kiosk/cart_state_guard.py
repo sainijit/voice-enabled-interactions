@@ -69,7 +69,7 @@ from __future__ import annotations
 import logging
 import re
 
-from agentic import item_intent_guard
+from plugins.kiosk import item_intent_guard
 
 logger = logging.getLogger(__name__)
 

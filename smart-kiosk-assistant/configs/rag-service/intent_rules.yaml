@@ -8,6 +8,8 @@
 # Words that signal the customer is asking about menu items, prices, or
 # availability. Triggers _CATALOGUE_QUERY_RE recovery guard and pre-grounding.
 catalogue_keywords:
+  - do you have
+  - have you got
   - menu
   - item
   - items
@@ -45,6 +47,11 @@ catalogue_keywords:
   - drinks
   - combo
   - combos
+  - sandwich
+  - sandwiches
+  - dosa
+  - pasta
+  - biryani
 
 # Words that signal an order-mutation intent. Triggers _ORDER_ACTION_RE guard.
 order_action_keywords:
@@ -163,6 +170,12 @@ domain_keywords:
 # Outlet/knowledge-base query words (hours, address, facilities).
 # Triggers _KNOWLEDGE_QUERY_RE pre-grounding.
 knowledge_keywords:
+  - tell me something about the restaurant
+  - tell me about your restaurant
+  - tell me something about this place
+  - about the restaurant
+  - about your restaurant
+  - about this place
   - open
   - opening
   - closing

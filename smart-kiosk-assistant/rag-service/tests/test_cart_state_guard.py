@@ -19,7 +19,7 @@ money); the fries were only ever a still-open upsell offer, never accepted.
 
 from __future__ import annotations
 
-from agentic import cart_state_guard as guard
+from plugins.kiosk import cart_state_guard as guard
 
 _BURGER_ITEM = {"product_id": "classic_chicken_burger", "quantity": 1}
 _FRIES_ITEM = {"product_id": "classic_french_fries", "quantity": 1}

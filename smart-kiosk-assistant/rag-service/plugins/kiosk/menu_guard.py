@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentic import action_result
+from agentic import domain_config
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ _MUTATING_TOOLS = action_result.CLAIM_TOOLS[action_result.ITEM_ADDED]
 # where *no* tool ran, whereas here the model has seen a tool result and phrases
 # the claim more confidently and more variously ("that's been added",
 # "I've put a sushi platter in your order").
-_ADDED_PATTERNS: tuple[re.Pattern[str], ...] = (
+_ADDED_PATTERNS_DEFAULT: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bI(?:'ve| have)\s+added\b", re.IGNORECASE),
     re.compile(r"\bI(?:'ve| have)\s+put\b.{0,60}?\b(?:in|into|on)\s+your\s+order\b", re.IGNORECASE),
     re.compile(r"\b(?:has|have|is|are)\s+been\s+added\b", re.IGNORECASE),
@@ -79,18 +80,18 @@ _ADDED_PATTERNS: tuple[re.Pattern[str], ...] = (
 # states the fact (not on the menu), then hands the customer a concrete next
 # step — a bare refusal leaves a voice customer with nowhere to go, since they
 # cannot see the menu.
-_REFUSAL_WITH_ALTERNATIVES = (
+_REFUSAL_WITH_ALTERNATIVES_DEFAULT = (
     "Sorry, we don't have {item} on the menu at the moment. "
     "Please choose from our menu — we do have {alternatives}. "
     "Would you like one of those?"
 )
 
-_REFUSAL_PLAIN = (
+_REFUSAL_PLAIN_DEFAULT = (
     "Sorry, we don't have {item} on the menu at the moment. "
     "Please choose an item from our menu — what would you like instead?"
 )
 
-_REFUSAL_GENERIC = (
+_REFUSAL_GENERIC_DEFAULT = (
     "Sorry, that isn't on our menu at the moment. "
     "Please choose an item from our menu — what would you like instead?"
 )
@@ -98,7 +99,7 @@ _REFUSAL_GENERIC = (
 # Spoken when kiosk-core refused the quantity rather than the product. The
 # item is deliberately not named: the number was misheard, so the reference
 # attached to it is not trustworthy enough to repeat back as fact.
-_REFUSAL_QUANTITY = (
+_REFUSAL_QUANTITY_DEFAULT = (
     "Sorry, I didn't catch how many you'd like, so I haven't added anything "
     "yet. How many would you like?"
 )
@@ -119,6 +120,26 @@ _MAX_ALTERNATIVES = 3
 # generic, item-less wording instead.
 _NON_ITEM_MARKER_RE = re.compile(r"\b(?:cart|order|checkout|basket|please)\b", re.IGNORECASE)
 _MAX_ITEM_WORDS = 5
+
+_added_patterns: tuple[re.Pattern[str], ...] | None = None
+
+
+def _get_refusal(key: str, default: str) -> str:
+    return domain_config.get_guard_rule("menu_guard", key, default) or default
+
+
+def _build_added_patterns() -> tuple[re.Pattern[str], ...]:
+    patterns = domain_config.get_guard_patterns("menu_guard")
+    if patterns:
+        return tuple(re.compile(p, re.IGNORECASE) for p in patterns)
+    return _ADDED_PATTERNS_DEFAULT
+
+
+def _get_added_patterns() -> tuple[re.Pattern[str], ...]:
+    global _added_patterns
+    if _added_patterns is None:
+        _added_patterns = _build_added_patterns()
+    return _added_patterns
 
 
 def _looks_like_item_name(ref: str) -> bool:
@@ -401,7 +422,7 @@ def _record_quantity_rejection(state: _TurnState, quantity_rejected_items: Any) 
 
 def claims_addition(text: str) -> bool:
     """Return True when ``text`` tells the customer an item is in their order."""
-    return bool(text) and any(pattern.search(text) for pattern in _ADDED_PATTERNS)
+    return bool(text) and any(pattern.search(text) for pattern in _get_added_patterns())
 
 
 def _format_price(price: Any) -> str:
@@ -435,13 +456,17 @@ def build_refusal(state: _TurnState | None = None) -> str:
     """
     state = state if state is not None else current_state()
     if state.quantity_refused:
-        return _REFUSAL_QUANTITY
+        return _get_refusal("refusal_quantity", _REFUSAL_QUANTITY_DEFAULT)
     item = next((ref for ref in state.rejected_refs if ref), "")
     if not item or not _looks_like_item_name(item):
-        return _REFUSAL_GENERIC
+        return _get_refusal("refusal_generic", _REFUSAL_GENERIC_DEFAULT)
 
     alternatives = _format_alternatives(state.alternatives)
-    template = _REFUSAL_WITH_ALTERNATIVES if alternatives else _REFUSAL_PLAIN
+    template = (
+        _get_refusal("refusal_with_alternatives", _REFUSAL_WITH_ALTERNATIVES_DEFAULT)
+        if alternatives
+        else _get_refusal("refusal_plain", _REFUSAL_PLAIN_DEFAULT)
+    )
     return template.format(item=item, alternatives=alternatives)
 
 

@@ -29,15 +29,15 @@ import time
 from typing import Any
 
 from agentic import action_result
-from agentic import cart_state_guard
+from plugins.kiosk import cart_state_guard
 from agentic import config as agent_cfg
-from agentic import confirm_guard
+from plugins.kiosk import confirm_guard
 from agentic import domain_config
-from agentic import item_intent_guard
+from plugins.kiosk import item_intent_guard
 from agentic import llm_metrics
-from agentic import menu_guard
-from agentic import removal_guard
-from agentic import reply_templates
+from plugins.kiosk import menu_guard
+from plugins.kiosk import removal_guard
+from plugins.kiosk import reply_templates
 from agentic.adk_runtime import create_adk_model, create_runner, create_session_service
 from agentic.mcp_client import MCPTool, bootstrap_mcp_tools, call_tool, get_all_tools
 from agentic.tools import knowledge_lookup_tool as knowledge_tool
@@ -1488,7 +1488,7 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                     if isinstance(p, dict) and "name" in p
                 ]
 
-        elif tool_name in ("place_order", "update_order", "get_order", "get_current_order"):
+        elif tool_name in (action_result.CLAIM_TOOLS[action_result.ITEM_ADDED] | action_result.ORDER_READ_TOOLS):
             if isinstance(data, dict):
                 items = [
                     {
@@ -1522,7 +1522,7 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                     if key in data:
                         compressed[key] = data[key]
 
-        elif tool_name == "remove_from_order":
+        elif tool_name in action_result.CLAIM_TOOLS[action_result.ITEM_REMOVED]:
             if isinstance(data, dict) and "error" not in data:
                 compressed = {
                     "removed": data.get("removed", []),
@@ -1539,7 +1539,7 @@ def _compress_tool_result(tool_name: str, raw: dict[str, Any]) -> dict[str, Any]
                     ],
                 }
 
-        elif tool_name == "confirm_order":
+        elif tool_name in action_result.CLAIM_TOOLS[action_result.ORDER_CONFIRMED]:
             if isinstance(data, dict):
                 compressed = {
                     "order_id": data.get("order_id"),
@@ -1965,7 +1965,7 @@ class OrderingAgent:
                 diet = _dietary_ctx.get()
                 if diet:
                     kwargs["dietary"] = diet
-            if tool_name in ("place_order", "update_order"):
+            if tool_name in action_result.CLAIM_TOOLS[action_result.ITEM_ADDED]:
                 # Catch a stale/pending item reference the model failed to
                 # update against what the customer just said this turn (e.g.
                 # a pending "French fries" confirmation still in the call
@@ -2015,21 +2015,19 @@ class OrderingAgent:
             # no upsell suggestions of its own, and a removal doesn't resolve
             # (accept or decline) whatever was previously offered.
             if cart_state is not None and tool_name in (
-                "place_order", "update_order", "remove_from_order",
+                action_result.CLAIM_TOOLS[action_result.ITEM_ADDED] | action_result.CLAIM_TOOLS[action_result.ITEM_REMOVED]
             ):
                 payload = action_result.unwrap(result)
                 if isinstance(payload, dict) and isinstance(payload.get("items"), list):
                     cart_state.known_items = payload["items"]
-                    if tool_name != "remove_from_order":
+                    if tool_name not in action_result.CLAIM_TOOLS[action_result.ITEM_REMOVED]:
                         upsell = payload.get("upsell_suggestions") or []
                         cart_state.pending_upsell = (
                             upsell[0].get("product")
                             if upsell and isinstance(upsell[0], dict)
                             else None
                         )
-            elif cart_state is not None and tool_name in (
-                "confirm_order", "confirm_active_order",
-            ):
+            elif cart_state is not None and tool_name in action_result.CLAIM_TOOLS[action_result.ORDER_CONFIRMED]:
                 # A confirmed order is closed; place_order's own docstring
                 # says a *new* draft opens for whatever comes next, so this
                 # session's known cart must not keep matching against a

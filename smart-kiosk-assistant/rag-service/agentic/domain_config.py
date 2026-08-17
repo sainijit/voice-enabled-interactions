@@ -34,6 +34,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -51,7 +52,17 @@ logger = logging.getLogger(__name__)
 _profile: dict[str, Any] = {}
 _intent: dict[str, Any] = {}
 _templates: dict[str, Any] = {}
+_guard_rules: dict[str, Any] | None = None
 _loaded = False
+
+
+def _config_base_path() -> Path | None:
+    """Return the mounted domain-config directory, if configured."""
+    raw = os.getenv("RAG_DOMAIN_CONFIG_PATH", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path.parent if path.suffix else path
 
 
 def _load() -> None:
@@ -60,8 +71,8 @@ def _load() -> None:
     if _loaded:
         return
 
-    config_dir = os.getenv("RAG_DOMAIN_CONFIG_PATH", "").strip()
-    if not config_dir:
+    base = _config_base_path()
+    if base is None:
         logger.info(
             "[domain_config] RAG_DOMAIN_CONFIG_PATH not set — using generic defaults. "
             "Mount configs/rag-service/ and set the env var to enable domain behaviour."
@@ -69,7 +80,6 @@ def _load() -> None:
         _loaded = True
         return
 
-    base = Path(config_dir)
     for attr, filename in (
         ("_profile", "agent_profile.yaml"),
         ("_intent", "intent_rules.yaml"),
@@ -85,6 +95,31 @@ def _load() -> None:
             logger.warning("[domain_config] %s not found — using defaults for this section", path)
 
     _loaded = True
+
+
+def _load_guard_rules() -> dict[str, Any]:
+    """Load guard_rules.json lazily from the mounted config directory."""
+    global _guard_rules
+    if _guard_rules is not None:
+        return _guard_rules
+
+    base = _config_base_path()
+    if base is None:
+        _guard_rules = {}
+        return _guard_rules
+
+    path = base / "guard_rules.json"
+    if not path.exists():
+        _guard_rules = {}
+        return _guard_rules
+
+    try:
+        _guard_rules = json.loads(path.read_text(encoding="utf-8")) or {}
+        logger.info("[domain_config] Loaded %s", path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[domain_config] Failed to load %s — using defaults: %s", path, exc)
+        _guard_rules = {}
+    return _guard_rules
 
 
 # Trigger load at import time so regex compilation (module-level in
@@ -248,6 +283,32 @@ def get_reply_template(name: str) -> str | None:
     _load()
     value = _templates.get(name)
     return str(value) if value is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Guard rule accessors
+# ---------------------------------------------------------------------------
+
+def get_guard_rules(guard_name: str) -> dict:
+    """Return the guard rules dict for guard_name (e.g. 'menu_guard').
+    Returns {} if guard_rules.json is not mounted or guard_name not found.
+    """
+    rules = _load_guard_rules()
+    guard_rules = rules.get(guard_name, {}) if isinstance(rules, dict) else {}
+    return guard_rules if isinstance(guard_rules, dict) else {}
+
+
+def get_guard_rule(guard_name: str, key: str, default: Any = None) -> Any:
+    """Get a single value from guard_rules[guard_name][key], with fallback."""
+    return get_guard_rules(guard_name).get(key, default)
+
+
+def get_guard_patterns(guard_name: str) -> list[str]:
+    """Return claim_patterns list for guard_name. Returns [] if not found."""
+    patterns = get_guard_rule(guard_name, "claim_patterns", [])
+    if not isinstance(patterns, list):
+        return []
+    return [str(pattern) for pattern in patterns]
 
 
 # ---------------------------------------------------------------------------

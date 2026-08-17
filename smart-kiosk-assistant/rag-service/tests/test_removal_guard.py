@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from agentic import removal_guard
+from plugins.kiosk import removal_guard
 
 
 def _mcp_envelope(payload: dict) -> dict:
@@ -152,7 +152,7 @@ def test_cancel_order_claim_with_no_open_order_is_replaced() -> None:
         "I've cancelled your order. Anything else?"
     )
     assert corrected is True
-    assert reply == removal_guard._REFUSAL_NO_OPEN_ORDER
+    assert reply == removal_guard._REFUSAL_NO_OPEN_ORDER_DEFAULT
 
 
 def test_cancel_order_claim_backed_by_success_is_left_alone() -> None:
@@ -247,7 +247,7 @@ def test_empty_reply_is_untouched() -> None:
 
 def test_sentence_gate_withholds_unbacked_removal_claim() -> None:
     """Speech cannot be recalled, so the gate must not release the false claim."""
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     removal_guard.record_tool_result("remove_from_order", _mcp_envelope(_not_in_cart_payload()))
     spoken: list[str] = []
@@ -259,7 +259,7 @@ def test_sentence_gate_withholds_unbacked_removal_claim() -> None:
 
 
 def test_sentence_gate_releases_backed_removal_claim() -> None:
-    from agentic.ordering_agent import _SentenceGate
+    from plugins.kiosk.ordering_agent import _SentenceGate
 
     removal_guard.record_tool_result("remove_from_order", _mcp_envelope(_success_payload()))
     spoken: list[str] = []

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from agentic import reply_templates as rt
+from plugins.kiosk import reply_templates as rt
 
 
 def _envelope(payload) -> dict:

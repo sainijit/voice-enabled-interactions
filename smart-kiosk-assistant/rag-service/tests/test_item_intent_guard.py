@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentic import item_intent_guard as guard
+from plugins.kiosk import item_intent_guard as guard
 
 
 class TestExtractNamedItem:

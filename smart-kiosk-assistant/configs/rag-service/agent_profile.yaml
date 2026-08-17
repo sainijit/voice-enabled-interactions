@@ -43,6 +43,24 @@ identity:
     went through when it hasn't. Please say "confirm my order" once more, or
     ask a member of staff.
 
+# ---------------------------------------------------------------------------
+# Plugin — domain agent module
+# ---------------------------------------------------------------------------
+# Specifies which Python module and factory function provide the domain agent.
+# The rag-service core never hardcodes an agent module; this is the only place
+# that wires the infrastructure to a domain's ordering/appointment/etc. agent.
+#
+# module_path: Python dotted import path within the rag-service package.
+# agent_factory: zero-argument function that returns the singleton agent.
+#
+# To use a different domain:
+#   plugin:
+#     agent_module: "plugins.healthcare.appointment_agent"
+#     agent_factory: "get_appointment_agent"
+plugin:
+  agent_module: "plugins.kiosk.ordering_agent"
+  agent_factory: "get_ordering_agent"
+
 rag:
   # Matches the OpenVINO model alias in the OVMS config and the collection
   # name used when ingesting knowledge-base documents for this kiosk.

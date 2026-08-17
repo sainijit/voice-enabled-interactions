@@ -90,9 +90,9 @@ async def _reset_agent_sessions() -> None:
     Best-effort: ingestion must not fail because the agent is unavailable.
     """
     try:
-        from agentic.ordering_agent import get_ordering_agent
+        from agentic.plugin_loader import load_agent_factory
 
-        await get_ordering_agent().reset_sessions()
+        await load_agent_factory()().reset_sessions()
     except Exception as exc:  # noqa: BLE001
         logger.warning("[INGEST] Could not reset agent sessions: %s", exc)
 

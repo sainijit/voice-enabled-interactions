@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 async def _warmup_agent_tools() -> None:
     """Background task: poll kiosk-core until MCP tools are discovered."""
     try:
-        from agentic.ordering_agent import get_ordering_agent
-        await get_ordering_agent().warmup()
+        from agentic.plugin_loader import load_agent_factory
+        await load_agent_factory()().warmup()
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -63,8 +63,8 @@ async def lifespan(app: FastAPI):
     warmup_task = None
     if ORDERING_AGENT_ENABLED:
         try:
-            from agentic.ordering_agent import get_ordering_agent
-            agent = get_ordering_agent()
+            from agentic.plugin_loader import load_agent_factory
+            agent = load_agent_factory()()
             await agent.bootstrap()
             logger.info("[STARTUP] OrderingAgent bootstrapped ✓")
         except BaseException as exc:

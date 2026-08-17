@@ -56,6 +56,8 @@ from __future__ import annotations
 import logging
 import re
 
+from agentic import action_result
+
 logger = logging.getLogger(__name__)
 
 # Verbs that introduce a fresh item reference. Deliberately anchored to the
@@ -245,7 +247,7 @@ def corrected_reference(
         existing single-item reference, or ``None`` when nothing should
         change (multi-item calls, bare confirmations, or no mismatch).
     """
-    if tool_name not in ("place_order", "update_order"):
+    if tool_name not in action_result.CLAIM_TOOLS[action_result.ITEM_ADDED]:
         return None
     if not isinstance(items, list) or len(items) != 1:
         # Multi-item calls are left untouched — see module docstring.

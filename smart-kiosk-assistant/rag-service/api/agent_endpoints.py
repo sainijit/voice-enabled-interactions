@@ -137,9 +137,10 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     )
 
     try:
-        from agentic.ordering_agent import get_ordering_agent
+        from agentic.plugin_loader import load_agent_factory
 
-        agent = get_ordering_agent()
+        _agent_factory = load_agent_factory()
+        agent = _agent_factory()
         result = await agent.chat(
             message=request.transcription,
             session_id=request.session_id,
@@ -198,9 +199,10 @@ async def agent_chat_stream(request: AgentChatRequest) -> StreamingResponse:
 
     async def run() -> None:
         try:
-            from agentic.ordering_agent import get_ordering_agent
+            from agentic.plugin_loader import load_agent_factory
 
-            agent = get_ordering_agent()
+            _agent_factory = load_agent_factory()
+            agent = _agent_factory()
             result = await agent.chat(
                 message=request.transcription,
                 session_id=request.session_id,

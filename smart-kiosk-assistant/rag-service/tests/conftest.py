@@ -70,7 +70,7 @@ def reset_guard_turn_state() -> None:
     same reset every real turn gets — guarantees every test starts from a
     clean, unshared state regardless of run order.
     """
-    from agentic import confirm_guard, menu_guard, removal_guard
+    from plugins.kiosk import confirm_guard, menu_guard, removal_guard
 
     menu_guard.begin_turn()
     removal_guard.begin_turn()

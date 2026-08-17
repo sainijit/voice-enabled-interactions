@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentic import action_result
+from agentic import domain_config
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,7 @@ def record_tool_result(tool_name: str, raw: Any) -> None:
         )
 
 
-_REFUSAL_GENERIC = (
+_REFUSAL_GENERIC_DEFAULT = (
     "Sorry, I couldn't confirm your order just now. Please say \"confirm my order\" "
     "once more, or ask a member of staff."
 )
@@ -148,4 +149,6 @@ def build_refusal(state: _TurnState | None = None) -> str:
         A short, markup-free sentence — never repeats the tool's raw error
         text, which is worded for the model, not the customer.
     """
-    return _REFUSAL_GENERIC
+    return domain_config.get_guard_rule(
+        "confirm_guard", "refusal_generic", _REFUSAL_GENERIC_DEFAULT
+    ) or _REFUSAL_GENERIC_DEFAULT
