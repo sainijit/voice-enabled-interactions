@@ -45,6 +45,12 @@ catalogue_keywords:
   - beverages
   - drink
   - drinks
+  # Hot-beverages category (teas and coffees) — see products.yaml.
+  - tea
+  - teas
+  - chai
+  - coffee
+  - coffees
   - combo
   - combos
   - sandwich
@@ -124,6 +130,11 @@ domain_keywords:
   - allergen
   - gluten
   - spicy
+  - garlic
+  - kids
+  - kid
+  - children
+  - child
   - calorie
   - calories
   - burger
@@ -138,6 +149,16 @@ domain_keywords:
   - beverage
   - beverages
   - coffee
+  - coffees
+  - tea
+  - teas
+  - chai
+  - espresso
+  - cappuccino
+  - latte
+  - americano
+  - mocha
+  - kahwa
   - lassi
   - soda
   - pepsi
@@ -201,6 +222,15 @@ knowledge_keywords:
   - gluten
   - ingredient
   - spicy
+  - not spicy
+  - less spicy
+  - mild
+  - garlic
+  - no garlic
+  - kids
+  - kid
+  - children
+  - child
   - payment
   - upi
   - card
@@ -224,5 +254,8 @@ category_names:
   - side
   - beverage
   - drink
+  - tea
+  - coffee
+  - chai
   - dessert
   - fries

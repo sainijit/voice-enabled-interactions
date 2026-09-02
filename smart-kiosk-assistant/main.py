@@ -60,6 +60,22 @@ async def lifespan(app: FastAPI):
             init_mcp_server(ordering_service)
             logger.info("[STARTUP] MCP server mounted at /mcp (streamable HTTP) ✓")
             logger.info("[STARTUP] Ordering feature enabled ✓")
+
+            # ── Demo payment QR (nested: payment settles an order) ───────────
+            if cfg.PAYMENT_ENABLED:
+                from kiosk_core.payment.service import PaymentService, load_payment_config
+                from kiosk_core.ordering.api import init_payment_service
+
+                payment_config = load_payment_config(cfg.PAYMENT_CONFIG_YAML_PATH)
+                init_payment_service(PaymentService(payment_config))
+                logger.info(
+                    "[STARTUP] Demo payment QR enabled ✓ (payee=%s) — NO REAL PAYMENTS",
+                    payment_config.payee_vpa,
+                )
+            else:
+                logger.info(
+                    "[STARTUP] Demo payment QR disabled (KIOSK_CORE_PAYMENT_ENABLED=false)"
+                )
         else:
             logger.info("[STARTUP] Ordering feature disabled (KIOSK_CORE_ORDERING_ENABLED=false)")
 

@@ -52,6 +52,7 @@ from typing import Any
 
 from agentic import action_result
 from agentic import domain_config
+from plugins.kiosk import item_intent_guard
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,18 @@ _REFUSAL_PLAIN_DEFAULT = (
 _REFUSAL_GENERIC_DEFAULT = (
     "Sorry, that isn't on our menu at the moment. "
     "Please choose an item from our menu — what would you like instead?"
+)
+
+# Spoken when the refused reference was a pronoun ("it", "order it") rather
+# than a product name. Observed live: the assistant quoted a Cafe Latte, the
+# customer said "Yes, I would like to order it", and the model passed
+# ``product_id="order it"`` — so the lookup failed and the customer was told a
+# real, just-quoted item was not on the menu. A failure to resolve a pronoun
+# is not evidence that anything is off-menu, so it must never be spoken as if
+# it were. Asking which item they meant is both truthful and recoverable.
+_REFUSAL_AMBIGUOUS_DEFAULT = (
+    "Sorry, I didn't catch which item you meant. "
+    "Could you tell me the name of the item you'd like?"
 )
 
 # Spoken when kiosk-core refused the quantity rather than the product. The
@@ -458,6 +471,9 @@ def build_refusal(state: _TurnState | None = None) -> str:
     if state.quantity_refused:
         return _get_refusal("refusal_quantity", _REFUSAL_QUANTITY_DEFAULT)
     item = next((ref for ref in state.rejected_refs if ref), "")
+    if item and item_intent_guard.is_anaphoric_product_ref(item):
+        # A pronoun the model failed to resolve — see _REFUSAL_AMBIGUOUS_DEFAULT.
+        return _get_refusal("refusal_ambiguous", _REFUSAL_AMBIGUOUS_DEFAULT)
     if not item or not _looks_like_item_name(item):
         return _get_refusal("refusal_generic", _REFUSAL_GENERIC_DEFAULT)
 

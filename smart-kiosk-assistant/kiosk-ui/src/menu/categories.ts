@@ -20,6 +20,9 @@ export interface CategoryMeta {
 // here still render (alphabetically, with a default icon) so the menu never
 // hides items just because it's an unrecognised category.
 export const CATEGORY_META: CategoryMeta[] = [
+  // Pinned first so the freshly-brewed range is the first thing a customer
+  // sees. Separate from `beverages`, which holds the chilled/fizzy drinks.
+  { key: 'hot-beverages', label: 'Tea & Coffee', icon: '☕' },
   { key: 'burgers', label: 'Burgers', icon: '🍔' },
   { key: 'pizza', label: 'Pizza', icon: '🍕' },
   { key: 'wraps', label: 'Wraps', icon: '🌯' },
@@ -29,7 +32,10 @@ export const CATEGORY_META: CategoryMeta[] = [
 ];
 
 /** Categories shown during peak hours (fast-prep, low-queue impact). */
-export const PEAK_CATEGORIES = new Set(['burgers', 'beverages', 'sides']);
+// Tea/coffee is included for the same reason as `beverages`: it is poured to
+// order in seconds, so it adds no kitchen queue. Omitting it would make the
+// whole top section vanish the moment the queue turns MEDIUM.
+export const PEAK_CATEGORIES = new Set(['burgers', 'beverages', 'hot-beverages', 'sides']);
 
 export const categoryMeta = (key: string): CategoryMeta =>
   CATEGORY_META.find((c) => c.key === key) ?? {

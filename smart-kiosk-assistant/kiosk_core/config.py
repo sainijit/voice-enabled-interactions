@@ -392,6 +392,23 @@ UPSELL_RULES_YAML_PATH = os.getenv(
 # breadth against spoken-reply latency.  1 keeps the turn inside the 3-4 s SLA.
 UPSELL_MAX_SUGGESTIONS = int(os.getenv("KIOSK_CORE_UPSELL_MAX_SUGGESTIONS", "1"))
 
+# ── Demo payment QR feature ──────────────────────────────────────────────────
+# Renders a scannable payment QR code under the cart once an order is
+# confirmed.  DEMO ONLY: the encoded payee handle is non-routable (see
+# configs/ordering/payment.yaml), so no money can ever move.  Set
+# KIOSK_CORE_PAYMENT_ENABLED=false to hide the QR without a rebuild — the
+# endpoint then returns 404 and the customer UI simply omits the panel.
+#
+# Gated separately from ORDERING_ENABLED rather than folded into it because a
+# venue may want ordering without any checkout/payment step on screen.
+PAYMENT_ENABLED = os.getenv("KIOSK_CORE_PAYMENT_ENABLED", "true").lower() not in ("false", "0", "no")
+
+# YAML file holding the merchant identity and QR payload settings.
+PAYMENT_CONFIG_YAML_PATH = os.getenv(
+    "KIOSK_CORE_PAYMENT_YAML",
+    "./configs/ordering/payment.yaml",
+)
+
 # ── Identity / biometric authentication feature ──────────────────────────────
 # Master switch for the multimodal (face + voice) identity subsystem.  When
 # false, kiosk-core does not mount the identity router, does not construct the

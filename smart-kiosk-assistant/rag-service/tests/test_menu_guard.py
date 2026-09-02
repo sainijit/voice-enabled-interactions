@@ -565,3 +565,38 @@ def test_both_off_menu_and_quantity_partial_rejections_are_both_disclosed() -> N
     assert changed is True
     assert "Chicken BBQ Pizza" in corrected  # off-menu disclosure
     assert "how many" in corrected.lower() or "quantity" in corrected.lower()  # quantity disclosure
+
+
+def test_pronoun_refusal_does_not_claim_the_item_is_off_menu() -> None:
+    # Live regression (conversation 246bfdf3): the assistant quoted "The Cafe
+    # Latte (250 ml) is available for ₹109. Would you like to order it?", the
+    # customer said "Yes, I would like to order it", and the model passed
+    # product_id="order it". Failing to resolve a pronoun is not evidence that
+    # anything is off-menu, so the refusal must not say a real, just-quoted
+    # item is unavailable — it must ask which item they meant.
+    menu_guard.record_tool_result(
+        "place_order", _mcp_envelope(_off_menu_payload("order it"))
+    )
+    refusal = menu_guard.build_refusal()
+    assert "menu" not in refusal.lower()
+    assert "which item" in refusal.lower()
+
+
+def test_pronoun_refusal_replaces_a_false_addition_claim() -> None:
+    menu_guard.record_tool_result(
+        "place_order", _mcp_envelope(_off_menu_payload("order it"))
+    )
+    cleaned, replaced = menu_guard.validate_reply(
+        "I've added the Cafe Latte to your order."
+    )
+    assert replaced is True
+    assert "menu" not in cleaned.lower()
+
+
+def test_real_off_menu_item_still_says_off_menu() -> None:
+    """The pronoun branch must not weaken a genuine off-menu refusal."""
+    menu_guard.record_tool_result(
+        "place_order", _mcp_envelope(_off_menu_payload("sushi platter"))
+    )
+    refusal = menu_guard.build_refusal()
+    assert "menu" in refusal.lower()

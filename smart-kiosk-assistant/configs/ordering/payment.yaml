@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Demo payment configuration for the kiosk checkout QR code.
+#
+# ⚠️  DEMO ONLY — no real payment is ever taken.
+#
+# `payee_vpa` is deliberately a NON-ROUTABLE placeholder handle. It uses the
+# reserved `.invalid` DNS suffix (RFC 2606), so no UPI/PSP app can resolve it
+# to a real bank account even if a visitor scans the code with a live payment
+# app. Do NOT replace it with a real VPA unless this kiosk is also wired to a
+# real payment gateway and the demo banner below is removed.
+
+payment:
+  # Merchant display name encoded into the QR payload and shown on screen.
+  payee_name: "QuickBite Kiosk (Demo)"
+
+  # Non-routable placeholder payee handle — see the warning above.
+  payee_vpa: "demo@quickbite.invalid"
+
+  # ISO-4217 currency code used in the payload.
+  currency: "INR"
+
+  # Transaction note template. Supported placeholder: {order_ref}
+  note_template: "QuickBite order {order_ref}"
+
+  # Banner rendered over/next to the QR in the customer UI so nobody mistakes
+  # this for a live payment request.
+  demo_banner: "DEMO ONLY — NOT A REAL PAYMENT"
+
+  # Rendered QR size in pixels (square) for the customer kiosk screen.
+  qr_size_px: 190
+
+  # Seconds the QR stays on screen before the UI flips to a simulated
+  # "Payment received" confirmation. DEMO ONLY — nothing is actually charged
+  # or verified; this is purely a timer so the demo can show the full
+  # order → pay → done journey without a payment gateway.
+  #
+  # Set to 0 to disable the auto-confirmation and leave the QR on screen
+  # indefinitely (e.g. if you wire up a real PSP webhook later).
+  simulated_success_after_seconds: 5
+
+  # Message shown once the simulated payment "succeeds".
+  success_message: "Payment received"

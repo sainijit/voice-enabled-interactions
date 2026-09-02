@@ -244,6 +244,55 @@ The session snapshot returned by **Get Session**, **Start**, and **Start File** 
 
 ---
 
+## Payment QR (Demo)
+
+```
+GET /api/v1/orders/{order_id}/payment
+```
+
+Returns a payment QR code for a **confirmed** order. The customer kiosk screen
+calls this once the cart flips to `confirmed` and renders the QR beneath the cart.
+
+> ⚠️ **DEMO ONLY.** The QR encodes a deliberately non-routable payee handle
+> (`*.invalid`, RFC 2606), so scanning it with a real payment app cannot transfer
+> money. No payment gateway is integrated.
+
+**Response**
+
+```json
+{
+  "order_id": 6,
+  "order_ref": "ORD-6",
+  "amount": 179.0,
+  "currency": "INR",
+  "payee_name": "QuickBite Kiosk (Demo)",
+  "payload": "upi://pay?pa=demo%40quickbite.invalid&pn=...&am=179.00&cu=INR&tr=ORD-6",
+  "qr_svg_data_uri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0i...",
+  "qr_size_px": 190,
+  "is_demo": true,
+  "demo_banner": "DEMO ONLY — NOT A REAL PAYMENT"
+}
+```
+
+`qr_svg_data_uri` can be used directly as an `<img src>`.
+
+**Status codes**
+
+| Code | Meaning |
+|---|---|
+| `200` | Payment intent returned |
+| `404` | Order not found, or the payment feature is disabled |
+| `422` | Order is still a `draft` — confirm it first |
+
+**Configuration**
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `KIOSK_CORE_PAYMENT_ENABLED` | `true` | Set to `false` to disable the endpoint and hide the QR |
+| `KIOSK_CORE_PAYMENT_YAML` | `./configs/ordering/payment.yaml` | Merchant name, payee handle, currency, banner text, QR size |
+
+---
+
 ## Polling Pattern
 
 Start a session, then poll until `status` is `"completed"` or `"failed"`:

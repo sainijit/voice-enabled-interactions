@@ -77,7 +77,59 @@ _CATEGORY_SYNONYMS = {
     "dessert": "desserts",
     "sweet": "desserts",
     "sweets": "desserts",
+    # Hot drinks live in their own category. The model asks for whatever noun
+    # the customer used ("tea", "coffee", "chai"), none of which match the
+    # stored category name, so map every natural phrasing onto it.
+    "tea": "hot-beverages",
+    "teas": "hot-beverages",
+    "chai": "hot-beverages",
+    "coffee": "hot-beverages",
+    "coffees": "hot-beverages",
+    "hot beverage": "hot-beverages",
+    "hot beverages": "hot-beverages",
+    "hot drink": "hot-beverages",
+    "hot drinks": "hot-beverages",
+    "tea and coffee": "hot-beverages",
+    "tea & coffee": "hot-beverages",
+    "hot_beverages": "hot-beverages",
 }
+
+# "Tea" and "coffee" are not separate catalogue categories — both live under
+# `hot-beverages` so the kiosk can show one combined section. But a customer
+# asking "what teas do you have?" must not be read the coffee list back, so
+# those words additionally narrow the result to the matching drinks.
+#
+# Matching is by name because the catalogue has no sub-category column, and
+# adding one purely for this would mean a schema change, a migration and a
+# Product model field for two groups of a single category. The patterns cover
+# the drinks that do NOT contain the obvious word — chai and kahwa are teas,
+# while espresso/cappuccino/latte/americano/mocha are coffees.
+_SUBCATEGORY_PATTERNS: dict[str, re.Pattern[str]] = {
+    "tea": re.compile(r"\b(?:tea|chai|kahwa)\b", re.IGNORECASE),
+    "coffee": re.compile(
+        r"\b(?:coffee|espresso|cappuccino|latte|americano|mocha)\b", re.IGNORECASE
+    ),
+}
+_SUBCATEGORY_ALIASES = {
+    "tea": "tea", "teas": "tea", "chai": "tea", "hot tea": "tea",
+    "coffee": "coffee", "coffees": "coffee", "hot coffee": "coffee",
+}
+
+
+def _subcategory_pattern(category: str | None) -> re.Pattern[str] | None:
+    """Return a name filter when the customer named a sub-group of a category.
+
+    Args:
+        category: Raw category argument as sent by the agent.
+
+    Returns:
+        A compiled pattern to filter product names by, or ``None`` when the
+        request was not for a known sub-group.
+    """
+    if category is None:
+        return None
+    alias = _SUBCATEGORY_ALIASES.get(category.strip().lower())
+    return _SUBCATEGORY_PATTERNS.get(alias) if alias else None
 
 
 def _normalise_category(category: str | None) -> str | None:
@@ -435,7 +487,8 @@ async def list_products(
     """List menu products in a category, or the category list when none is given.
 
     Args:
-        category: One of: burgers, pizza, wraps, sides, beverages, desserts.
+        category: One of: burgers, pizza, wraps, sides, beverages,
+                  hot-beverages (teas and coffees), desserts.
                   Call with a category to get that category's products with
                   prices. Call with NO category only to discover which
                   categories exist — that returns category names and item
@@ -452,10 +505,28 @@ async def list_products(
         categories}`` — see the comment below for why this is a distinct case.
     """
     requested = category
+    subcategory = _subcategory_pattern(category)
     category = _normalise_category(category)
 
     products = await _svc().list_products(category=category, dietary=dietary)
 
+    if subcategory is not None and products:
+        # Narrow "tea"/"coffee" to just those drinks. Kept non-destructive: if
+        # the filter matches nothing (renamed or reworded catalogue), fall back
+        # to the unnarrowed category rather than claiming we carry none.
+        narrowed = [p for p in products if subcategory.search(p.name)]
+        if narrowed:
+            logger.info(
+                "[MCP-SERVER] list_products category=%r narrowed %d -> %d by sub-group",
+                requested, len(products), len(narrowed),
+            )
+            products = narrowed
+        else:
+            logger.warning(
+                "[MCP-SERVER] list_products sub-group filter for %r matched no "
+                "product name in category=%r — returning the full category",
+                requested, category,
+            )
     if not products and category is not None:
         # This string never matched a real category (aliases for "everything"
         # like "all"/"menu"/"food" are already caught above). Two genuinely
@@ -551,6 +622,13 @@ async def get_popular_products(
     "what do you recommend", "suggest something to drink", "what's your most
     ordered dish", "show me your favourites". This is a catalogue flag set by
     the restaurant, not a generated opinion, so it is safe to state as fact.
+
+    Do NOT use this for a suggestion that names a constraint this catalogue
+    has no field for — spice level, an ingredient to avoid (e.g. "no
+    garlic"), an allergen, or an age group ("for the kids"). This tool only
+    knows product_id/name/category/price/is_bestseller/is_veg, so it cannot
+    honour those constraints and will surface an unrelated bestseller
+    instead. Those requests should go to knowledge_lookup.
 
     Do NOT use ``get_upsell_suggestions`` for this — that tool only pairs
     items already in the customer's cart and requires real cart product_ids;
@@ -649,16 +727,23 @@ async def place_order(
 
 @mcp.tool()
 async def update_order(
-    order_id: int, items: list[dict[str, Any]], dietary: str | None = None
+    order_id: int, items: list[dict[str, Any]], dietary: str | None = None,
+    user_id: str = "anonymous",
 ) -> dict[str, Any]:
     """Add or increment items on an existing draft order.
 
     Args:
-        order_id: The order to update.
+        order_id: The order to update. The model is not required to get this
+            exactly right — if it does not match the customer's actual open
+            draft order, the call falls back to that open draft automatically
+            (see ``user_id``), the same recovery ``place_order`` performs.
         items: List of {product_id, quantity} to add. product_id may be a
             catalogue id OR a plain product name — the server resolves it.
         dietary: Leave unset — the caller fills this in automatically from
             anything the customer has already said about diet this session.
+        user_id: Customer identifier (use "anonymous" if unknown). Used only
+            to recover the customer's real open draft order when ``order_id``
+            does not resolve — never trusts a wrong id at face value.
 
     Returns:
         Updated order with recalculated total, or an error dict with
@@ -679,7 +764,7 @@ async def update_order(
         return _nothing_resolved_quantity_error(implausible_qty)
     try:
         item_list = [OrderItemIn(**i) for i in resolved]
-        order = await _svc().update_order_items(order_id, item_list)
+        order = await _svc().update_order_items(order_id, item_list, user_id=user_id)
         logger.info("[MCP-SERVER] update_order order_id=%d new_total=%.2f", order_id, order.total)
         result = await _attach_upsell(order.model_dump(mode="json"))
         # Names of exactly what this call added, distinct from ``result["items"]``
@@ -701,8 +786,19 @@ async def update_order(
             result.update(_ambiguous_payload(ambiguous))
         return result
     except ValueError as exc:
+        # Genuinely no open cart for this customer (the fallback in
+        # update_order_items already tried and found none) — this is NOT an
+        # off-menu item, so the error must say so explicitly. Left unguided,
+        # the model has been observed inventing an unrelated excuse (e.g.
+        # "that item isn't on our menu") for a plain missing-cart error.
         logger.warning("[MCP-SERVER] update_order order_id=%d rejected: %s", order_id, exc)
-        return {"error": str(exc)}
+        return {
+            "error": (
+                f"{exc} There is no open order for this customer to update. "
+                "Do NOT say the item is unavailable or off-menu — instead call "
+                "place_order with the same items to start a new order."
+            )
+        }
 
 
 @mcp.tool()

@@ -68,7 +68,7 @@ _user_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
 # Defaults match Smart Kiosk tool names; updated in-place after MCP bootstrap
 # via classify_discovered_tools() using role patterns from agent_profile.yaml.
 _USER_ID_INJECTED_TOOLS: action_result._MutableToolSet = action_result._MutableToolSet(
-    frozenset({"place_order", "remove_from_order", "cancel_order",
+    frozenset({"place_order", "update_order", "remove_from_order", "cancel_order",
                "confirm_active_order", "get_current_order"})
 )
 
@@ -115,11 +115,15 @@ class _CartState:
     instead.
     """
 
-    __slots__ = ("known_items", "pending_upsell")
+    __slots__ = ("known_items", "pending_upsell", "last_named_product")
 
     def __init__(self) -> None:
         self.known_items: list[dict[str, Any]] = []
         self.pending_upsell: dict[str, Any] | None = None
+        # The catalogue product the customer last named by name, remembered so
+        # a later pronoun ("yes, order it") can be resolved back to it. See
+        # item_intent_guard.product_named_in.
+        self.last_named_product: dict[str, Any] | None = None
 
 
 # The current session's cart/upsell memory (see _CartState above), read and
@@ -272,7 +276,8 @@ _KNOWLEDGE_QUERY_RE = domain_config.build_knowledge_regex() or re.compile(
     r"\b(?:open(?:ing)?|clos(?:e|ing)|hours?|timing|breakfast|"
     r"restaurant name|name of (?:the|your) restaurant|address|located?|location|"
     r"parking|deliver(?:y|ies)?|takeaway|dine[- ]?in|wifi|contact|phone|"
-    r"halal|vegetarian|vegan|allergen|gluten|ingredient|spicy|"
+    r"halal|vegetarian|vegan|allergen|gluten|ingredient|spicy|garlic|"
+    r"mild|less spicy|not spicy|kids?|child(?:ren)?|"
     r"payment|upi|card|cash|policy|refund|"
     r"restrooms?|bathrooms?|washrooms?|toilets?|facilit(?:y|ies)|"
     r"wheelchair|accessib\w*|seating|"
@@ -289,6 +294,22 @@ _KNOWLEDGE_NUDGE = (
     "two spoken sentences using only what it returns."
 )
 
+# A preference request naming a constraint the catalogue tools cannot filter
+# on (spice level, an ingredient to avoid, an allergen, or an age group).
+# Pre-grounding already answers these correctly from the knowledge base (see
+# Rule 4c in agent_profile.yaml), but the small on-device LLM has been
+# observed calling get_popular_products anyway right after — e.g. "something
+# for my kids to eat" pre-grounds with real kids'-menu picks, then the model
+# also calls get_popular_products(category="children's food"), gets an empty
+# result (no such catalogue category exists), and speaks THAT instead of the
+# grounded answer. This regex identifies the turns at risk so the guard below
+# can discard a wasted/misleading catalogue call and re-ground deterministically.
+_CONSTRAINED_PREFERENCE_RE = re.compile(
+    r"\b(?:spicy|not spicy|less spicy|mild|garlic|no garlic|allergen|"
+    r"gluten|kids?|child(?:ren)?)\b",
+    re.IGNORECASE,
+)
+
 # Catalogue questions must always be answered from list_products. The model is
 # otherwise happy to invent a confident, well-formatted menu — one turn asking
 # "can you tell me the desserts?" produced eight fictional items at a uniform
@@ -301,6 +322,7 @@ _CATALOGUE_QUERY_RE = domain_config.build_catalogue_regex() or re.compile(
     r"option|options|price|prices|cost|costs|how much|rate|rates|"
     r"burger|burgers|pizza|pizzas|wrap|wraps|side|sides|dessert|desserts|"
     r"desert|deserts|sweet|sweets|beverage|beverages|drink|drinks|combo|combos|"
+    r"tea|teas|chai|coffee|coffees|"
     r"(?:do|does) you (?:have|serve|sell|offer|carry|make|got)|"
     r"have you got|any (?:sandwiches?|food|snacks?))\b",
     re.IGNORECASE,
@@ -394,9 +416,11 @@ _IN_DOMAIN_RE = domain_config.build_domain_regex() or re.compile(
     r"restaurant|outlet|kiosk|store|shop|kitchen|staff|table|"
     r"seat|seats|seating|sit|sitting|"
     r"add|added|remove|cancel|confirm|serve|serves|recommend|suggest|"
-    r"veg|vegan|vegetarian|halal|allergen|gluten|spicy|calorie|calories|"
+    r"veg|vegan|vegetarian|halal|allergen|gluten|spicy|garlic|calorie|calories|"
+    r"kids?|child(?:ren)?|"
     r"burger|burgers|pizza|pizzas|wrap|wraps|fries|dessert|desserts|"
     r"beverage|beverages|coffee|lassi|soda|pepsi|roll|rolls|"
+    r"coffees|tea|teas|chai|espresso|cappuccino|latte|americano|mocha|kahwa|"
     r"open|opening|close|closing|hours?|timing|address|location|parking|"
     r"wifi|delivery|takeaway|offer|offers|discount|"
     r"washroom|restroom|toilet|water|napkin|straw|takeout|parcel)\b",
@@ -610,7 +634,87 @@ _NUDGE_NAMES[id(_KNOWLEDGE_NUDGE)] = "knowledge"
 # and synonyms ("drink" -> beverages) before querying.
 _CATEGORY_KEYWORDS = domain_config.get_category_names() or (
     "burger", "pizza", "wrap", "side", "beverage", "drink", "dessert", "fries",
+    "tea", "coffee", "chai",
 )
+
+# Teas and coffees share one catalogue category (`hot-beverages`) so the kiosk
+# can show them as a single section. The model therefore asks for that whole
+# category whenever either is mentioned, which answers "what teas do you have?"
+# by reciting six coffees as well.
+#
+# kiosk-core can narrow the result (it accepts category="tea"/"coffee"), but
+# only if that is what it receives — and the model reliably sends the catalogue
+# name it was told about instead. The customer's own words are the trustworthy
+# signal, so the sub-group is resolved from the utterance and the argument is
+# rewritten before the call, the same way dietary/user_id are injected above.
+_TEA_UTTERANCE_RE = re.compile(r"\b(?:tea|teas|chai|kahwa)\b", re.IGNORECASE)
+_COFFEE_UTTERANCE_RE = re.compile(
+    r"\b(?:coffee|coffees|espresso|cappuccino|latte|americano|mocha)\b", re.IGNORECASE
+)
+# Only these get rewritten. A request already narrowed to something else must
+# never be hijacked just because the customer mentioned a drink in passing.
+_HOT_DRINK_CATEGORY_ARGS = frozenset({
+    "hot-beverages", "hot_beverages", "hot beverages", "beverages", "beverage",
+    "drink", "drinks", "tea and coffee", "tea & coffee",
+})
+
+
+def _hot_drink_subgroup(category: str | None, utterance: str) -> str | None:
+    """Resolve a tea/coffee sub-group from what the customer actually said.
+
+    Args:
+        category: The category argument the model produced.
+        utterance: The customer's message for this turn.
+
+    Returns:
+        ``"tea"`` or ``"coffee"`` when the customer named exactly one of them
+        and the model asked for the combined category, otherwise ``None``
+        (including when they asked for both, which needs no narrowing).
+    """
+    if not category or category.strip().lower() not in _HOT_DRINK_CATEGORY_ARGS:
+        return None
+    wants_tea = bool(_TEA_UTTERANCE_RE.search(utterance))
+    wants_coffee = bool(_COFFEE_UTTERANCE_RE.search(utterance))
+    if wants_tea and not wants_coffee:
+        return "tea"
+    if wants_coffee and not wants_tea:
+        return "coffee"
+    return None
+
+
+# Read-only catalogue tools whose results name real, orderable products.
+_CATALOGUE_TOOLS = frozenset({"list_products", "get_popular_products"})
+
+
+def _products_in(result: Any) -> list[dict[str, Any]]:
+    """Extract the product dicts from a catalogue tool result.
+
+    ``call_tool`` returns an MCP envelope whose payload is a JSON *string*, and
+    catalogue tools put a top-level array inside it — hence ``unwrap_any``
+    rather than ``unwrap``. A wrapper dict is also tolerated, and anything
+    unrecognised yields an empty list rather than raising.
+
+    Args:
+        result: Whatever the catalogue tool returned.
+
+    Returns:
+        The product dicts found, or ``[]``.
+    """
+    payload = action_result.unwrap_any(result)
+    if isinstance(payload, dict):
+        for key in ("products", "items", "results"):
+            if isinstance(payload.get(key), list):
+                payload = payload[key]
+                break
+        else:
+            return []
+    if not isinstance(payload, list):
+        return []
+    return [
+        entry
+        for entry in payload
+        if isinstance(entry, dict) and entry.get("product_id") and entry.get("name")
+    ]
 
 # Deliberately excludes ambiguous phrases like "that's it" / "that's all" /
 # "I'm done" — those are commonly used to decline an upsell, not to confirm
@@ -1965,7 +2069,50 @@ class OrderingAgent:
                 diet = _dietary_ctx.get()
                 if diet:
                     kwargs["dietary"] = diet
+            if tool_name == "list_products":
+                # See _hot_drink_subgroup: narrow "what teas do you have?" to
+                # the teas instead of the whole tea-and-coffee section.
+                subgroup = _hot_drink_subgroup(
+                    kwargs.get("category"), _utterance_ctx.get()
+                )
+                if subgroup:
+                    logger.info(
+                        "[AGENT→MCP] list_products category=%r narrowed to %r "
+                        "from the customer's wording",
+                        kwargs.get("category"), subgroup,
+                    )
+                    kwargs["category"] = subgroup
             if tool_name in action_result.CLAIM_TOOLS[action_result.ITEM_ADDED]:
+                # Resolve a pronoun the model echoed straight from the
+                # customer ("order it") back to the product they named
+                # earlier. Without this the catalogue lookup fails and the
+                # customer is told a just-quoted item is not on the menu.
+                # See item_intent_guard's "Anaphoric tool arguments" section.
+                items_now = kwargs.get("items")
+                remembered = (
+                    cart_state.last_named_product if cart_state is not None else None
+                )
+                if (
+                    remembered
+                    and isinstance(items_now, list)
+                    and len(items_now) == 1
+                    and isinstance(items_now[0], dict)
+                ):
+                    ref = (
+                        items_now[0].get("product_id")
+                        or items_now[0].get("name")
+                        or items_now[0].get("product")
+                        or ""
+                    )
+                    if item_intent_guard.is_anaphoric_product_ref(ref):
+                        logger.warning(
+                            "[ITEM-INTENT-GUARD] tool=%s pronoun reference=%r "
+                            "resolved to the product the customer named earlier: %r",
+                            tool_name, ref, remembered.get("name"),
+                        )
+                        items_now[0]["product_id"] = remembered["product_id"]
+                        items_now[0].pop("name", None)
+                        items_now[0].pop("product", None)
                 # Catch a stale/pending item reference the model failed to
                 # update against what the customer just said this turn (e.g.
                 # a pending "French fries" confirmation still in the call
@@ -1997,6 +2144,20 @@ class OrderingAgent:
                         kwargs["items"] = filtered
             logger.info("[AGENT→MCP] tool=%s args=%s", tool_name, kwargs)
             result = await call_tool(tool_name, kwargs)
+            # Remember which catalogue product the customer named this turn,
+            # so a pronoun in a later turn ("yes, order it") resolves to it.
+            # Driven by the catalogue result rather than the reply text, so
+            # the remembered item is always a real, orderable product.
+            if cart_state is not None and tool_name in _CATALOGUE_TOOLS:
+                named = item_intent_guard.product_named_in(
+                    _utterance_ctx.get(), _products_in(result)
+                )
+                if named:
+                    cart_state.last_named_product = named
+                    logger.info(
+                        "[AGENT] Remembered referent for a later pronoun: %r",
+                        named.get("name"),
+                    )
             # Record the outcome *before* compression: the menu guard needs the
             # tool's own error payload, and compression is free to reshape a
             # successful result.
@@ -2462,6 +2623,27 @@ class OrderingAgent:
                     reply_parts, tool_calls = retry_parts, retry_tools
                     logger.info("[AGENT] Retry produced tool_calls=%s", retry_tools)
 
+            # A constrained preference ("for the kids", "no garlic", "not
+            # spicy") was already answered correctly by pre-grounding, but the
+            # model still called get_popular_products/list_products on top —
+            # see _CONSTRAINED_PREFERENCE_RE. That call is either an unrelated
+            # bestseller or an empty "nothing popular in that category" result
+            # (the category doesn't exist in the catalogue), and it must never
+            # be allowed to overwrite the grounded answer.
+            if (
+                pregrounded
+                and _CONSTRAINED_PREFERENCE_RE.search(message)
+                and any(t in ("get_popular_products", "list_products") for t in tool_calls)
+            ):
+                logger.warning(
+                    "[AGENT] Constrained-preference turn also called catalogue "
+                    "tool — discarding and re-grounding from knowledge only | "
+                    "session=%s tool_calls=%s", session_id, tool_calls,
+                )
+                grounded = await self._force_knowledge(message, session_id)
+                if grounded:
+                    reply_parts, tool_calls = [grounded], ["knowledge_lookup"]
+
             # Last line of defence. If the model still claims an order was
             # placed or confirmed while no order tool ran, that claim is false:
             # observed with "Yes confirm my order" -> "Your order ... is
@@ -2560,6 +2742,27 @@ class OrderingAgent:
                 )
                 reply = tpl_reply
         reply = _strip_leaked_directives(reply)
+
+        # A pre-grounded turn produced no usable text — the model echoed
+        # `[knowledge] [/knowledge]` with nothing between the markers (a
+        # degenerate empty completion), which _strip_knowledge_markers cannot
+        # tell apart from "nothing to unwrap" and so returns unchanged,
+        # leaking the literal bracket text to the customer/TTS. A pregrounded
+        # turn always has real retrieved context sitting right there, so
+        # recompute the answer deterministically via the RAG pipeline's own
+        # synthesis (the same reliable path /api/v1/query uses) instead of
+        # ever speaking a bracket or an empty reply.
+        if pregrounded and (not reply.strip() or "[knowledge]" in reply.lower() or "[/knowledge]" in reply.lower()):
+            logger.warning(
+                "[AGENT] Pre-grounded turn produced an empty/marker-only reply "
+                "— re-grounding deterministically | session=%s raw=%r",
+                session_id, reply[:160],
+            )
+            grounded = await self._force_knowledge(message, session_id)
+            if grounded:
+                reply = grounded
+                if "knowledge_lookup" not in tool_calls:
+                    tool_calls = [*tool_calls, "knowledge_lookup"]
         if _ERROR_PAYLOAD_RE.search(reply):
             logger.error(
                 "[AGENT] Raw tool error payload leaked into reply — substituting "

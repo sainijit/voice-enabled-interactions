@@ -104,6 +104,22 @@ class TestCorrectedReference:
         )
         assert result is None
 
+    @pytest.mark.parametrize(
+        "utterance",
+        [
+            "Yes, I would like to order it.",
+            "Yes please, order it.",
+            "Sure, add that one.",
+            "Yeah, I'll take it.",
+        ],
+    )
+    def test_pronoun_utterance_never_overwrites_a_real_reference(self, utterance):
+        # Regression: the model correctly sent "Cafe Latte" but this guard
+        # replaced it with the pronoun scraped from the utterance, and the
+        # customer was told a just-quoted item was off-menu.
+        items = [{"product_id": "Cafe Latte", "quantity": 1}]
+        assert guard.corrected_reference("place_order", items, utterance) is None
+
     def test_leaves_bare_confirmation_untouched(self):
         items = [{"product_id": "french fries", "quantity": 1}]
         result = guard.corrected_reference("update_order", items, "yes go ahead")
@@ -172,3 +188,73 @@ class TestTentativeIntent:
         assert result is not None, (
             f"Expected non-None for direct order: {utterance!r}"
         )
+
+
+COFFEES = [
+    {"product_id": "COFFEE-001", "name": "Filter Coffee (150 ml)"},
+    {"product_id": "COFFEE-002", "name": "Espresso (60 ml)"},
+    {"product_id": "COFFEE-003", "name": "Cappuccino (200 ml)"},
+    {"product_id": "COFFEE-004", "name": "Cafe Latte (250 ml)"},
+    {"product_id": "COFFEE-006", "name": "Hazelnut Mocha (250 ml)"},
+]
+
+
+class TestIsAnaphoricProductRef:
+    """Observed live: the model passed product_id="order it" after the
+    customer said "Yes, I would like to order it", so a real, just-quoted
+    Cafe Latte was reported as off-menu.
+    """
+
+    @pytest.mark.parametrize("reference", [
+        "order it", "it", "that", "this one", "that one", "them",
+        "I would like to order it", "take it", "the same", "all of them",
+        "yes", "yeah", "ok", "order",
+    ])
+    def test_pronoun_references_are_detected(self, reference: str):
+        assert guard.is_anaphoric_product_ref(reference) is True, (
+            f"Expected {reference!r} to be treated as a pronoun reference"
+        )
+
+    @pytest.mark.parametrize("reference", [
+        "Cafe Latte (250 ml)", "COFFEE-004", "cold coffee", "margherita pizza",
+        "fries", "chicken burger", "Masala Chai", "green tea",
+    ])
+    def test_real_products_are_not_flagged(self, reference: str):
+        """A real id or name — including one containing a listed word such as
+        "Cold Coffee" — must never be mistaken for a pronoun."""
+        assert guard.is_anaphoric_product_ref(reference) is False, (
+            f"Expected {reference!r} to be treated as a real product"
+        )
+
+    def test_empty_reference_is_not_a_pronoun(self):
+        assert guard.is_anaphoric_product_ref("") is False
+
+
+class TestProductNamedIn:
+    def test_remembers_the_single_named_product(self):
+        found = guard.product_named_in("I would like to order one cafe latte.", COFFEES)
+        assert found is not None and found["product_id"] == "COFFEE-004"
+
+    def test_matches_through_an_accent(self):
+        """ASR emits "café latte" while the catalogue stores "Cafe Latte"."""
+        found = guard.product_named_in("I would like to order one café latte.", COFFEES)
+        assert found is not None and found["product_id"] == "COFFEE-004"
+
+    def test_ignores_the_size_qualifier(self):
+        found = guard.product_named_in("I'll take the hazelnut mocha", COFFEES)
+        assert found is not None and found["product_id"] == "COFFEE-006"
+
+    def test_a_browse_names_nothing(self):
+        assert guard.product_named_in("what coffees do you have", COFFEES) is None
+
+    def test_two_named_items_are_ambiguous(self):
+        """Remembering just one of two named items would resolve a later
+        pronoun to the wrong product, so nothing is remembered."""
+        assert guard.product_named_in("I want a latte and an espresso", COFFEES) is None
+
+    def test_bare_confirmation_names_nothing(self):
+        assert guard.product_named_in("yes please", COFFEES) is None
+
+    @pytest.mark.parametrize("products", [None, [], "not a list", [{"bad": 1}]])
+    def test_malformed_products_are_tolerated(self, products):
+        assert guard.product_named_in("a cafe latte", products) is None

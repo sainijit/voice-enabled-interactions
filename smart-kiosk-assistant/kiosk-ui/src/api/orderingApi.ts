@@ -1,5 +1,5 @@
 import { endpoints } from '../constants';
-import type { Order, Product, UpsellSuggestion } from '../types';
+import type { Order, PaymentIntent, Product, UpsellSuggestion } from '../types';
 
 /** Format a value in Indian Rupees, dropping a trailing .0 for whole values (matches the agent's replies). */
 export const formatCurrency = (value: number | undefined): string => {
@@ -80,5 +80,26 @@ export async function fetchUpsell(productIds: string[]): Promise<UpsellSuggestio
     return await res.json();
   } catch {
     return [];
+  }
+}
+
+/**
+ * Fetch the demo payment intent (incl. QR code) for a CONFIRMED order.
+ *
+ * Returns null when the order is still a draft (422), when the payment
+ * feature is disabled (404), or on any network error — callers simply omit
+ * the payment panel in that case, so a payment outage can never block the
+ * customer from seeing their confirmed receipt.
+ */
+export async function fetchPaymentIntent(orderId: number): Promise<PaymentIntent | null> {
+  try {
+    const res = await fetch(endpoints.orderPayment(orderId), {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return null;
+    const data: PaymentIntent | null = await res.json();
+    return data ?? null;
+  } catch {
+    return null;
   }
 }

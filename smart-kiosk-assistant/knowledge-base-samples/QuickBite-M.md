@@ -89,3 +89,28 @@
 - Upsell suggestions (e.g. fries with a burger, a drink with a pizza) follow
   the rules configured in `upsell_rules.yaml` and are only ever drawn from the
   menu above.
+
+## Recommendations (curated, from the menu above only)
+
+Staff-curated picks for common open-ended requests. Every item named below
+already appears in the Full Menu above with its exact name and price — never
+invent an item or price when answering these requests, and answer in your own
+words in one or two short spoken sentences rather than reading this section
+verbatim.
+
+- **Light, mild (not spicy), garlic-free picks**: **Classic French Fries
+  (Regular) — ₹89**, **Margherita Pizza (Regular) — ₹179**, **Mixed Veg
+  Fajita Wrap — ₹149**, **Mango Lassi (300 ml) — ₹89**, **Vanilla Soft Serve —
+  ₹59**. None of these contain garlic and none are tagged spicy ([S]/[SS]) in
+  the Dietary Tag System above.
+- **Kids' picks** (mild, familiar, no spice, no garlic): **Crispy Veg Patty
+  Burger — ₹129**, **Classic French Fries (Regular) — ₹89**, **Margherita
+  Pizza (Regular) — ₹179**, **Chocolate Brownie — ₹89**, **Vanilla Soft
+  Serve — ₹59**, **Mango Lassi (300 ml) — ₹89**.
+- **Avoid for "no garlic" requests**: **Garlic Bread (4 pcs)** and **Peri
+  Peri Chicken Wrap** explicitly contain garlic (garlic butter / garlic
+  sauce) — do not recommend these when a customer asks for garlic-free.
+- **Most-ordered beverage**: We do not serve tea. Our most popular
+  (bestseller) beverage is **Cold Coffee (300 ml) — ₹99**. If a customer asks
+  for tea specifically, say tea is not on the menu and offer Cold Coffee (our
+  most-ordered drink) as the alternative — do not imply we have tea.

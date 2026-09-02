@@ -18,6 +18,7 @@ const CATEGORY_ICON_NAME: Record<string, string> = {
   wraps: 'burrito',
   sides: 'french-fries',
   beverages: 'cup-with-straw',
+  'hot-beverages': 'hot-beverage',
   desserts: 'shortcake',
 };
 const DEFAULT_ICON_NAME = 'fork-and-knife-with-plate';
@@ -61,6 +62,18 @@ const PRODUCT_ICON_OVERRIDE: Record<string, string> = {
   'DRINK-003': 'mango', // Mango Lassi
   'DRINK-004': 'hot-beverage', // Cold Coffee
   'DRINK-005': 'lime', // Fresh Lime Soda
+  'TEA-001': 'teapot', // Masala Chai
+  'TEA-002': 'hot-beverage', // Ginger Tea
+  'TEA-003': 'teapot', // Cardamom Elaichi Tea
+  'TEA-004': 'teacup-without-handle', // Green Tea
+  'TEA-005': 'lime', // Lemon Honey Tea
+  'TEA-006': 'teacup-without-handle', // Kashmiri Kahwa
+  'COFFEE-001': 'hot-beverage', // Filter Coffee
+  'COFFEE-002': 'hot-beverage', // Espresso
+  'COFFEE-003': 'glass-of-milk', // Cappuccino
+  'COFFEE-004': 'glass-of-milk', // Cafe Latte
+  'COFFEE-005': 'hot-beverage', // Americano
+  'COFFEE-006': 'chocolate-bar', // Hazelnut Mocha
   'DESSERT-001': 'chocolate-bar', // Chocolate Brownie
   'DESSERT-002': 'ice-cream', // Vanilla Soft Serve
 };
@@ -81,7 +94,11 @@ const NAME_KEYWORD_ICON: Array<[RegExp, string]> = [
   [/garlic/i, 'garlic'],
   [/mango/i, 'mango'],
   [/lime/i, 'lime'],
-  [/coffee/i, 'hot-beverage'],
+  [/(latte|cappuccino|mocha|macchiato)/i, 'glass-of-milk'],
+  [/(chai|masala tea)/i, 'teapot'],
+  [/coffee|espresso|americano/i, 'hot-beverage'],
+  // Generic tea last, so the milk/spiced variants above win first.
+  [/tea|kahwa|kadha/i, 'teacup-without-handle'],
   [/(cola|soda|pepsi|7up|fizz)/i, 'tumbler-glass'],
   [/chocolate/i, 'chocolate-bar'],
   [/(vanilla|ice cream|soft serve)/i, 'ice-cream'],
@@ -94,6 +111,7 @@ const CATEGORY_ICON_POOL: Record<string, string[]> = {
   wraps: ['stuffed-flatbread', 'burrito', 'taco', 'sandwich'],
   sides: ['french-fries', 'hot-pepper', 'onion', 'garlic'],
   beverages: ['tumbler-glass', 'cup-with-straw', 'mango', 'hot-beverage', 'lime'],
+  'hot-beverages': ['hot-beverage', 'teacup-without-handle', 'teapot', 'glass-of-milk', 'bubble-tea'],
   desserts: ['chocolate-bar', 'ice-cream', 'shortcake'],
 };
 

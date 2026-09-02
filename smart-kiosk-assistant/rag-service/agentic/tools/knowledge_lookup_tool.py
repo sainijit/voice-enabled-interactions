@@ -260,6 +260,21 @@ _POPULARITY_QUERY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Terms that indicate the customer is naming a constraint get_popular_products
+# cannot filter on — spice level, an ingredient to avoid, an allergen, or an
+# age group. get_popular_products has no such metadata (only
+# product_id/name/category/price/is_bestseller/is_veg) and would surface an
+# unrelated bestseller for these, e.g. a caffeinated Cold Coffee for "something
+# for the kids". This knowledge base carries a curated Recommendations section
+# for exactly these requests (mild/garlic-free picks, kids' picks) — it is
+# authoritative here, unlike for a bare "what's popular" question, so the
+# popularity redirect below must not fire when one of these co-occurs.
+_CONSTRAINED_PREFERENCE_OVERRIDE_RE = re.compile(
+    r"\b(?:spicy|not spicy|less spicy|mild|garlic|no garlic|allergen|"
+    r"gluten|kids?|child(?:ren)?)\b",
+    re.IGNORECASE,
+)
+
 _USE_GET_POPULAR_PRODUCTS = (
     "This question asks what is popular/most-ordered/recommended. The "
     "knowledge base is not authoritative for this and using it would invent "
@@ -329,10 +344,14 @@ async def knowledge_lookup(question: str) -> str:
 
     Do NOT use this tool for prices, product availability, or menu listings —
     call ``list_products`` for those, it is the only authoritative source for
-    product names and prices. Do NOT use it for "what's popular / your
-    favourites / most ordered / what do you recommend" — call
-    ``get_popular_products`` for those. Do NOT use it for placing, updating, or
-    confirming orders.
+    product names and prices. Do NOT use it for an unconstrained "what's
+    popular / your favourites / most ordered" question — call
+    ``get_popular_products`` for those. DO use it, however, for a preference
+    request that names a constraint the catalogue has no field for — spice
+    level, an ingredient to avoid (e.g. "no garlic"), an allergen, or an age
+    group ("something for the kids") — this knowledge base has a curated
+    Recommendations section for exactly these. Do NOT use it for placing,
+    updating, or confirming orders.
 
     Args:
         question: The user's question about menu or outlet information.
@@ -354,8 +373,12 @@ async def knowledge_lookup(question: str) -> str:
     # Refuse popularity/recommendation questions — see _POPULARITY_QUERY_RE.
     # Checked before the KB-override carve-out below would otherwise apply,
     # since "popular"/"recommend" never co-occurs with a genuine KB override
-    # term in a way that changes which tool is authoritative.
-    if _POPULARITY_QUERY_RE.search(question):
+    # term in a way that changes which tool is authoritative. Exception: a
+    # constrained preference (kids/spice/garlic/allergen — see
+    # _CONSTRAINED_PREFERENCE_OVERRIDE_RE) IS answered from this knowledge
+    # base's curated Recommendations section, since get_popular_products
+    # cannot filter on any of those.
+    if _POPULARITY_QUERY_RE.search(question) and not _CONSTRAINED_PREFERENCE_OVERRIDE_RE.search(question):
         logger.info(
             "[TOOL:knowledge_lookup] Redirecting popularity question to get_popular_products: %r",
             question[:120],

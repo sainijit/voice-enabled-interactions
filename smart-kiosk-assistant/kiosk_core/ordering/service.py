@@ -466,14 +466,43 @@ class OrderingService:
         logger.info("[SERVICE] Retrieved current draft order for user=%s", user_id)
         return order
 
-    async def update_order_items(self, order_id: int, items: list[OrderItemIn]) -> Order:
-        """Add or increment items on an existing draft order."""
+    async def update_order_items(
+        self, order_id: int, items: list[OrderItemIn], user_id: str | None = None
+    ) -> Order:
+        """Add or increment items on an existing draft order.
+
+        Args:
+            order_id: The order the caller believes is open. The LLM agent
+                cannot be relied on to remember this exact number across
+                turns (the same failure mode documented on ``place_order``)
+                — observed live: the model called ``update_order`` with a
+                fabricated ``order_id`` one turn after a real order was
+                created, and the update was rejected outright even though
+                the customer had a perfectly valid open cart.
+            items: Items to add or increment.
+            user_id: When given, a mismatched/invalid ``order_id`` falls
+                back to this user's actual open draft (via
+                ``consolidate_drafts``, the same recovery ``place_order``
+                already performs) instead of failing the whole call. Only
+                falls back for a genuinely open draft belonging to this
+                user — never silently redirects onto someone else's order.
+        """
         async with get_db() as db:
             prod_repo = SqliteProductRepository(db)
             order_repo = SqliteOrderRepository(db)
 
             # Verify order exists and is still a draft
             order = await order_repo.get(order_id)
+            if (order is None or order.status != "draft") and user_id:
+                fallback_id = await order_repo.consolidate_drafts(user_id)
+                if fallback_id is not None:
+                    logger.warning(
+                        "[SERVICE] update_order_items order_id=%d invalid for user=%s — "
+                        "falling back to open draft order_id=%d",
+                        order_id, user_id, fallback_id,
+                    )
+                    order_id = fallback_id
+                    order = await order_repo.get(order_id)
             if order is None:
                 raise ValueError(f"Order not found: {order_id}")
             if order.status != "draft":

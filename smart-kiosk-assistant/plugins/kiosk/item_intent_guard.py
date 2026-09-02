@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 from agentic import action_result
 
@@ -263,6 +264,14 @@ def corrected_reference(
     if not named_item:
         return None
 
+    if is_anaphoric_product_ref(named_item):
+        # "Yes, I would like to order it." names no product — it points back at
+        # one. Treating the pronoun as the customer's just-named item would
+        # overwrite a perfectly good reference (observed live: the model sent
+        # "Cafe Latte", this guard replaced it with "order it", and the
+        # customer was told a just-quoted item was off-menu).
+        return None
+
     if not mismatches(reference, named_item):
         return None
 
@@ -272,3 +281,121 @@ def corrected_reference(
         tool_name, reference, named_item,
     )
     return named_item
+
+
+# ---------------------------------------------------------------------------
+# Anaphoric tool arguments ("order it")
+#
+# The guard above corrects a *stale but real* product reference. This section
+# handles the opposite failure, observed live: the assistant answered a price
+# question ("The Cafe Latte (250 ml) is available for ₹109. Would you like to
+# order it?"), the customer said "Yes, I would like to order it.", and the
+# model passed ``product_id="order it"`` — echoing the customer's words instead
+# of resolving the pronoun against its own previous sentence.
+#
+# Nothing downstream can recover from that: kiosk-core looks up "order it",
+# finds no such product, and menu_guard tells the customer the item is not on
+# the menu — while the item is on the menu and was quoted seconds earlier.
+#
+# The fix is to remember which catalogue product the customer named in an
+# earlier turn and substitute it when the model sends a pronoun. Same
+# philosophy as the dietary/user_id injection: deterministic context beats
+# whatever the model chose to pass.
+# ---------------------------------------------------------------------------
+
+# Leading action verbs stripped before an argument is tested for anaphora, so
+# "order it" / "add that one" reduce to the bare pronoun the pattern expects.
+_ACTION_PREFIX_RE = re.compile(
+    r"""^\s*(?:
+        please|just|kindly|
+        i|we|
+        would|will|'d|'ll|
+        like|want|wish|
+        to|
+        order|add|get|have|take|buy|purchase|place|make|do
+    )\b\s*""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def is_anaphoric_product_ref(reference: str) -> bool:
+    """Return True when a tool's product argument is a pronoun, not a product.
+
+    Args:
+        reference: The ``product_id``/``name`` the model passed to the tool.
+
+    Returns:
+        True when the reference points at something established earlier in the
+        conversation ("it", "order it", "that one") or carries no meaningful
+        token at all, rather than identifying a product. A real product id or
+        name — including one that merely *contains* a listed word, such as
+        "Cold Coffee" — returns False.
+    """
+    if not reference or not isinstance(reference, str):
+        return False
+    cleaned = reference.strip()
+    # Strip stacked lead-ins ("I would like to order it") one at a time.
+    previous = None
+    while previous != cleaned and cleaned:
+        previous = cleaned
+        cleaned = _ACTION_PREFIX_RE.sub("", cleaned).strip()
+    if not cleaned:
+        return True
+    if _CONFIRMATION_ONLY_RE.match(cleaned):
+        return True
+    return bool(_ANAPHORIC_RE.match(cleaned)) or not _tokens(cleaned)
+
+
+def _fold(text: str) -> str:
+    """Lowercase and strip accents so "café latte" matches "Cafe Latte"."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _spoken_name(product_name: str) -> str:
+    """Drop the trailing size/volume qualifier customers rarely say aloud."""
+    return re.sub(r"\s*\([^)]*\)\s*$", "", product_name).strip()
+
+
+def product_named_in(utterance: str, products: list) -> dict | None:
+    """Find the one catalogue product the customer named in this utterance.
+
+    Used to remember a referent across turns, so a later pronoun ("order it")
+    can be resolved back to a real product.
+
+    Args:
+        utterance: The customer's raw message for the turn.
+        products: Product dicts as returned by a catalogue tool; each is
+            expected to carry ``product_id`` and ``name``.
+
+    Returns:
+        The single matching product dict, or ``None`` when the utterance named
+        no product or named more than one (ambiguous — nothing is remembered
+        rather than remembering the wrong item).
+    """
+    if not utterance or not isinstance(products, list):
+        return None
+    folded = _fold(utterance)
+    spoken = [
+        (product, _spoken_name(_fold(product["name"])))
+        for product in products
+        if isinstance(product, dict) and isinstance(product.get("name"), str)
+    ]
+    matches = [product for product, name in spoken if name and name in folded]
+    if len(matches) != 1:
+        return None
+
+    # Guard against a multi-item utterance ("a latte and an espresso") whose
+    # full-name match happens to land on only one of them: remembering that one
+    # would silently resolve a later "add it" to the wrong product. Any token
+    # pointing at a *second* product makes the referent ambiguous, so nothing
+    # is remembered.
+    said = _tokens(folded)
+    hinted = {
+        product["product_id"]
+        for product, name in spoken
+        if said & _tokens(name)
+    }
+    if len(hinted) > 1:
+        return None
+    return matches[0]

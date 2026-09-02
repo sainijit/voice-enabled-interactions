@@ -21,6 +21,8 @@ from kiosk_core.ordering.models import (
     UpsellSuggestion,
 )
 from kiosk_core.ordering.service import OrderingService
+from kiosk_core.payment.models import PaymentIntent
+from kiosk_core.payment.service import PaymentService
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,10 @@ router = APIRouter(prefix="/api/v1", tags=["ordering"])
 
 # Module-level singleton injected at startup via `init_ordering_service()`
 _ordering_service: OrderingService | None = None
+
+# Optional — stays None when KIOSK_CORE_PAYMENT_ENABLED=false, which is what
+# makes the payment endpoint 404 and the customer UI omit the QR panel.
+_payment_service: PaymentService | None = None
 
 
 def init_ordering_service(service: OrderingService) -> None:
@@ -37,13 +43,32 @@ def init_ordering_service(service: OrderingService) -> None:
     logger.info("[ORDERING-API] OrderingService registered")
 
 
+def init_payment_service(service: PaymentService) -> None:
+    """Called from main.py lifespan to inject the demo payment service.
+
+    Only invoked when the payment feature flag is on; leaving it uncalled is
+    the supported way to disable the checkout QR.
+    """
+    global _payment_service
+    _payment_service = service
+    logger.info("[ORDERING-API] PaymentService registered (demo QR enabled)")
+
+
 def get_ordering_service() -> OrderingService:
     if _ordering_service is None:
         raise RuntimeError("OrderingService not initialised. Call init_ordering_service() first.")
     return _ordering_service
 
 
+def get_payment_service() -> PaymentService:
+    """Resolve the payment service, or 404 when the feature is disabled."""
+    if _payment_service is None:
+        raise HTTPException(status_code=404, detail="Payment feature is disabled")
+    return _payment_service
+
+
 ServiceDep = Annotated[OrderingService, Depends(get_ordering_service)]
+PaymentDep = Annotated[PaymentService, Depends(get_payment_service)]
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +182,43 @@ async def confirm_order(order_id: int, service: ServiceDep) -> Order:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     logger.info("[ORDERING-API] Order ORD-%05d confirmed ✓", confirmed.order_id)
     return confirmed
+
+
+# ---------------------------------------------------------------------------
+# Payment (demo)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/orders/{order_id}/payment",
+    response_model=PaymentIntent,
+    summary="Get demo payment QR for a confirmed order",
+)
+async def get_order_payment(
+    order_id: int, service: ServiceDep, payment: PaymentDep
+) -> PaymentIntent:
+    """Return the demo payment intent (incl. QR code) for a confirmed order.
+
+    The customer screen calls this once the cart flips to ``confirmed`` and
+    renders the returned SVG QR beneath the cart.
+
+    ⚠️  DEMO ONLY — the QR encodes a non-routable payee handle, so it cannot
+    move real money.
+
+    Raises:
+        HTTPException: 404 when the order does not exist or the payment
+            feature is disabled; 422 when the order is still a draft.
+    """
+    logger.info("[ORDERING-API] GET /orders/%d/payment", order_id)
+    order = await service.get_order(order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail=f"Order not found: {order_id}")
+    try:
+        return payment.create_intent(order)
+    except ValueError as exc:
+        # Draft cart — the total is still changing, so quoting an amount here
+        # would be wrong. The UI only asks after confirmation anyway.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

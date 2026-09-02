@@ -1,7 +1,7 @@
 # QuickBite Express — Product Catalogue
 # Source: knowledge-base-samples/QuickBite-M.md
 # Format: product_id, name, category, price (INR)
-# Categories: burgers, wraps, pizza, beverages, sides, desserts, breakfast
+# Categories: burgers, wraps, pizza, beverages, hot-beverages, sides, desserts, breakfast
 
 products:
   # ── Burgers ─────────────────────────────────────────────────────────
@@ -177,4 +177,85 @@ products:
     name: "Vanilla Soft Serve"
     category: desserts
     price: 59.0
+    is_veg: true
+
+  # ── Tea & Coffee (hot-beverages) ─────────────────────────────────────
+  # Freshly brewed hot drinks. Kept as their own category (not `beverages`,
+  # which holds the chilled/fizzy range) so the kiosk can show them as a
+  # dedicated section and so "show me the teas"/"what coffees do you have"
+  # filter down to just these. Cold Coffee (DRINK-004) intentionally stays
+  # under `beverages` — it is served chilled.
+  - product_id: TEA-001
+    name: "Masala Chai (200 ml)"
+    category: hot-beverages
+    price: 49.0
+    is_veg: true
+    is_bestseller: true
+
+  - product_id: TEA-002
+    name: "Ginger Tea (200 ml)"
+    category: hot-beverages
+    price: 49.0
+    is_veg: true
+
+  - product_id: TEA-003
+    name: "Cardamom Elaichi Tea (200 ml)"
+    category: hot-beverages
+    price: 55.0
+    is_veg: true
+
+  - product_id: TEA-004
+    name: "Green Tea (200 ml)"
+    category: hot-beverages
+    price: 59.0
+    is_veg: true
+
+  - product_id: TEA-005
+    name: "Lemon Honey Tea (200 ml)"
+    category: hot-beverages
+    price: 65.0
+    is_veg: true
+
+  - product_id: TEA-006
+    name: "Kashmiri Kahwa (200 ml)"
+    category: hot-beverages
+    price: 89.0
+    is_veg: true
+
+  - product_id: COFFEE-001
+    name: "Filter Coffee (150 ml)"
+    category: hot-beverages
+    price: 59.0
+    is_veg: true
+    is_bestseller: true
+
+  - product_id: COFFEE-002
+    name: "Espresso (60 ml)"
+    category: hot-beverages
+    price: 69.0
+    is_veg: true
+
+  - product_id: COFFEE-003
+    name: "Cappuccino (200 ml)"
+    category: hot-beverages
+    price: 99.0
+    is_veg: true
+    is_bestseller: true
+
+  - product_id: COFFEE-004
+    name: "Cafe Latte (250 ml)"
+    category: hot-beverages
+    price: 109.0
+    is_veg: true
+
+  - product_id: COFFEE-005
+    name: "Americano (200 ml)"
+    category: hot-beverages
+    price: 89.0
+    is_veg: true
+
+  - product_id: COFFEE-006
+    name: "Hazelnut Mocha (250 ml)"
+    category: hot-beverages
+    price: 129.0
     is_veg: true

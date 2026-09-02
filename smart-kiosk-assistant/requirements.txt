@@ -35,3 +35,7 @@ uvicorn==0.35.0
 aiosqlite==0.20.0
 PyYAML==6.0.2
 fastmcp==2.10.0
+
+# Demo payment QR — pure-Python, zero transitive deps (chosen over
+# qrcode[pil], which would pull Pillow into the kiosk-core image).
+segno==1.6.6

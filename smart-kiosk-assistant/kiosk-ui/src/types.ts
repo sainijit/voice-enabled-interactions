@@ -64,6 +64,29 @@ export interface UpsellSuggestion {
   reason: string;
 }
 
+/**
+ * Demo payment intent for a confirmed order (kiosk-core `/orders/{id}/payment`).
+ *
+ * DEMO ONLY — `qr_svg_data_uri` encodes a non-routable payee handle, so
+ * scanning it with a real payment app cannot transfer money. `demo_banner`
+ * must always be rendered alongside the QR.
+ */
+export interface PaymentIntent {
+  order_id: number;
+  order_ref: string;
+  amount: number;
+  currency: string;
+  payee_name: string;
+  payload: string;
+  qr_svg_data_uri: string;
+  qr_size_px: number;
+  is_demo: boolean;
+  demo_banner: string;
+  /** Seconds before the UI simulates a successful payment. 0 disables it. */
+  simulated_success_after_seconds: number;
+  success_message: string;
+}
+
 // ── KPIs ────────────────────────────────────────────────────────────────────
 export interface KpiData {
   // raw merged model-info + perf; rendered defensively in ModelKpis

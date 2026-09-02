@@ -16,6 +16,7 @@ export const endpoints = {
   // ordering
   products: '/api/v1/products',
   order: (orderId: number) => `/api/v1/orders/${orderId}`,
+  orderPayment: (orderId: number) => `/api/v1/orders/${orderId}/payment`,
   currentOrder: (userId: string) =>
     `/api/v1/users/${encodeURIComponent(userId)}/orders/current`,
   upsell: '/api/v1/upsell',

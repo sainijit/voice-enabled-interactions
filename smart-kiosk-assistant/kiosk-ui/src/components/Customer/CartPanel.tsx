@@ -1,5 +1,6 @@
 import { useOrderTracking } from '../../hooks/useOrderTracking';
 import { formatCurrency, formatOrderId } from '../../api/orderingApi';
+import { PaymentQr } from './PaymentQr';
 
 interface CartPanelProps {
   active: boolean;
@@ -68,9 +69,12 @@ export function CartPanel({ active }: CartPanelProps) {
             </div>
 
             {isConfirmed ? (
-              <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-center text-xs text-green-700">
-                🎉 Thank you! Your order {formatOrderId(order.order_id)} is confirmed.
-              </p>
+              <>
+                <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-center text-xs text-green-700">
+                  🎉 Thank you! Your order {formatOrderId(order.order_id)} is confirmed.
+                </p>
+                <PaymentQr orderId={order.order_id} />
+              </>
             ) : suggestions.length > 0 ? (
               <div className="mt-4">
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">

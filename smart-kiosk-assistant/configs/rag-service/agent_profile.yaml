@@ -108,7 +108,14 @@ tool_roles:
   upsell_read:      "^get_upsell"
   # Tools whose user_id argument is stripped from the model schema and injected
   # server-side by the rag-service (_mcp_fn). Set to "" to disable injection.
-  user_id_injected: "^(place|remove_from|cancel)_order$|^confirm_active_order$|^get_current_order$"
+  #
+  # update_order MUST be included: it takes an order_id the model routinely
+  # hallucinates (observed live: `order_id: 12345` one turn after a real order
+  # was created). kiosk-core recovers from a wrong id by falling back to the
+  # customer's real open draft — but that recovery is keyed on user_id, so
+  # without injection the lookup runs as "anonymous", finds no cart, and the
+  # add is rejected outright even though the customer has a valid open order.
+  user_id_injected: "^(place|update|remove_from|cancel)_order$|^confirm_active_order$|^get_current_order$"
   # Tools whose dietary argument is injected server-side. Set to "" to disable.
   dietary_injected: "^(place|update)_order$|^(list_products|get_popular_products)$"
 
@@ -156,7 +163,9 @@ agent_instruction:
 
     4b. BROWSE WHOLE MENU → list_categories (not list_products). Name the categories, ask which to see.
 
-    4c. OPEN SUGGESTION ("suggest something to drink", "what do you recommend", "what's your most ordered dish", "show me your favourites/bestsellers") with no specific item and nothing in the cart to base a pairing on → get_popular_products(category), inferring category from what they named (drink/beverage → beverages) or omitting it for a restaurant-wide answer. List returned items with name and price. Never call get_upsell_suggestions here — that tool requires real cart product_ids and fabricates a result without them. Empty result: say nothing is flagged popular in that category, ask what they'd like instead. Never state a dish or price that is not in the result.
+    4c. PREFERENCE WITH A CONSTRAINT get_popular_products/list_products cannot filter on — spice level ("less spicy", "mild"), an ingredient to avoid ("no garlic"), an allergen, or an age group ("for the kids", "something for children") → call knowledge_lookup with the customer's exact words instead. The knowledge base has a curated Recommendations section with real menu items and prices for exactly these requests. knowledge_lookup is the ONLY tool this request needs — do NOT also call get_popular_products or list_products in the same turn, before or after it; those tools carry no spice/allergen/age metadata, cannot be filtered by any category the catalogue recognises, and will surface an unrelated or empty result that must NEVER override the knowledge_lookup answer. Read back item NAME and PRICE verbatim from the knowledge_lookup result only, in one or two spoken sentences — never recite the knowledge excerpt verbatim, never speak markdown syntax (e.g. ">", "**", "#").
+
+    4d. OPEN SUGGESTION WITH NO CONSTRAINT ("suggest something to drink", "what do you recommend", "what's your most ordered dish", "show me your favourites/bestsellers") with no specific item, no constraint (see 4c), and nothing in the cart to base a pairing on → get_popular_products(category), inferring category from what they named (drink/beverage → beverages; tea/chai/coffee → hot-beverages) or omitting it for a restaurant-wide answer. List returned items with name and price. Never call get_upsell_suggestions here — that tool requires real cart product_ids and fabricates a result without them. Empty result: say nothing is flagged popular in that category, ask what they'd like instead. Never state a dish or price that is not in the result.
 
     5. MANAGE / CONFIRM — "show my order", "what's my total", "status of my order", "track my order", "did my order go through" → get_current_order(user_id). "confirm / yes / place it" → confirm_active_order. Only say the order is confirmed after the tool returns successfully; read back the order_id exactly as the tool returned it. Never invent or reformat an order_id.
 
