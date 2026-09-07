@@ -41,8 +41,19 @@ class AnalyzerClient:
         """
         path = Path(file_path)
         data: dict = {"temperature": str(temperature)}
-        if language:
-            data["language"] = language
+        # Always send the `language` field explicitly. The analyzer's
+        # /v1/audio/transcriptions endpoint declares
+        # `language: str | None = Form("en")` — if the field is OMITTED
+        # from the multipart body, FastAPI applies that "en" default
+        # regardless of our intent. A genuinely EMPTY string ("") is also
+        # treated as "not provided" by Starlette's multipart form parser
+        # (confirmed empirically), so it silently falls back to "en" too.
+        # A single space survives multipart parsing as a real value, and
+        # the analyzer's own `_normalize_optional_text()` strips it back
+        # down to None — this is required to genuinely leave the language
+        # unset, e.g. for English-only ASR checkpoints
+        # (distil-whisper/distil-small.en) that reject any language token.
+        data["language"] = language if language else " "
         if diarization:
             data["diarization"] = "true"
             data["response_format"] = "verbose_json"

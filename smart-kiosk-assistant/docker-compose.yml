@@ -264,6 +264,13 @@ services:
     restart: unless-stopped
 
   text-to-speech:
+    # Built locally from a sibling edge-ai-libraries checkout so the Kokoro
+    # TTS engine (added there, not upstream) is available. Comment out
+    # `build:` and rely on `image:` alone to go back to pulling the
+    # upstream prebuilt image (SpeechT5/Qwen only, no Kokoro).
+    build:
+      context: ../../edge-ai-libraries/microservices/text-to-speech
+      dockerfile: Dockerfile
     image: ${REGISTRY:-intel}/text-to-speech:${RELEASE_TAG:-latest}
     container_name: text-to-speech
     user: "1000:1000"
@@ -319,6 +326,14 @@ services:
       - "${RENDER_GID:-992}"
     environment:
       MPLCONFIGDIR: /tmp/matplotlib
+      # Skip LiteLLM's remote model-cost-map fetch (raw.githubusercontent.com)
+      # on first completion() call. This deployment is offline/air-gapped, so
+      # that fetch always times out (~12-15s) before falling back to the
+      # local backup anyway. Our self-hosted OVMS model isn't in either map
+      # (cloud or local), and nothing here reads litellm cost/limit data, so
+      # forcing local removes a one-time dead wait on every rag-service
+      # restart with no functional loss.
+      LITELLM_LOCAL_MODEL_COST_MAP: "true"
       # Agent LLM — points at the OVMS container
       AGENT_LLM_URL:   http://ovms-llm:8000/v3
       AGENT_LLM_MODEL: ${OVMS_MODEL_NAME:-OpenVINO/Qwen3-4B-int4-ov}
@@ -502,14 +517,36 @@ services:
       KIOSK_CORE_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
       KIOSK_CORE_RAG_URL:      http://rag-service:8020/api/v1/query
       KIOSK_CORE_TTS_URL:      http://text-to-speech:8011/v1/audio/speech
-      # Back to Ryan (US English male, bright and projecting) — the
-      # text-to-speech service's own default_speaker, and previously
-      # confirmed the loudest/fastest built-in voice (see
-      # configs/text-to-speech/config.yaml). Kabir was tried and reverted.
-      # This override is left explicit (rather than omitted) so the choice
-      # is visible here and can be swapped without touching config.yaml.
-      # Full supported_speakers list is in configs/text-to-speech/config.yaml.
-      KIOSK_CORE_TTS_VOICE:    Ryan
+      # "Ryan" was the SpeechT5/Qwen-era default (US English male, bright and
+      # projecting). The engine has since moved to Kokoro (see
+      # configs/text-to-speech/config.yaml), which has no "Ryan" voice — this
+      # override was left stale after that migration and made EVERY TTS
+      # request 400 (silent replies) until this fix. am_michael is Kokoro's
+      # closest match to the old Ryan voice and matches config.yaml's own
+      # default_speaker, so this override is now redundant but kept explicit
+      # per the original rationale: visible here, swappable without touching
+      # config.yaml. Full Kokoro voice list is in configs/text-to-speech/config.yaml.
+      KIOSK_CORE_TTS_VOICE:    am_michael
+      # ── Pre-synthesized opener ────────────────────────────────────────
+      # An ordering turn's reply is templated only after the tool returns, so
+      # the model emits no prose to stream and the customer hears ~2s of
+      # silence while the tool-call JSON is generated. A short, cached phrase
+      # is played immediately to fill that window. Must stay non-committal —
+      # it is spoken before any tool has run. Set ENABLED=false to disable.
+      KIOSK_CORE_OPENER_ENABLED: ${KIOSK_CORE_OPENER_ENABLED:-true}
+      KIOSK_CORE_OPENER_TEXT:    ${KIOSK_CORE_OPENER_TEXT:-One moment.}
+      # Adaptive endpoint: shorten the end-of-turn wait when the transcript
+      # already reads as a finished sentence. Fails closed to
+      # KIOSK_CORE_SILENCE_TIMEOUT_SECONDS when no transcript has arrived.
+      KIOSK_CORE_ENDPOINT_COMPLETE_ENABLED: ${KIOSK_CORE_ENDPOINT_COMPLETE_ENABLED:-true}
+      KIOSK_CORE_ENDPOINT_SHORT_SECONDS:    ${KIOSK_CORE_ENDPOINT_SHORT_SECONDS:-1.0}
+      KIOSK_CORE_ENDPOINT_MIN_WORDS:        ${KIOSK_CORE_ENDPOINT_MIN_WORDS:-3}
+      # Tier 2 roadmap item #4 (cumulative-snapshot ASR), adapted: skip the
+      # final tail-chunk ASR call when it holds no unflushed speech (pure
+      # trailing silence — the adaptive-pause flush already sent every real
+      # word). Default off pending live A/B measurement; see config.py for
+      # the full rationale (DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED).
+      KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED: ${KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED:-false}
       KIOSK_CORE_METRICS_URL:  http://metrics-collector:9000
       # Diarization — re-enable once HF terms are accepted for pyannote models.
       # Accept terms at: https://huggingface.co/pyannote/speaker-diarization-community-1
@@ -527,6 +564,11 @@ services:
       # vars on audio-analyzer above, which are the actual fix for pyannote
       # loading fully offline from its already-complete local cache.
       KIOSK_CORE_DIARIZATION_ENABLED: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
+      # Silero VAD (v5, onnxruntime): optional model-based alternative to the
+      # adaptive RMS VAD. Default off — RMS VAD is the well-tested default;
+      # see DEFAULT_SILERO_VAD_* in kiosk_core/config.py for the full
+      # tradeoff writeup and kiosk_core/silero_vad.py for the wrapper.
+      KIOSK_CORE_SILERO_VAD_ENABLED: ${KIOSK_CORE_SILERO_VAD_ENABLED:-false}
       # Consecutive rejected turns (speaker filter dropped every segment as
       # non-primary) required before the kiosk speaks
       # KIOSK_CORE_UNRECOGNIZED_SPEAKER_PROMPT instead of staying silent.

@@ -50,6 +50,7 @@ class AsrSpan:
     ms: float | None = None
     device: str = "CPU"
     chunks: int = 0                # number of transcribe calls summed into ms
+    final_flush_skipped: bool = False  # see config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED
 
 
 @dataclass
@@ -64,6 +65,21 @@ class TtsSpan:
 class WallTimes:
     turn_total_ms: float | None = None
     time_to_first_audio_ms: float | None = None
+    # How long the endpoint waited in trailing silence before committing the
+    # turn (1.5s fixed, or KIOSK_CORE_ENDPOINT_SHORT_SECONDS when the
+    # transcript already read as a finished sentence). The customer sits
+    # through this, so any voice-to-voice figure has to include it.
+    endpoint_wait_ms: float | None = None
+    # Customer's last word -> first sound out of the speaker. This is the
+    # "voice to voice" clock, the one a customer actually feels, and the only
+    # one comparable to external voice-kiosk figures. The other timings in this
+    # trace start at the endpoint decision instead, which excludes the wait.
+    voice_to_voice_ms: float | None = None
+    # Customer's last word -> first sound that carries the ANSWER. The opener
+    # ("One moment.") is real audio and legitimately stops the silence, but it
+    # is not informative, so it is reported separately rather than allowed to
+    # flatter voice_to_voice_ms.
+    voice_to_voice_informative_ms: float | None = None
 
 
 @dataclass

@@ -1,5 +1,7 @@
 import logging
 import math
+import hashlib
+import shutil
 import tempfile
 import threading
 import time
@@ -29,6 +31,79 @@ from kiosk_core.tts_client import TtsClient
 
 
 logger = logging.getLogger(__name__)
+
+# ── Pre-synthesized opener cache ──────────────────────────────────────────
+# Rendered at most once per (text, model, voice, language) for the whole
+# process and reused by every session, so the opener never costs TTS time on
+# the hot path. Guarded by a lock because concurrent sessions can race on the
+# first turn after startup.
+_opener_lock = threading.Lock()
+_opener_cache: dict[tuple[str, str, str | None, str | None], Path | None] = {}
+
+
+def _render_opener(
+    tts_client: TtsClient,
+    text: str,
+    model: str,
+    voice: str | None,
+    language: str | None,
+    instructions: str | None,
+) -> Path | None:
+    """Return a cached WAV of ``text``, synthesising it on first use.
+
+    Args:
+        tts_client:   Client used for the one-off synthesis.
+        text:         Opener phrase. Must be non-committal — see
+                      ``config.DEFAULT_OPENER_TEXT``.
+        model:        TTS model name.
+        voice:        TTS voice, or None for the service default.
+        language:     TTS language, or None for the service default.
+        instructions: Optional TTS style instructions.
+
+    Returns:
+        Path to the rendered WAV, or None when synthesis failed. A failure is
+        cached as None so a broken TTS service cannot make every turn pay a
+        failed round-trip.
+    """
+    key = (text, model, voice, language)
+    with _opener_lock:
+        if key in _opener_cache:
+            return _opener_cache[key]
+
+        cache_dir = Path(config.DEFAULT_OPENER_CACHE_DIR)
+        if not cache_dir.is_absolute():
+            cache_dir = Path(__file__).resolve().parent.parent / cache_dir
+        # hashlib, not hash(): str hashing is salted per process (PYTHONHASHSEED),
+        # so hash() would pick a new filename on every restart and re-synthesise
+        # the opener instead of reusing the cached WAV on disk.
+        digest = hashlib.sha256("\x00".join(str(k) for k in key).encode()).hexdigest()[:16]
+        path = cache_dir / f"opener_{digest}.wav"
+
+        if path.exists() and path.stat().st_size > 0:
+            _opener_cache[key] = path
+            return path
+
+        try:
+            t0 = time.monotonic()
+            tts_client.synthesize_to_file(
+                text=text,
+                output_path=str(path),
+                model=model,
+                voice=voice,
+                language=language,
+                instructions=instructions,
+            )
+            logger.info(
+                "[OPENER] Rendered %r -> %s in %.0f ms",
+                text, path.name, (time.monotonic() - t0) * 1000,
+            )
+            _opener_cache[key] = path
+        except Exception:
+            logger.exception("[OPENER] Synthesis failed; opener disabled for this process")
+            _opener_cache[key] = None
+        return _opener_cache[key]
+
+
 _SENTENCE_PATTERN = re.compile(r"^(.+?[.!?,:;](?:[\"')\]]+)?)(?:\s+|$)", re.DOTALL)
 # Whisper hallucination tokens to strip from transcripts
 _WHISPER_JUNK = re.compile(
@@ -139,6 +214,57 @@ def _collapse_repeated_phrases(text: str) -> str:
             break
         current = collapsed
     return " ".join(current)
+
+
+# ── Adaptive endpoint: does the transcript sound finished? ──────────────────
+# A word that ends a transcript but cannot end a sentence. If the customer
+# stopped on one of these they are mid-thought, so the turn must keep the full
+# silence_timeout_seconds instead of committing early.
+_INCOMPLETE_TAIL_WORDS = frozenset(
+    # hesitation sounds
+    "um uh umm uhh er ah hmm erm".split()
+    # contractions that open a clause: "I'd like..." cut after "I'd"
+    + "i've i'd i'll i'm we've we'd we'll you've you'd you'll they've they'd "
+      "they'll wanna gonna gimme lemme".split()
+    # conjunctions, articles and determiners
+    + "and or but so like the a an to of my your our their some any those "
+      "these that this".split()
+    # auxiliaries and pronouns
+    + "do does did is are was were can could would will have has had get got "
+      "i we you they".split()
+    # prepositions that must take an object: "with...", "a burger and fries for..."
+    + "for with in on at by from about without".split()
+)
+
+_ENDPOINT_WORD_RE = re.compile(r"[^a-z' ]")
+
+
+def _looks_complete(text: str, min_words: int) -> bool:
+    """True when a transcript reads like a finished utterance.
+
+    Used only to SHORTEN the end-of-turn wait, never to extend it, so every
+    uncertain case must return False. An empty or not-yet-arrived transcript
+    therefore fails closed and the caller keeps the full silence timeout.
+
+    Args:
+        text: The transcript assembled so far this turn.
+        min_words: Fewest words that may be judged complete.
+
+    Returns:
+        Whether the turn may be ended early.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    # A trailing comma is an explicit continuation, whatever the words are.
+    if raw.endswith(","):
+        return False
+    words = _ENDPOINT_WORD_RE.sub("", raw.lower()).split()
+    if len(words) < min_words:
+        return False
+    # Whisper punctuates fragments with "?" and ".", so punctuation cannot
+    # rescue a dangling word — judge on the final word itself.
+    return words[-1] not in _INCOMPLETE_TAIL_WORDS
 
 
 def _assemble_transcript(parts: list[str]) -> str:
@@ -337,6 +463,15 @@ class BaseAudioSession:
         self._speech_started = False
         self._captured_samples = 0
         self._source_kind = "audio"
+        # True once any speech frame has landed in the *current* chunk_frames
+        # buffer since it was last cleared by a flush. Reset alongside
+        # chunk_frames on every flush (timed cap, adaptive pause, or final).
+        # Used only when KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED is set —
+        # see config.py for the full rationale.
+        self._chunk_has_speech = False
+        # Count of turns where the final tail-chunk flush was skipped because
+        # it held no unflushed speech, purely for observability/metrics.
+        self._final_flush_skipped = False
 
         # ── Adaptive VAD state ─────────────────────────────────────────────
         # `request.silence_threshold` is the seed/fallback gate. When adaptive
@@ -360,6 +495,15 @@ class BaseAudioSession:
         self._t_agent_start: float | None = None    # just before agent HTTP call
         self._t_agent_end: float | None = None      # agent reply received
         self._t_first_tts: float | None = None      # first TTS sentence queued
+        self._t_first_audio: float | None = None    # first audio available (opener or first sentence)
+        # Trailing silence the endpoint waited through before committing the
+        # turn. Needed to report voice-to-voice latency, because every other
+        # timestamp in the trace starts after this wait has already elapsed.
+        self._endpoint_wait_seconds: float | None = None
+        # First segment carrying the answer, stamped when its WAV is on disk.
+        # _t_first_tts marks when a sentence was queued for synthesis, which is
+        # ~one TTS call earlier and would understate voice-to-voice latency.
+        self._t_first_answer_audio: float | None = None
         self._t_last_tts: float | None = None       # last TTS segment written (in worker thread)
         self._t_turn_end: float | None = None       # after worker.join()
         self._tts_segment_count: int = 0
@@ -380,6 +524,28 @@ class BaseAudioSession:
         preroll_frames = max(1, int(preroll_seconds / self._frame_duration_seconds))
         self._preroll_frames: deque[np.ndarray] = deque(maxlen=preroll_frames)
         self._session_output_dir = Path(__file__).resolve().parent.parent / "generated_audio" / self.session_id
+
+        # Silero VAD (optional, feature-flagged — see config.KIOSK_CORE_SILERO_VAD_ENABLED).
+        # Only constructed when enabled: it loads an onnxruntime session, which
+        # is unnecessary overhead for the default RMS-VAD path.
+        self._silero_vad = None
+        if config.KIOSK_CORE_SILERO_VAD_ENABLED:
+            try:
+                from kiosk_core.silero_vad import SileroVAD
+
+                self._silero_vad = SileroVAD(
+                    config.DEFAULT_SILERO_VAD_MODEL_PATH,
+                    sample_rate=self.request.sample_rate,
+                    intra_op_threads=config.DEFAULT_SILERO_VAD_INTRA_OP_THREADS,
+                )
+            except Exception:
+                # Fail open: fall back to the RMS VAD rather than breaking the
+                # session if the model file/onnxruntime isn't available.
+                logger.exception(
+                    "session=%s | Silero VAD enabled but failed to initialize; falling back to RMS VAD",
+                    self.session_id,
+                )
+                self._silero_vad = None
 
     def start(self) -> None:
         with self._lock:
@@ -455,6 +621,8 @@ class BaseAudioSession:
                 # during the calibration window the seed threshold is still in
                 # force, so the first frames after calibration must be judged
                 # by the newly derived gate rather than the stale seed.
+                # Still computed/updated even when Silero VAD is active: it's
+                # cheap and keeps the RMS gate ready as an instant fallback.
                 self._update_vad_threshold(rms, is_speech)
                 if self._vad_calibrating:
                     # Still measuring the room — hold the frame in preroll
@@ -462,6 +630,14 @@ class BaseAudioSession:
                     is_speech = False
                 else:
                     is_speech = rms >= self._vad_threshold
+
+                if self._silero_vad is not None:
+                    # Model-based speech probability replaces the RMS decision
+                    # while feature-flagged on. int16-scale frame -> normalized
+                    # float32 [-1, 1], as the Silero graph expects.
+                    normalized = frame.astype(np.float32) / 32768.0
+                    speech_prob = self._silero_vad.prob(normalized)
+                    is_speech = speech_prob >= config.DEFAULT_SILERO_VAD_THRESHOLD
 
                 if not self._speech_started:
                     if is_speech:
@@ -484,6 +660,7 @@ class BaseAudioSession:
                 if is_speech:
                     silence_run_seconds = 0.0
                     _adaptive_flushed = False  # new speech: allow adaptive flush again
+                    self._chunk_has_speech = True
                 else:
                     silence_run_seconds += self._frame_duration_seconds
 
@@ -491,11 +668,13 @@ class BaseAudioSession:
                 if self._chunk_duration_seconds(chunk_frames) >= self.request.chunk_seconds:
                     # Enqueue for the background flush worker instead of
                     # transcribing inline — see the _flush_queue docstring in
-                    # __init__ for why this must not block this loop.
-                    self._flush_queue.put(chunk_frames)
+                    # __init__ for why this must not block this loop. Not the
+                    # final chunk — speech may still be ongoing.
+                    self._flush_queue.put((chunk_frames, False))
                     chunk_frames = []
                     silence_run_seconds = 0.0
                     _adaptive_flushed = False
+                    self._chunk_has_speech = False
                     continue
 
                 # ── Adaptive pause flush ────────────────────────────────────
@@ -523,14 +702,53 @@ class BaseAudioSession:
                         silence_run_seconds,
                         self._chunk_duration_seconds(chunk_frames),
                     )
-                    self._flush_queue.put(chunk_frames)
+                    # Not the final chunk — see DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED
+                    # in config.py for why this one is flagged non-final.
+                    self._flush_queue.put((chunk_frames, False))
                     chunk_frames = []
                     _adaptive_flushed = True
+                    self._chunk_has_speech = False
                     # Do NOT reset silence_run_seconds — we're still in silence,
                     # the endpoint counter keeps running toward silence_timeout_seconds.
 
                 # ── Endpoint (trailing silence) ─────────────────────────────
+                # Two waits, not one. A transcript that reads as a finished
+                # sentence commits at endpoint_short_seconds; anything that
+                # looks mid-thought keeps the full silence_timeout_seconds.
+                # _looks_complete fails closed, so if the adaptive flush's ASR
+                # has not landed yet this is exactly the old fixed behaviour.
+                if (
+                    config.DEFAULT_ENDPOINT_COMPLETE_ENABLED
+                    and silence_run_seconds >= config.DEFAULT_ENDPOINT_SHORT_SECONDS
+                    and silence_run_seconds < self.request.silence_timeout_seconds
+                    # The tail has been flushed, so no un-transcribed speech is
+                    # held back. chunk_frames is NOT a usable test here: every
+                    # frame is appended to it, silence included, so it refills
+                    # the moment the adaptive flush clears it.
+                    and _adaptive_flushed
+                    # ...and every flushed chunk has been transcribed. Without
+                    # this, an in-flight tail could leave a truncated transcript
+                    # that still reads as a finished sentence ("Order one
+                    # classic"), and the turn would commit on the wrong words.
+                    and self._flush_queue.unfinished_tasks == 0
+                    and _looks_complete(
+                        _assemble_transcript(self.transcript_parts),
+                        config.DEFAULT_ENDPOINT_MIN_WORDS,
+                    )
+                ):
+                    logger.info(
+                        "[ENDPOINT] session=%s | early commit at %.2fs "
+                        "(transcript reads complete; saved %.2fs)",
+                        self.session_id,
+                        silence_run_seconds,
+                        self.request.silence_timeout_seconds - silence_run_seconds,
+                    )
+                    self._endpoint_wait_seconds = silence_run_seconds
+                    end_reason = "silence_timeout"
+                    break
+
                 if silence_run_seconds >= self.request.silence_timeout_seconds:
+                    self._endpoint_wait_seconds = silence_run_seconds
                     end_reason = "silence_timeout"
                     break
 
@@ -548,9 +766,29 @@ class BaseAudioSession:
         # The final chunk is enqueued the same way as every mid-stream chunk —
         # the worker's own exception handling (see _flush_worker) already
         # treats any single chunk's ASR failure as non-fatal, so there is
-        # nothing left for this call site to catch.
-        if chunk_frames and self._speech_started:
-            self._flush_queue.put(chunk_frames)
+        # nothing left for this call site to catch. This IS the final chunk —
+        # always keep full diarization on it regardless of
+        # DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED (see config.py).
+        #
+        # See config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED: when set, and
+        # nothing in chunk_frames is unflushed speech (the adaptive-pause
+        # flush already sent every real word — chunk_frames is trailing
+        # silence only), skip this call entirely rather than pay Whisper's
+        # fixed per-call round trip to transcribe silence into "".
+        if (
+            chunk_frames
+            and self._speech_started
+            and (config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED is False or self._chunk_has_speech)
+        ):
+            self._flush_queue.put((chunk_frames, True))
+        elif chunk_frames and self._speech_started:
+            self._final_flush_skipped = True
+            logger.info(
+                "[CHUNK] session=%s | skipped empty final tail-chunk flush "
+                "(%.2fs of silence, no unflushed speech since last flush)",
+                self.session_id,
+                self._chunk_duration_seconds(chunk_frames),
+            )
 
         # Signal the worker to stop after draining everything queued so far,
         # then block until it has actually finished — _finalize_run (called
@@ -586,8 +824,9 @@ class BaseAudioSession:
             try:
                 if item is None:
                     break
+                frames, is_final = item
                 try:
-                    self._flush_chunk(item)
+                    self._flush_chunk(frames, is_final)
                 except Exception:
                     logger.exception(
                         "Audio session %s: chunk flush failed (non-fatal)", self.session_id,
@@ -705,8 +944,60 @@ class BaseAudioSession:
         sentence_queue.put((None, None))
         worker.join()
 
+    def _emit_opener(self) -> None:
+        """Play a cached, non-committal opener while the agent turn runs.
+
+        Ordering turns emit only a tool call — the spoken reply is templated
+        after the tool returns — so there is no model text to stream during the
+        ~2 s the LLM spends generating tool-call JSON. This publishes a
+        pre-rendered segment at index 0 (model sentences start at 1) so the
+        customer hears something immediately.
+
+        The segment is a plain file copy, so it costs no TTS round-trip. Any
+        failure is swallowed: the opener is a latency optimisation and must
+        never be able to break a turn.
+        """
+        if not config.DEFAULT_OPENER_ENABLED:
+            return
+        text = (config.DEFAULT_OPENER_TEXT or "").strip()
+        if not text:
+            return
+
+        source = _render_opener(
+            self.tts_client,
+            text,
+            self.request.tts_model,
+            self.request.tts_voice,
+            self.request.tts_language,
+            self.request.tts_instructions,
+        )
+        if source is None:
+            return
+
+        try:
+            destination = self._session_output_dir / "response_000.wav"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            with self._lock:
+                if self._t_first_audio is None:
+                    self._t_first_audio = time.monotonic()
+                self._t_last_tts = time.monotonic()
+                self.tts_audio_segments.append(
+                    {
+                        "index": 0,
+                        "text": text,
+                        "audio_file": str(destination),
+                    }
+                )
+            logger.info("[OPENER] session=%s emitted %r", self.session_id, text)
+        except Exception:
+            logger.exception("[OPENER] Failed to publish opener for session %s", self.session_id)
+
     def _stream_rag_response(self, transcript: str) -> None:
         pending_text = ""
+        # Emitted before the agent call so the customer hears it while the
+        # model is still generating the turn's tool call.
+        self._emit_opener()
         sentence_queue: Queue[tuple[int | None, str | None]] = Queue()
         worker = threading.Thread(target=self._tts_worker, args=(sentence_queue,), daemon=True)
         worker.start()
@@ -768,6 +1059,8 @@ class BaseAudioSession:
                     sentence_index += 1
                     if sentence_index == 1:
                         self._t_first_tts = time.monotonic()
+                        if self._t_first_audio is None:
+                            self._t_first_audio = self._t_first_tts
                     sentence_queue.put((sentence_index, sentence))
 
             trailing_text = pending_text.strip()
@@ -775,6 +1068,8 @@ class BaseAudioSession:
                 sentence_index += 1
                 if sentence_index == 1:
                     self._t_first_tts = time.monotonic()
+                    if self._t_first_audio is None:
+                        self._t_first_audio = self._t_first_tts
                 sentence_queue.put((sentence_index, trailing_text))
 
             # If agent_end wasn't set (empty reply), set it now
@@ -824,8 +1119,38 @@ class BaseAudioSession:
         agent_total_ms = _ms(t_agent_s, t_end)
         # TTS = from first sentence queued to last segment written
         tts_ms = _ms(t_first, t_last)
-        # Time to first audio = from agent call start to first TTS sentence queued
-        ttfa_ms = _ms(t_agent_s, t_first)
+        # Time to first audio = from end of speech (t0, stamped by
+        # _finalize_run) to the moment the first segment became available.
+        #
+        # Measured from t0 rather than from agent_start because the opener is
+        # published *before* the agent call starts, which would otherwise make
+        # this negative. t0 is also the more honest boundary: it is what the
+        # customer actually waits through after they stop talking.
+        ttfa_ms = _ms(t0, self._t_first_audio or t_first)
+        # Voice to voice: the customer's last word to the first sound. t0 is
+        # stamped at the endpoint decision, so the silence the customer sat
+        # through has to be added back on. This is the clock external
+        # voice-kiosk numbers use; ttfa_ms alone understates the wait.
+        endpoint_wait_ms = (
+            round(self._endpoint_wait_seconds * 1000, 1)
+            if self._endpoint_wait_seconds is not None
+            else None
+        )
+        v2v_ms = (
+            round(endpoint_wait_ms + ttfa_ms, 1)
+            if endpoint_wait_ms is not None and ttfa_ms is not None
+            else None
+        )
+        # Same clock, but to the first sound that actually answers. The opener
+        # is deliberately excluded here: it breaks the silence but tells the
+        # customer nothing, so counting it as "the reply" would flatter the
+        # number. Uses the on-disk stamp, not the queue stamp.
+        informative_ms = _ms(t0, self._t_first_answer_audio)
+        v2v_informative_ms = (
+            round(endpoint_wait_ms + informative_ms, 1)
+            if endpoint_wait_ms is not None and informative_ms is not None
+            else None
+        )
         # Wall E2E: genuinely end-to-end — from the first speech frame captured
         # (so audio capture and ASR are included) to the last TTS segment
         # written. Falls back to turn_start when no speech was ever detected.
@@ -845,8 +1170,11 @@ class BaseAudioSession:
             wall=WallTimes(
                 turn_total_ms=wall_total_ms,
                 time_to_first_audio_ms=ttfa_ms,
+                endpoint_wait_ms=endpoint_wait_ms,
+                voice_to_voice_ms=v2v_ms,
+                voice_to_voice_informative_ms=v2v_informative_ms,
             ),
-            asr=AsrSpan(ms=asr_ms, chunks=self._asr_chunks),
+            asr=AsrSpan(ms=asr_ms, chunks=self._asr_chunks, final_flush_skipped=self._final_flush_skipped),
             agent=AgentSpan(
                 ttft_ms=ttft_ms,
                 total_ms=agent_total_ms,
@@ -920,6 +1248,13 @@ class BaseAudioSession:
                     self._apply_tts_gain(output_path)
                 with self._lock:
                     self._t_last_tts = time.monotonic()
+                    # First segment that carries the ANSWER (the opener is
+                    # index 0 and is written by _emit_opener, never here).
+                    # Stamped on write, not on queue: queuing a sentence does
+                    # not make a sound, and the synthesis in between is a real
+                    # part of what the customer waits through.
+                    if self._t_first_answer_audio is None:
+                        self._t_first_answer_audio = self._t_last_tts
                     self.tts_audio_segments.append(
                         {
                             "index": sentence_index,
@@ -1183,21 +1518,28 @@ class BaseAudioSession:
         total_samples = sum(len(frame) for frame in frames)
         return total_samples / self.request.sample_rate
 
-    def _flush_chunk(self, frames: list[np.ndarray]) -> None:
+    def _flush_chunk(self, frames: list[np.ndarray], is_final: bool = True) -> None:
         audio = np.concatenate(frames, axis=0)
         temp_path = self._write_temp_wav(audio)
         try:
             duration = len(audio) / self.request.sample_rate
+            # Full diarization always runs on the final tail chunk. On
+            # intermediate chunks (max-chunk-size-cap flush, adaptive-pause
+            # pre-warm flush) it is gated by DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED
+            # — see config.py for the latency/accuracy tradeoff this encodes.
+            diarization_requested = config.DEFAULT_DIARIZATION_ENABLED and (
+                is_final or config.DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED
+            )
             logger.info(
-                "[CHUNK] session=%s | flushing %.2fs of audio, diarization=%s",
-                self.session_id, duration, config.DEFAULT_DIARIZATION_ENABLED,
+                "[CHUNK] session=%s | flushing %.2fs of audio, is_final=%s, diarization=%s",
+                self.session_id, duration, is_final, diarization_requested,
             )
             _t_asr = time.monotonic()
             payload = self.client.transcribe_file(
                 temp_path,
                 language=self.request.language,
                 temperature=self.request.temperature,
-                diarization=config.DEFAULT_DIARIZATION_ENABLED,
+                diarization=diarization_requested,
                 session_id=self._analyzer_session_id,
                 speaker_scope_id=self.agent_session_id,
                 # Bias Whisper towards the real menu vocabulary. Without it the
@@ -1268,10 +1610,10 @@ class BaseAudioSession:
                 else:
                     raw_text = ""
 
-            if segments and config.DEFAULT_DIARIZATION_ENABLED:
+            if segments and diarization_requested:
                 text = self._filter_target_speaker(segments)
             else:
-                if config.DEFAULT_DIARIZATION_ENABLED and not segments:
+                if diarization_requested and not segments:
                     logger.info(
                         "[CHUNK] session=%s | diarization enabled but no segments returned — using flat text",
                         self.session_id,
@@ -1695,6 +2037,11 @@ class TextQuerySession(BaseAudioSession):
             sentence_index, sentence = sentence_queue.get()
             if sentence_index is None or sentence is None:
                 return
+
+    def _emit_opener(self) -> None:
+        # Text queries produce no audio at all, so there is no silent gap to
+        # fill and an opener segment would be a spurious audio artefact.
+        return
 
 
 class FileAudioSession(BaseAudioSession):

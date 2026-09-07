@@ -9,10 +9,42 @@ models:
     provider: openvino # openai | openvino | whispercpp
     name: whisper-small  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
                         # whisper-small OpenVINO IR (INT8) converted to models/openvino/whisper-small-int8/
+                        # REVERTED from distil-whisper/distil-small.en (2026-09-07 evaluation): distil-small.en
+                        # measured ~2-3x faster in isolated single-shot benchmarks (215-277ms vs 533-584ms,
+                        # GPU/NPU, full ~8.4s clip), BUT on THIS hardware's NPU + openvino_genai stack it has
+                        # a confirmed state-corruption bug: after the shared WhisperPipeline singleton
+                        # processes one clip length then a DIFFERENT clip length (e.g. the 1s silent warmup
+                        # then a real 2.78s utterance — exactly our production request pattern), every
+                        # subsequent .generate() call on that pipeline instance returns garbled/wrong text
+                        # (e.g. "you" instead of the real order) and NEVER recovers, even reverting to a
+                        # clip length that worked before. Reproduced directly against openvino_genai
+                        # WhisperPipeline, isolated from our diarization/pipeline code. whisper-small does
+                        # NOT exhibit this bug (verified with the same repro script) — it handles variable-
+                        # length calls on the same pipeline instance correctly, matching real usage.
+                        # distil-small.en on GPU (not NPU) does NOT show this corruption either — so it
+                        # remains a candidate IF re-adopted on GPU, but that reintroduces GPU contention
+                        # with ovms-llm/text-to-speech, the original reason NPU was chosen. Revisit only
+                        # after this NPU-specific openvino_genai bug is understood/fixed upstream, or if
+                        # GPU headroom is confirmed acceptable.
                         # Use whisper-base on CPU/NPU; whisper-small on GPU for better accuracy.
                         # OpenVINO GPU target: <300ms for typical 1-2s kiosk commands.
-    device: CPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
-                # Change to GPU or NPU for hardware-accelerated inference.
+    device: NPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
+                # Enabled after fixing ACCEL_MOUNT_PATH (was /dev/null, silently
+                # disabling NPU passthrough — see .env). NPU is now enumerated
+                # correctly. An initial A/B (NPU ~950-1,300ms vs an earlier GPU
+                # baseline of 660ms) looked like a regression, but that comparison
+                # was confounded: diarization was silently still enabled
+                # (AUDIO_ANALYZER__MODELS__ASR__DIARIZATION env override defaults
+                # to true regardless of this file) and the GPU baseline used a
+                # different benchmark clip. A controlled re-test — same clip,
+                # same warm container, diarization forced off for the isolation
+                # test only — showed NPU (542-557ms) and GPU (533-584ms)
+                # effectively tied for whisper-small on this hardware. Keeping
+                # NPU: it frees the iGPU for ovms-llm/text-to-speech, matching
+                # the reference prototype's (kiosk-voice-handoff.pdf) rationale
+                # for putting ASR on NPU even though it uses a smaller distilled
+                # model (distil-whisper distil-small.en) that we don't have
+                # exported offline.
     weight_format: int8 # OpenVINO: int8 | fp16 | null; int8 for whisper-small-int8 OV model
     temperature: 0.0
     diarization: True        # set True to enable pyannote speaker diarization

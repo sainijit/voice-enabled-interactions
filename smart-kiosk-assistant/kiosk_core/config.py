@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 DEFAULT_ANALYZER_URL = os.getenv(
@@ -110,6 +111,41 @@ HOST_MIC = os.getenv("HOST_MIC", "false").lower() not in ("false", "0", "no")
 # into a controlled one. The pad is intentionally non-zero — clauses should
 # breathe — but short enough to sound continuous.
 DEFAULT_TTS_TRIM_ENABLED = os.getenv("KIOSK_CORE_TTS_TRIM_ENABLED", "true").lower() not in ("false", "0", "no")
+
+# ── Speech normalization ───────────────────────────────────────────────────
+# The reply text/UI keep "₹169" and "8 AM" as written; speecht5 reads those
+# literally (symbol-and-digit tokens) rather than as a spoken price/time.
+# Adapted from the reference prototype's pipeline/speech.py (kiosk-voice-lab
+# -main), with ₹/Rs/INR support added for this restaurant's rupee prices.
+# Deterministic regex/string work, no model involved — negligible latency
+# cost. Applied inside TtsClient.synthesize_to_file so every call path
+# (streamed clauses, the pre-synthesized opener) is covered.
+DEFAULT_TTS_SPEECH_NORMALIZE_ENABLED = os.getenv(
+    "KIOSK_CORE_TTS_SPEECH_NORMALIZE_ENABLED", "true"
+).lower() not in ("false", "0", "no")
+
+# ── Pre-synthesized opener ────────────────────────────────────────────────
+# On an ordering turn the model emits only a tool call — no prose — and the
+# spoken reply is templated from the tool result afterwards. Measured on this
+# stack: the 33-token tool-call JSON costs ~1.6 s at ~48.5 ms/token, so the
+# customer hears nothing for ~2 s after they stop speaking.
+#
+# Nothing can shorten that window from inside the turn (the reply does not
+# exist yet), but it can be *filled*: a short phrase is synthesised once,
+# cached on disk, and played the instant the turn ends while the agent call is
+# still in flight. Time-to-first-audio drops from ~2 s to a file copy.
+#
+# The text MUST stay non-committal. Speech cannot be recalled, and the opener
+# is spoken before any tool has run — so it must never name an item, quantity,
+# price, or outcome, otherwise it can contradict the menu/removal/confirm
+# guards that rewrite the real reply when a tool fails.
+DEFAULT_OPENER_ENABLED = os.getenv(
+    "KIOSK_CORE_OPENER_ENABLED", "true"
+).lower() not in ("false", "0", "no")
+DEFAULT_OPENER_TEXT = os.getenv("KIOSK_CORE_OPENER_TEXT", "One moment.")
+# Rendered opener cache. Synthesised once per (text, voice, language) and
+# reused for every turn and every session, so TTS never sits on the hot path.
+DEFAULT_OPENER_CACHE_DIR = os.getenv("KIOSK_CORE_OPENER_CACHE_DIR", "./storage/openers")
 
 # When list_products is called with no category, return a per-category summary
 # instead of every product. The catalogue is 26 items: reciting it costs ~19 s
@@ -228,6 +264,29 @@ DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SE
 # proven to avoid the mid-word splits above, and it only became effective again
 # because the endpoint is now longer than it. See the INVARIANT note above.
 DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.70"))
+# ── Adaptive endpoint (sentence-completeness shortcut) ──────────────────────
+# DEFAULT_SILENCE_TIMEOUT_SECONDS above has to be long enough for the WORST
+# case: a customer hesitating mid-sentence. That makes every turn pay the
+# hesitation tax, including the majority that end on an obviously finished
+# sentence ("I would like one classic chicken burger").
+#
+# A loudness detector cannot tell those two apart, so it needs one fixed wait.
+# Reading the transcript can: if the words so far end on a filler ("um"), a
+# dangling function word ("and", "with", "I'd") or a comma, the customer is
+# mid-thought and we keep the full timeout. Otherwise we commit early.
+#
+# This only ever SHORTENS the wait, and only when a transcript already exists.
+# If ASR has not returned yet, the text is empty or stale, the check fails
+# closed and behaviour is identical to the fixed timeout.
+#
+# INVARIANT: must be strictly greater than DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS
+# (0.70) and strictly less than DEFAULT_SILENCE_TIMEOUT_SECONDS (1.5), so the
+# adaptive flush has fired and its ASR result has had time to land.
+DEFAULT_ENDPOINT_COMPLETE_ENABLED = os.getenv("KIOSK_CORE_ENDPOINT_COMPLETE_ENABLED", "true").lower() == "true"
+DEFAULT_ENDPOINT_SHORT_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_SHORT_SECONDS", "1.0"))
+# Minimum words before a transcript may be judged "finished". Two words or
+# fewer is almost always a fragment mid-utterance ("I want...").
+DEFAULT_ENDPOINT_MIN_WORDS = int(os.getenv("KIOSK_CORE_ENDPOINT_MIN_WORDS", "3"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))
 
@@ -279,6 +338,34 @@ DEFAULT_VAD_FLOOR_ADAPT_DOWN = float(os.getenv("KIOSK_CORE_VAD_FLOOR_ADAPT_DOWN"
 DEFAULT_VAD_FLOOR_ADAPT_UP = float(os.getenv("KIOSK_CORE_VAD_FLOOR_ADAPT_UP", "0.005"))
 DEFAULT_BLOCK_DURATION_SECONDS = float(os.getenv("KIOSK_CORE_BLOCK_DURATION_SECONDS", "0.1"))
 DEFAULT_PREROLL_SECONDS = float(os.getenv("KIOSK_CORE_PREROLL_SECONDS", "0.3"))
+
+# Silero VAD (v5, onnxruntime): an optional, model-based alternative to the
+# adaptive RMS VAD above. Default OFF — the RMS VAD is well-tested (see
+# tests/unit/test_adaptive_vad.py) and remains the safe default. When
+# enabled, Silero's speech probability REPLACES the RMS-derived is_speech
+# decision in the per-frame loop (see BaseAudioSession._process_frame_stream);
+# the RMS floor/gate calibration still runs alongside it (cheap, harmless)
+# but its classification is ignored while Silero is active.
+KIOSK_CORE_SILERO_VAD_ENABLED = os.getenv("KIOSK_CORE_SILERO_VAD_ENABLED", "false").lower() not in (
+    "false",
+    "0",
+    "no",
+)
+# Bundled with this repo (~2MB) rather than fetched at runtime, since
+# kiosk-core is built fresh from source each deploy (unlike audio-analyzer/
+# text-to-speech, which pull prebuilt images with their own model-fetch
+# scripts).
+DEFAULT_SILERO_VAD_MODEL_PATH = os.getenv(
+    "KIOSK_CORE_SILERO_VAD_MODEL_PATH",
+    str(Path(__file__).resolve().parent / "models" / "silero_vad.onnx"),
+)
+# Speech-probability cutoff. 0.5 matches the reference lab's SmartEndpointer
+# threshold and Silero's own documented default.
+DEFAULT_SILERO_VAD_THRESHOLD = float(os.getenv("KIOSK_CORE_SILERO_VAD_THRESHOLD", "0.5"))
+# onnxruntime intra-op thread cap for the Silero session. Kept at 1 since the
+# model is tiny (~2MB) and does not benefit from parallelism; avoids
+# contending with the ASR/LLM/TTS pipelines' own thread pools.
+DEFAULT_SILERO_VAD_INTRA_OP_THREADS = int(os.getenv("KIOSK_CORE_SILERO_VAD_INTRA_OP_THREADS", "1"))
 DEFAULT_HTTP_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_HTTP_TIMEOUT_SECONDS", "300.0"))
 
 # Wake-word activation (openwakeword)
@@ -294,6 +381,58 @@ DEFAULT_WAKEWORD_INFERENCE_FRAMEWORK = os.getenv("KIOSK_CORE_WAKEWORD_INFERENCE_
 # Set KIOSK_CORE_DIARIZATION_ENABLED=false to revert to flat-text behavior
 # (no speaker filtering; all segments forwarded as-is).
 DEFAULT_DIARIZATION_ENABLED = os.getenv("KIOSK_CORE_DIARIZATION_ENABLED", "true").lower() not in ("false", "0", "no")
+# Diarization on INTERMEDIATE chunks only (the max-chunk-size-cap flush and
+# the adaptive-pause pre-warm flush — i.e. every chunk except the final tail
+# at true endpoint, which always keeps full diarization regardless of this
+# flag). Off by default: diarization adds ~150-220ms/chunk, which pushes the
+# adaptive flush's ASR round-trip past DEFAULT_ENDPOINT_SHORT_SECONDS and
+# effectively disables the sentence-completeness endpoint shortcut (see
+# DEFAULT_ENDPOINT_SHORT_SECONDS below) — measured landing at ~1.40-1.50s vs.
+# the 1.5s silence timeout, leaving no margin for it to ever fire early.
+# With diarization off on intermediate chunks only, ASR-only lands at
+# ~1.23-1.28s, giving the shortcut real room to save ~200-270ms on utterances
+# that read as finished.
+# TRADEOFF (accepted): an intermediate chunk's transcribed text still becomes
+# part of the final committed transcript (see _flush_chunk in
+# audio_session.py) — it is not a throwaway heuristic check. With diarization
+# off there, any bystander/secondary speech captured during that portion of
+# the utterance is NOT filtered out for that slice, unlike the final tail
+# chunk which always runs full diarization. Accepted as a reasonable
+# trade-off since the tail (last ~0.3-0.5s before endpoint) still enforces
+# speaker-filtering, and any covered utterance is short (a few seconds).
+DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED = os.getenv(
+    "KIOSK_CORE_DIARIZATION_INTERMEDIATE_ENABLED", "false"
+).lower() not in ("false", "0", "no")
+
+# ── Skip empty final tail-chunk ASR call ────────────────────────────────────
+# Tier 2 roadmap item #4 ("cumulative-snapshot ASR"), adapted to this
+# codebase's actual bottleneck rather than the reference lab's design
+# (kiosk-voice-lab-main has neither per-chunk streaming ASR nor per-chunk
+# diarization, so its periodic-snapshot mechanism does not transplant safely
+# here — see docs/discussion for the rejected full rework).
+#
+# By the time the endpoint fires, the adaptive-pause flush (see
+# DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS) has almost always already sent every
+# real word to the analyzer; the final "is_final=True" tail chunk enqueued in
+# _process_frame_stream typically contains nothing but the trailing silence
+# frames accumulated since that flush. Whisper still pays its fixed
+# per-call round-trip (~1.2-4.7s observed) to transcribe that silence into an
+# empty string — pure critical-path latency with no transcript benefit.
+#
+# When enabled, a chunk with zero speech frames since the last flush (tracked
+# per-turn in BaseAudioSession._chunk_has_speech) skips the final flush
+# entirely instead of queuing it. This is safe for the speaker-filter
+# invariant noted above (DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED): silence
+# yields no segments to filter regardless, so no verification is lost, only a
+# no-op HTTP round trip. If the tail DOES contain any unflushed speech (e.g. a
+# short trailing utterance under the adaptive flush's 0.5s minimum), the
+# final flush still runs exactly as before — diarization coverage on real
+# speech is unchanged.
+#
+# Default OFF pending live A/B measurement against the current behavior.
+DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED = os.getenv(
+    "KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED", "false"
+).lower() not in ("false", "0", "no")
 # Minimum domain-keyword overlap ratio to accept a fallback segment when the
 # primary customer is silent for an entire chunk.
 DEFAULT_SEMANTIC_FALLBACK_THRESHOLD = float(os.getenv("KIOSK_CORE_SEMANTIC_FALLBACK_THRESHOLD", "0.10"))

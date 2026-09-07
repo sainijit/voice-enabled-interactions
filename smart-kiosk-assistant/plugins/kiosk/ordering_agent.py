@@ -36,6 +36,7 @@ from agentic import domain_config
 from plugins.kiosk import item_intent_guard
 from agentic import llm_metrics
 from plugins.kiosk import menu_guard
+from plugins.kiosk import price_guard
 from plugins.kiosk import removal_guard
 from plugins.kiosk import reply_templates
 from agentic.adk_runtime import create_adk_model, create_runner, create_session_service
@@ -1203,6 +1204,17 @@ def _strip_tool_syntax(reply: str) -> str:
 # receives a half-formed clause.
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
+# Phrase (clause) boundaries: sentence terminators, plus a comma that is not
+# part of digit-grouping (e.g. the "," in "1,234" must never split). Releasing
+# at comma boundaries — not just full sentences — lets TTS start on "Sure,"
+# or "Your total is now 169 rupees," well before the model finishes the
+# sentence, shrinking time-to-first-informative-audio the same way
+# kiosk-voice-lab-main's ``speak_streaming()`` phrase splitter does. Every
+# safety condition in ``_SentenceGate._is_safe()`` still applies per phrase —
+# they are local (word-boundary) regex checks, so a claim never straddles a
+# phrase boundary undetected.
+_PHRASE_BREAK_RE = re.compile(r"(?<=[.!?])\s+|(?<!\d)(?<=,)\s+")
+
 
 def _normalise_for_compare(text: str) -> str:
     """Collapse whitespace so streamed and final text can be prefix-compared.
@@ -1233,15 +1245,20 @@ class _SentenceGate:
     because a later guard may rewrite text we would otherwise have spoken.
     """
 
-    def __init__(self, message: str, emit) -> None:
+    def __init__(self, message: str, emit, *, pregrounded: bool = False) -> None:
         """Initialise the gate.
 
         Args:
-            message: The customer's utterance, needed to detect confirm intent.
-            emit:    Callback invoked with each sentence cleared for speech.
+            message:     The customer's utterance, needed to detect confirm intent.
+            emit:        Callback invoked with each sentence cleared for speech.
+            pregrounded: Whether an authoritative ``[knowledge]`` block was
+                injected into this turn's prompt. Such a turn answers from that
+                block and is *expected* to call no tool, which relaxes
+                condition (a) below.
         """
         self._message = message
         self._emit = emit
+        self._pregrounded = pregrounded
         self._buffer = ""
         self._released: list[str] = []
         self._open = True
@@ -1266,7 +1283,26 @@ class _SentenceGate:
         #     [knowledge] markers / out-of-scope questions): it likewise only
         #     fires when `not tool_calls`, so a sentence it would replace can
         #     never have been released early.
-        if not tool_calls:
+        #
+        #     A *pre-grounded* turn is the one exception, and it is exempt for
+        #     the same reason chat() exempts it: the authoritative knowledge was
+        #     already placed in the prompt, so "no tool call" is the intended
+        #     outcome rather than a grounding failure. Every guard this
+        #     condition mirrors is itself disabled on such a turn — the
+        #     missing-tool-call retry, _force_knowledge(), and the ungrounded
+        #     reply guard are all additionally gated on `not pregrounded`.
+        #
+        #     The one whole-reply guard that is NOT pregrounded-exempt is the
+        #     catalogue-promise recovery, and it cannot collide here:
+        #     pre-grounding is only applied to a knowledge question that does
+        #     *not* match the catalogue regex, so the two are mutually
+        #     exclusive by construction.
+        #
+        #     That leaves _strip_knowledge_markers(), which does still rewrite a
+        #     pre-grounded reply when the model parrots the injected block back.
+        #     Condition (d2) below withholds exactly those sentences, so it is
+        #     load-bearing now rather than merely defensive.
+        if not tool_calls and not self._pregrounded:
             return False
         # (b) _force_confirm() replaces the reply on confirm-intent turns.
         if self._confirm_intent:
@@ -1313,13 +1349,18 @@ class _SentenceGate:
         #      TTS first.
         if removal_guard.claims_removal(sentence) and not removal_guard.current_state().succeeded:
             return False
+        # (c5) A restated total is only trustworthy when it matches this
+        #      turn's own tool result; chat() corrects a mismatch post-hoc via
+        #      price_guard.validate_reply(). See agentic/price_guard.py.
+        if price_guard.mismatched(sentence):
+            return False
         # (d) Anything that would be stripped or substituted wholesale.
         if _ERROR_PAYLOAD_RE.search(sentence) or _TOOL_SYNTAX_RE.search(sentence):
             return False
         # (d2) A parroted pre-grounding delimiter is rewritten by
-        #      _strip_knowledge_markers(). Condition (a) already withholds
-        #      pre-grounded turns (they run no tool), but this stays explicit
-        #      so the gate keeps mirroring chat() one-for-one.
+        #      _strip_knowledge_markers(). On a pre-grounded turn condition (a)
+        #      no longer withholds the reply, so this is the sole check
+        #      standing between a parroted "[knowledge]" and TTS.
         if _KNOWLEDGE_MARKER_RE.search(sentence):
             return False
         # (d3) A hallucinated citation marker is rewritten by
@@ -1336,7 +1377,11 @@ class _SentenceGate:
         return True
 
     def feed(self, delta: str, tool_calls: list[str]) -> None:
-        """Accumulate a streamed fragment and release any complete safe sentences.
+        """Accumulate a streamed fragment and release any complete safe phrases.
+
+        Releases at both sentence and comma boundaries (see
+        ``_PHRASE_BREAK_RE``) so TTS can start on an early clause instead of
+        waiting for the whole sentence.
 
         Args:
             delta:      Newly generated text.
@@ -1345,7 +1390,7 @@ class _SentenceGate:
         if not self._open or not delta:
             return
         self._buffer += delta
-        parts = _SENTENCE_END_RE.split(self._buffer)
+        parts = _PHRASE_BREAK_RE.split(self._buffer)
         # The trailing element has no terminator yet, so it stays buffered.
         self._buffer = parts.pop() if parts else ""
         for sentence in parts:
@@ -2004,6 +2049,7 @@ class OrderingAgent:
             menu_guard.record_tool_result(tool_name, result)
             removal_guard.record_tool_result(tool_name, result)
             confirm_guard.record_tool_result(tool_name, result)
+            price_guard.record_tool_result(tool_name, result)
             llm_metrics.record_guard((time.monotonic() - _guard_start) * 1000)
 
             # Refresh this session's cart/upsell memory from whatever the
@@ -2400,11 +2446,12 @@ class OrderingAgent:
         menu_guard.begin_turn()
         removal_guard.begin_turn()
         confirm_guard.begin_turn()
+        price_guard.begin_turn()
         _tool_call_count_ctx.set(_ToolCallCounter())
 
         try:
             gate = (
-                _SentenceGate(message, on_safe_sentence)
+                _SentenceGate(message, on_safe_sentence, pregrounded=pregrounded)
                 if (on_safe_sentence is not None and agent_cfg.STREAM_SENTENCES)
                 else None
             )
@@ -2641,6 +2688,18 @@ class OrderingAgent:
         if removal_refused:
             logger.error(
                 "[AGENT] Unbacked removal claim replaced with grounded refusal "
+                "| session=%s tool_calls=%s reply=%r",
+                session_id, tool_calls, reply[:160],
+            )
+
+        # A restated total is only trustworthy when it matches this turn's own
+        # tool result. Corrected in place (never blocked) — the right number
+        # is already known with certainty, so there is nothing to fall back
+        # to. See agentic/price_guard.py.
+        reply, price_corrected = price_guard.validate_reply(reply)
+        if price_corrected:
+            logger.error(
+                "[AGENT] Hallucinated total corrected against tool result "
                 "| session=%s tool_calls=%s reply=%r",
                 session_id, tool_calls, reply[:160],
             )

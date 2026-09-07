@@ -3,6 +3,7 @@ from pathlib import Path
 import httpx
 
 from kiosk_core import config
+from kiosk_core.speech_normalizer import for_speech
 
 
 class TtsClient:
@@ -19,6 +20,12 @@ class TtsClient:
         language: str | None = None,
         instructions: str | None = None,
     ) -> None:
+        # Applied here, not at each call site, so every path (streamed
+        # clauses, the pre-synthesized opener) speaks prices/times instead
+        # of reading raw symbols/digits — see speech_normalizer.py.
+        if config.DEFAULT_TTS_SPEECH_NORMALIZE_ENABLED:
+            text = for_speech(text)
+
         payload = {
             "model": model,
             "input": text,
