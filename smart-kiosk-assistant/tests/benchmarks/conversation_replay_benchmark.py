@@ -32,11 +32,13 @@ Stdlib only, consistent with the sibling benchmark.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import statistics
 import sys
 import time
 import uuid
+import wave
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -161,8 +163,19 @@ def replay_turn(
         m.error = f"harness tts failed: {exc}"
         return m
 
+    # Derive the sample rate from the synthesised WAV rather than assuming
+    # 16 kHz: the TTS backend decides the output rate (Kokoro emits 24 kHz,
+    # SpeechT5 16 kHz) and kiosk-core rejects the upload if the declared
+    # session rate disagrees with the WAV header.
+    try:
+        with wave.open(io.BytesIO(wav), "rb") as _wf:
+            wav_sample_rate = _wf.getframerate()
+    except Exception as exc:  # noqa: BLE001
+        m.error = f"could not read synthesised wav header: {exc}"
+        return m
+
     fields = {
-        "sample_rate": "16000",
+        "sample_rate": str(wav_sample_rate),
         "chunk_seconds": "4.0",
         "silence_timeout_seconds": "1.5",
         "max_session_seconds": str(max_session_seconds),

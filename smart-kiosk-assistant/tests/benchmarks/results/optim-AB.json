@@ -1,0 +1,159 @@
+{
+  "label": "optim-AB",
+  "prompt": "I would like to order one classic chicken burger",
+  "started_at": "2026-09-08T06:13:44.009578+00:00",
+  "finished_at": "2026-09-08T06:14:00.949075+00:00",
+  "config": {
+    "ovms_models": [
+      "OpenVINO/Qwen3-4B-int8-ov"
+    ],
+    "ovms_cmd": [
+      "--rest_port",
+      "8000",
+      "--port",
+      "9000",
+      "--source_model",
+      "OpenVINO/Qwen3-4B-int8-ov",
+      "--model_repository_path",
+      "/models",
+      "--task",
+      "text_generation",
+      "--tool_parser",
+      "hermes3",
+      "--enable_tool_guided_generation",
+      "false",
+      "--target_device",
+      "GPU",
+      "--cache_dir",
+      "/tmp/ov_cache",
+      "--enable_prefix_caching",
+      "true",
+      "--cache_size",
+      "4",
+      "--max_num_seqs",
+      "4",
+      "--max_num_batched_tokens",
+      "4096",
+      "--plugin_config",
+      "{\"PERFORMANCE_HINT\":\"LATENCY\"}"
+    ],
+    "ovms_image": "openvino/model_server:latest-gpu",
+    "runs": 5,
+    "warmup": 1,
+    "reuse_session": false,
+    "tier": "A"
+  },
+  "agent_runs": [
+    {
+      "run": 1,
+      "latency_ms": 2312.3,
+      "tool_calls": [
+        "place_order"
+      ],
+      "reply": "I've added Classic Chicken Burger to your order. Your total is now \u20b92704. Would you also like Classic French Fries (Regular) (\u20b989)?",
+      "error": null,
+      "session_id": "bench-d3a95f5b",
+      "llm1_ms": 2133.0,
+      "tool_ms": 163.0,
+      "llm2_ms": 10.0,
+      "tool_name": "place_order"
+    },
+    {
+      "run": 2,
+      "latency_ms": 2265.3,
+      "tool_calls": [
+        "place_order"
+      ],
+      "reply": "I've added Classic Chicken Burger to your order. Your total is now \u20b92873. Would you also like Classic French Fries (Regular) (\u20b989)?",
+      "error": null,
+      "session_id": "bench-eba461dd",
+      "llm1_ms": 2120.0,
+      "tool_ms": 127.0,
+      "llm2_ms": 11.0,
+      "tool_name": "place_order"
+    },
+    {
+      "run": 3,
+      "latency_ms": 2310.7,
+      "tool_calls": [
+        "place_order"
+      ],
+      "reply": "I've added Classic Chicken Burger to your order. Your total is now \u20b93042. Would you also like Classic French Fries (Regular) (\u20b989)?",
+      "error": null,
+      "session_id": "bench-dadaeb9f",
+      "llm1_ms": 2125.0,
+      "tool_ms": 170.0,
+      "llm2_ms": 9.0,
+      "tool_name": "place_order"
+    },
+    {
+      "run": 4,
+      "latency_ms": 2276.9,
+      "tool_calls": [
+        "place_order"
+      ],
+      "reply": "I've added Classic Chicken Burger to your order. Your total is now \u20b93211. Would you also like Classic French Fries (Regular) (\u20b989)?",
+      "error": null,
+      "session_id": "bench-29790df0",
+      "llm1_ms": 2106.0,
+      "tool_ms": 154.0,
+      "llm2_ms": 11.0,
+      "tool_name": "place_order"
+    },
+    {
+      "run": 5,
+      "latency_ms": 2269.0,
+      "tool_calls": [
+        "place_order"
+      ],
+      "reply": "I've added Classic Chicken Burger to your order. Your total is now \u20b93380. Would you also like Classic French Fries (Regular) (\u20b989)?",
+      "error": null,
+      "session_id": "bench-df9d86e0",
+      "llm1_ms": 2120.0,
+      "tool_ms": 135.0,
+      "llm2_ms": 9.0,
+      "tool_name": "place_order"
+    }
+  ],
+  "voice_runs": [],
+  "summary": {
+    "agent_turn": {
+      "count": 5,
+      "min_ms": 2265.3,
+      "mean_ms": 2286.8,
+      "median_ms": 2276.9,
+      "max_ms": 2312.3
+    },
+    "agent_tool_calls": [
+      [
+        "place_order"
+      ]
+    ],
+    "agent_split": {
+      "llm1": {
+        "count": 5,
+        "min_ms": 2106.0,
+        "mean_ms": 2120.8,
+        "median_ms": 2120.0,
+        "max_ms": 2133.0
+      },
+      "tool": {
+        "count": 5,
+        "min_ms": 127.0,
+        "mean_ms": 149.8,
+        "median_ms": 154.0,
+        "max_ms": 170.0
+      },
+      "llm2": {
+        "count": 5,
+        "min_ms": 9.0,
+        "mean_ms": 10.0,
+        "median_ms": 10.0,
+        "max_ms": 11.0
+      }
+    },
+    "agent_tool_invoked": [
+      "place_order"
+    ]
+  }
+}

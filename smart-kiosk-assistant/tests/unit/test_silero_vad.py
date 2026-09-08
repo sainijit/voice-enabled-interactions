@@ -114,3 +114,30 @@ class TestSileroVADStateHandling:
         assert np.array_equal(vad.context, np.zeros(64, dtype=np.float32))
         assert len(vad.buf) == 0
         assert vad.last_prob == 0.0
+
+
+class TestSampleRateValidation:
+    """Silero v5 only accepts 8kHz/16kHz.
+
+    An unsupported rate loads fine but fails at inference time inside the
+    decoder LSTM, which previously surfaced as a mid-session crash rather
+    than a clean fallback. The rate is therefore rejected in ``__init__``.
+    """
+
+    @pytest.mark.parametrize("rate", [8000, 16000])
+    def test_supported_rates_construct(self, rate: int) -> None:
+        vad = SileroVAD(MODEL_PATH, sample_rate=rate)
+        assert int(vad.sr) == rate
+
+    @pytest.mark.parametrize("rate", [24000, 22050, 44100, 48000, 0, -1])
+    def test_unsupported_rates_raise_value_error(self, rate: int) -> None:
+        with pytest.raises(ValueError, match="supports"):
+            SileroVAD(MODEL_PATH, sample_rate=rate)
+
+    def test_error_message_names_the_offending_rate(self) -> None:
+        with pytest.raises(ValueError, match="24000"):
+            SileroVAD(MODEL_PATH, sample_rate=24000)
+
+    def test_default_rate_is_supported(self) -> None:
+        assert SileroVAD.SUPPORTED_SAMPLE_RATES == (8000, 16000)
+        assert int(SileroVAD(MODEL_PATH).sr) == 16000

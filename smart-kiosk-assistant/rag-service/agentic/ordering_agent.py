@@ -897,7 +897,7 @@ class OrderingAgent:
             return result
 
         _mcp_fn.__name__ = tool_name
-        _mcp_fn.__doc__ = mcp_tool.description or tool_name
+        _mcp_fn.__doc__ = mcp_tool.prompt_description or tool_name
 
         # Build an explicit signature from the MCP JSON input schema so ADK
         # introspection produces a correct function-call declaration.

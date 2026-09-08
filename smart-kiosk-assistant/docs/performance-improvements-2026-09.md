@@ -244,9 +244,18 @@ The gap is architectural, not a difference in model speed:
    the dominant factor, but it forecloses any cross-service speculative
    overlap.
 3. **Leaner generation config.** `max_new_tokens=80` (vs. this stack's 192),
-   an int4 model (vs. int8), no conversation history resent for
+   no conversation history resent for
    retail-mode Q&A (`context_turns=0`), and simple regex-parsed `<act>`
    directives instead of a full JSON-schema tool-calling protocol.
+   The prototype also runs `Qwen3-4B` at **int4** (`scripts/setup.sh` exports
+   `Qwen/Qwen3-4B-Instruct-2507` to `models/qwen3-4b-int4`), whereas this
+   stack as actually deployed runs **int8**. Note the subtlety: the
+   `docker-compose.yml` *default* is `OpenVINO/Qwen3-4B-int4-ov`, but both
+   `.env` and `.env.example` pin `OVMS_MODEL_NAME=OpenVINO/Qwen3-4B-int8-ov`,
+   and `.env` wins — `GET :8000/v3/models` on the running stack returns
+   `OpenVINO/Qwen3-4B-int8-ov`. So precision *is* part of the gap. Always
+   confirm the served model from `/v3/models` rather than from the compose
+   default.
 4. **Prefix caching shared across in-turn drafts, not just across turns**
    — per-turn-changing content (RAG chunks, cart state, question) is placed
    at the end of the prompt so every speculative draft during a turn shares
@@ -311,3 +320,267 @@ Summary:
 - Explicitly not pursued: continuous rolling ASR at shorter intervals,
   in-process OpenVINO GenAI LLM pipeline, full speculative-decoding
   architecture (scoped as a known larger future opportunity).
+
+---
+
+# Follow-up round: prompt-mass and endpointing (October)
+
+Prompted by a working `kiosk-voice-lab-main` replay on the dev box, which
+gave a measured reference to compare against instead of the PDF's headline
+number.
+
+## Reference measurement (the prototype, reproduced)
+
+39 turns across 4 replay scripts (`make replay SCRIPT=demo|session2|session3|session5`),
+metric = endpoint decision → first audio sample:
+
+| | ms |
+|---|---|
+| min / p25 | 1 / 334 |
+| **median** | **529** |
+| p75 / p90 / p95 | 1032 / 1218 / 1694 |
+| mean / max | 643 / 1895 |
+
+Quality on the same runs: WER 0–4.6%, **0 false triggers, 0 forced ends**.
+Adding the endpointer's own 150 ms complete-sentence wait reconstructs
+≈680 ms voice-to-voice, consistent with the handoff PDF's ~700 ms.
+
+The decisive split is *when the work happened*, not how fast it ran:
+
+| Turn class | n | median |
+|---|---|---|
+| Reply audio already synthesized before endpoint | 10/39 | **159 ms** |
+| Draft text ready, TTS after endpoint | 28/39 | 697 ms |
+| No usable draft (cold) | 1/39 | 1895 ms |
+
+**Draft hit rate 38/39 (97%).**
+
+Getting the prototype to run required fixing three broken setup artifacts on
+the box (recorded here because `make setup`/`make drivers` fail silently):
+the Intel NPU userspace driver was never installed (`intel-level-zero-npu` /
+`intel-driver-compiler-npu`, so OpenVINO enumerated CPU/GPU only), and both
+`tts_models/kokoro/voices-v1.0.bin` and `models/silero_vad.onnx` were 35 KB
+proxy error pages rather than the real 28 MB / 2.3 MB assets.
+
+## Why the LLM stage costs so much more here
+
+Measured with the actual Qwen3-4B tokenizer, not estimated:
+
+| Component | Lab | This stack |
+|---|---|---|
+| Model precision | int4 | **int8** (`.env` pins it; see the correction above) |
+| System prompt / agent instruction | **881** | **1,509** |
+| Tool schemas | **0** (regex `<act>` directives) | **~2,697** (12 MCP tools) |
+| **Static prefill per call** | **881** | **4,206** |
+| **LLM calls per ordering turn** | **1** | **2** (but see below) |
+
+The 12 MCP tool schemas alone are ~3× the lab's entire system prompt. And the
+lab emits the state change and the speech from *one* generation
+(`<act>add|Ranger Double Burger|2</act>Two Ranger Doubles, got it.`), where
+ADK must generate a tool call, execute it, then generate the reply.
+
+**Correction from measurement: the second LLM call is already effectively
+free.** Profiling one `place_order` turn on the running stack gives:
+
+| stage | median | share |
+|---|---|---|
+| LLM#1 (tool selection) | 2,334 ms | **93.1%** |
+| MCP tool execution | 162 ms | 6.5% |
+| LLM#2 (reply) | **11 ms** | 0.4% |
+
+An earlier round's templated-reply shortcut means LLM#2 usually skips
+generation entirely for ordering turns. So the "2 calls ≈ 2× the work" part
+of the analysis above does **not** hold in practice — the cost is
+overwhelmingly a *single* prefill-dominated call. That is why this round's
+prefill reduction (change 11) is the only thing that moved the number, and it
+is where further effort should go.
+
+## Changes made this round
+
+### 11. MCP tool-schema compaction (`Returns:`/`Raises:` stripped)
+The MCP tool docstrings are Google-style and document their return payload in
+detail for humans reading `mcp_server.py`. That prose never influences which
+tool the model picks or how it fills arguments — the model sees the real
+result after the call — but it was re-sent as part of the tool schema on
+every LLM round-trip.
+
+`compact_tool_description()` truncates a description at the first
+`Returns:`/`Raises:`/`Yields:`/`Example:`/`Note:` heading. The summary line
+and the whole `Args:` block, which *do* steer tool selection and argument
+filling, are kept verbatim. Docstrings in source are untouched (project
+convention requires them); only the LLM-facing copy is trimmed.
+
+Measured through the real `MCPTool.prompt_description` code path across all
+12 kiosk tools: **1,627 → 1,199 tokens, −428 per call, −856 per turn.**
+
+**End-to-end effect (measured on the running stack, Arc iGPU, int8):**
+`tests/benchmarks/agent_latency_benchmark.py --tier A --runs 5`, one
+`place_order` turn, all four changes off vs. changes 11+14 on:
+
+| | baseline | 11+14 on | Δ |
+|---|---|---|---|
+| agent turn, median | 2,506 ms | **2,277 ms** | **−229 ms (−9.1%)** |
+| LLM#1 (tool selection), median | 2,334 ms | 2,120 ms | −214 ms |
+| range (min–max) | 2,457–2,528 | 2,265–2,312 | no overlap |
+
+The ranges do not overlap, so the win is real rather than run-to-run noise,
+and it lands almost entirely on LLM#1 — exactly the prefill stage the
+compaction targets.
+
+- Config: `AGENT_COMPACT_TOOL_DESCRIPTIONS` (default `true`).
+- Code: `rag-service/agentic/mcp_client.py` (`compact_tool_description`,
+  `MCPTool.prompt_description`), `rag-service/agentic/config.py`,
+  `plugins/kiosk/ordering_agent.py`, `rag-service/agentic/ordering_agent.py`.
+- Tests: `rag-service/tests/test_mcp_client.py` (8 new).
+
+### 12. OVMS prefill chunk budget 4096 → 8192 — TRIED, REVERTED
+The hypothesis was sound: the static part of every agent prompt measured
+**4,206 tokens** before history, the `[knowledge]` block or the customer's
+message, so `--max_num_batched_tokens 4096` was splitting every LLM call into
+multiple chunked-prefill iterations, and this is a single-customer kiosk
+pinned to `PERFORMANCE_HINT=LATENCY` where chunking's throughput fairness
+buys nothing.
+
+It was measured and produced **no improvement**:
+
+| | 4096 | 8192 |
+|---|---|---|
+| isolated agent turn, median | **2,277 ms** | 2,306 ms |
+| 6-turn replay, `llm_ms` median | 5,951 ms | 5,869 ms |
+| 6-turn replay, `llm_ms` mean | 5,682 ms | 6,112 ms |
+
+Both deltas are inside run-to-run noise and they point in opposite
+directions. The reason is change 11: compaction removes ~428 tokens per call,
+which pulls the static prefill back **under** 4096, so the chunking the
+larger budget was meant to avoid no longer happens. Change 11 subsumes
+change 12.
+
+Reverted to the upstream default per the project rule that a change is only
+kept if it measurably improves something. Worth revisiting only if the prompt
+grows materially again.
+
+### 13. Silero VAD enabled by default
+Built and unit-tested in the previous round but left off. Every turn timer —
+the 0.70 s adaptive flush, the sentence-completeness shortcut, and the 1.5 s
+silence endpoint — starts counting from the frame the VAD first calls
+silence. An absolute RMS gate declares silence late in a room louder than the
+one it was calibrated for (measured on the demo unit: silence floor RMS
+~1076 against a 900 gate, so `silence_run_seconds` never accumulated and
+*neither* the endpoint nor the adaptive flush could fire at all). Silero
+scores speech directly, so the clock starts at the true end of the words and
+every downstream timer shifts earlier with it.
+
+**Bug found and fixed while enabling this.** Silero v5 accepts 8 kHz and
+16 kHz only. `SileroVAD` documented that constraint but did not enforce it:
+an unsupported rate builds a valid ONNX session and only fails much later, at
+*inference* time, deep in the decoder LSTM
+(`Input X must have 3 dimensions only`). The existing "fail open to RMS VAD"
+guard wraps the constructor, so it never caught this — the session crashed
+mid-turn instead. Turning the flag on by default converted that latent bug
+into a live one for any session not at 16 kHz, which is not hypothetical:
+Kokoro TTS emits **24 kHz**, so every turn of the conversation replay
+benchmark failed.
+
+The rate is now validated in `__init__`, which raises `ValueError`, which the
+existing guard catches and downgrades to the RMS VAD with a concise warning
+instead of a stack trace. Verified by replaying a 6-turn conversation at
+24 kHz: 0/6 turns before the fix, 6/6 after.
+
+- Config: `KIOSK_CORE_SILERO_VAD_ENABLED` (default flipped `false` → `true`).
+- Code: `kiosk_core/silero_vad.py` (`SUPPORTED_SAMPLE_RATES`, constructor
+  validation), `kiosk_core/audio_session.py` (`ValueError` handled distinctly
+  from unexpected failures).
+- Tests: `tests/unit/test_silero_vad.py` (7 existing + 10 new, run against
+  the real model).
+
+### 14. `AGENT_MAX_TOKENS` 192 → 128
+Sized from measurement rather than guesswork: the longest legitimate outputs
+are a full category listing (**84 tokens**) and a multi-item `update_order`
+tool call (**56 tokens**), so 128 leaves ~50% headroom.
+
+**This does not shorten a normal turn** — generation stops at EOS. It only
+lowers the ceiling on the pathological case the cap exists for (a turn that
+free-runs instead of calling a tool). Recorded as a worst-case bound, not a
+median win.
+
+## Investigated and explicitly NOT changed this round
+
+### Lowering `KIOSK_CORE_ENDPOINT_SHORT_SECONDS` (1.0 s → ~0.3 s)
+Proposed, then rejected on reading the code. `config.py` documents a hard
+invariant: `ADAPTIVE_FLUSH_PAUSE (0.70) < ENDPOINT_SHORT (1.0) <
+SILENCE_TIMEOUT (1.5)`. The completeness shortcut can only fire once the
+adaptive flush's ASR round-trip has landed, measured at **~1.23–1.28 s** —
+already later than the 1.0 s floor. So the binding constraint is ASR latency,
+not the threshold, and lowering it would gain nothing while risking a
+fail-closed check reading a stale transcript. The only real lever here is
+making the transcript land sooner, which means the preview-ASR work below.
+
+### Prompt reordering for prefix-cache reuse
+Checked and found already correct: the ADK prompt is
+`system + tool schemas → history → turn tail`, and the turn's second LLM call
+is a strict extension of the first call's prefix, so `--enable_prefix_caching`
+(already on) covers it. No change needed.
+
+## Testing performed
+
+- 18 new unit tests this round: 8 in `rag-service/tests/test_mcp_client.py`
+  (compaction) and 10 in `tests/unit/test_silero_vad.py` (sample-rate
+  validation). `tests/unit/test_silero_vad.py` is fully green (17 passed)
+  against the real ONNX model.
+- **Regression check by A/B against the committed baseline.** The full suite
+  was run twice on the same box — once with this round's changes stashed and
+  once with them applied — and produced byte-identical totals:
+  `17 failed, 103 passed, 3 skipped, 32 errors` both times. The changes
+  therefore introduce **no regressions**.
+- Those 17 failures / 32 errors are a *host environment* fault, not a code
+  fault: `.setup-venv` hits
+  `ImportError: cannot load module more than once per process` from numpy
+  when the functional tests do their deferred `import main`. They reproduce
+  on the untouched commit. Do not read them as a baseline to accept —
+  the earlier "492 passed" figure came from a healthier venv, and the venv
+  should be rebuilt before the next full-suite run.
+- Live stack verification: all six services healthy via `make test`; the
+  compacted tool schemas confirmed reaching the agent
+  (`Agent rebuilt with 12 MCP tool(s) ✓`, warmup clean on attempt 1).
+- `docker compose config -q` validated after every compose edit.
+
+### Benchmark harness fix (required to measure at all)
+`tests/benchmarks/conversation_replay_benchmark.py` hard-coded
+`sample_rate: "16000"` when starting the kiosk-core session, but the rate is
+decided by whichever TTS backend synthesises the prompt. With Kokoro (24 kHz)
+every turn was rejected outright by kiosk-core's rate check. The harness now
+reads the frame rate from the synthesised WAV header, so it follows the TTS
+backend instead of assuming one.
+
+### Gotchas worth recording
+- **`REGISTRY` in `.env` is a build-mode switch, not a registry name.** It is
+  literally `true`. The Makefile maps `true|false` → `_ENV_REGISTRY` (`intel`)
+  before calling compose; a raw `docker compose` command does not, and
+  silently resolves images to `true/rag-service:...`. That is a *different,
+  stale* image, so edits appear not to take effect. Always drive the stack
+  through `make`, or pass `REGISTRY=intel` explicitly.
+- **`make build` did not pick up source edits made after the last image
+  build.** The running `rag-service` image predated the changes by ~14 h,
+  while `plugins/` is bind-mounted live — so new plugin code called into old
+  baked `agentic/` code and the agent failed warmup with
+  `'MCPTool' object has no attribute 'prompt_description'`. Verify a change
+  actually landed with
+  `docker exec rag-service grep -c ... /app/rag-service/agentic/...` before
+  trusting any measurement.
+- **`make build` also clobbers the local Kokoro TTS image**: it builds the
+  local services and then unconditionally runs
+  `docker compose pull audio-analyzer text-to-speech`, overwriting the
+  locally built `text-to-speech` (which has the Kokoro backend) with the
+  upstream one (which does not, and rejects `runtime: kokoro`). Rebuild it
+  explicitly afterwards.
+
+## Remaining opportunity (unchanged, still the big one)
+
+Speculative drafting during speech. The prototype's 97% draft-hit rate is
+what buys its median; nothing in this round touches *when* work happens. The
+staged path is: a throwaway preview-ASR tick (strictly isolated from the
+committed transcript, so the diarization and Whisper-hallucination fixes are
+not reintroduced) → speculative agent drafts on changed previews with
+newest-wins preemption, read-only turns first so no tool ever executes
+speculatively → first-phrase TTS pre-synthesis from the draft prefix, reusing
+the existing opener cache.

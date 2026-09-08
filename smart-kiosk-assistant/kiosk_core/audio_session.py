@@ -538,6 +538,16 @@ class BaseAudioSession:
                     sample_rate=self.request.sample_rate,
                     intra_op_threads=config.DEFAULT_SILERO_VAD_INTRA_OP_THREADS,
                 )
+            except ValueError as exc:
+                # Expected, not exceptional: the session's sample rate isn't
+                # one Silero supports (e.g. 24kHz browser/Kokoro audio). Log
+                # concisely and use the rate-agnostic RMS VAD instead.
+                logger.warning(
+                    "session=%s | Silero VAD unavailable (%s); using RMS VAD",
+                    self.session_id,
+                    exc,
+                )
+                self._silero_vad = None
             except Exception:
                 # Fail open: fall back to the RMS VAD rather than breaking the
                 # session if the model file/onnxruntime isn't available.

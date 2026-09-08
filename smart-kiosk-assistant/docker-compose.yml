@@ -347,8 +347,22 @@ services:
       AGENT_STREAM_SENTENCES: ${AGENT_STREAM_SENTENCES:-true}
       # Caps generated tokens per LLM round-trip. Decode dominates agent
       # latency, so this bounds the worst case (a turn that free-runs instead
-      # of calling a tool). Tunable from .env without a rebuild.
-      AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-192}
+      # of calling a tool). Generation stops at EOS, so this does NOT shorten a
+      # normal turn — it only bounds the pathological one.
+      #
+      # Sized from measurement with the Qwen3-4B tokenizer: the longest
+      # legitimate outputs are a full category listing (84 tokens) and a
+      # multi-item update_order tool call (56 tokens). 128 leaves ~50% headroom
+      # over both while cutting the free-run ceiling from 192.
+      # Tunable from .env without a rebuild.
+      AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-128}
+      # Send MCP tool docstrings to the LLM without their "Returns:"/"Raises:"
+      # sections. Those describe the payload the model receives *after* the
+      # call, so they never steer tool choice or argument filling, but they were
+      # re-sent as part of the tool schema on every LLM round-trip.
+      # Measured: 1,627 -> 1,199 docstring tokens across the 12 kiosk tools.
+      # Set AGENT_COMPACT_TOOL_DESCRIPTIONS=false to revert with a restart.
+      AGENT_COMPACT_TOOL_DESCRIPTIONS: ${AGENT_COMPACT_TOOL_DESCRIPTIONS:-true}
       # Embedding + reranker models are loaded in-process via OpenVINO at
       # startup. These are intentionally decoupled from TARGET_DEVICE (which
       # only controls the ovms-llm container): both models are exported by
@@ -481,6 +495,17 @@ services:
       # Required for Level Zero to enumerate the Intel NPU. Harmless when no
       # NPU node is mapped — OpenVINO then reports CPU/GPU only.
       ZE_ENABLE_ALT_DRIVERS: libze_intel_npu.so
+    # --max_num_batched_tokens is the prefill chunk budget. Raising it to 8192
+    # was tried (rationale: with the Qwen3-4B tokenizer the static part of every
+    # agent prompt measured 4,206 tokens — 1,509 agent instruction + ~2,697 MCP
+    # tool schemas — so at 4096 every call was split into multiple chunked
+    # prefill iterations). Measured on an Arc iGPU it produced NO improvement:
+    # isolated agent turn 2,306 ms at 8192 vs 2,277 ms at 4096, and a 6-turn
+    # conversation replay gave an LLM median of 5,869 ms vs 5,951 ms — both
+    # within run-to-run noise. Tool-description compaction
+    # (AGENT_COMPACT_TOOL_DESCRIPTIONS) already pulls the static prefill back
+    # under 4096, which makes the larger budget redundant. Kept at the upstream
+    # default; revisit only if the prompt grows materially again.
     command: >
       --rest_port 8000
       --port 9000
@@ -564,11 +589,15 @@ services:
       # vars on audio-analyzer above, which are the actual fix for pyannote
       # loading fully offline from its already-complete local cache.
       KIOSK_CORE_DIARIZATION_ENABLED: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
-      # Silero VAD (v5, onnxruntime): optional model-based alternative to the
-      # adaptive RMS VAD. Default off — RMS VAD is the well-tested default;
-      # see DEFAULT_SILERO_VAD_* in kiosk_core/config.py for the full
-      # tradeoff writeup and kiosk_core/silero_vad.py for the wrapper.
-      KIOSK_CORE_SILERO_VAD_ENABLED: ${KIOSK_CORE_SILERO_VAD_ENABLED:-false}
+      # Silero VAD (v5, onnxruntime): model-based replacement for the adaptive
+      # RMS VAD's speech/silence decision. Default ON — every turn timer (the
+      # 0.70s adaptive flush, the sentence-completeness shortcut and the 1.5s
+      # silence endpoint) starts from the frame the VAD first calls silence, so
+      # a loudness gate that declares silence late in a noisy room delays the
+      # whole turn. See DEFAULT_SILERO_VAD_* in kiosk_core/config.py for the
+      # full writeup and kiosk_core/silero_vad.py for the wrapper. Fails open to
+      # the RMS VAD. Set to false to restore the RMS-only path.
+      KIOSK_CORE_SILERO_VAD_ENABLED: ${KIOSK_CORE_SILERO_VAD_ENABLED:-true}
       # Consecutive rejected turns (speaker filter dropped every segment as
       # non-primary) required before the kiosk speaks
       # KIOSK_CORE_UNRECOGNIZED_SPEAKER_PROMPT instead of staying silent.

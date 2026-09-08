@@ -42,6 +42,12 @@ class SileroVAD:
 
     FRAME = 512
 
+    #: Sample rates the upstream Silero v5 graph accepts. Feeding any other
+    #: rate loads successfully but fails at *inference* time deep inside the
+    #: decoder LSTM ("Input X must have 3 dimensions only"), so the rate is
+    #: validated up front instead — see __init__.
+    SUPPORTED_SAMPLE_RATES = (8000, 16000)
+
     def __init__(
         self,
         model_path: str | Path,
@@ -57,7 +63,18 @@ class SileroVAD:
             intra_op_threads: onnxruntime intra-op thread cap. Defaults to 1
                 to avoid contending with the ASR/LLM/TTS pipelines, since
                 this model is tiny and does not benefit from parallelism.
+
+        Raises:
+            ValueError: If ``sample_rate`` is not one of
+                :attr:`SUPPORTED_SAMPLE_RATES`. Callers are expected to treat
+                this as "fall back to RMS VAD" rather than a fatal error.
         """
+        if sample_rate not in self.SUPPORTED_SAMPLE_RATES:
+            raise ValueError(
+                f"Silero VAD supports {self.SUPPORTED_SAMPLE_RATES} Hz only, "
+                f"got {sample_rate} Hz"
+            )
+
         import onnxruntime as ort
 
         so = ort.SessionOptions()

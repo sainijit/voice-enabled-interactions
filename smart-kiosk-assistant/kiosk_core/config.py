@@ -339,14 +339,33 @@ DEFAULT_VAD_FLOOR_ADAPT_UP = float(os.getenv("KIOSK_CORE_VAD_FLOOR_ADAPT_UP", "0
 DEFAULT_BLOCK_DURATION_SECONDS = float(os.getenv("KIOSK_CORE_BLOCK_DURATION_SECONDS", "0.1"))
 DEFAULT_PREROLL_SECONDS = float(os.getenv("KIOSK_CORE_PREROLL_SECONDS", "0.3"))
 
-# Silero VAD (v5, onnxruntime): an optional, model-based alternative to the
-# adaptive RMS VAD above. Default OFF — the RMS VAD is well-tested (see
-# tests/unit/test_adaptive_vad.py) and remains the safe default. When
-# enabled, Silero's speech probability REPLACES the RMS-derived is_speech
-# decision in the per-frame loop (see BaseAudioSession._process_frame_stream);
-# the RMS floor/gate calibration still runs alongside it (cheap, harmless)
-# but its classification is ignored while Silero is active.
-KIOSK_CORE_SILERO_VAD_ENABLED = os.getenv("KIOSK_CORE_SILERO_VAD_ENABLED", "false").lower() not in (
+# Silero VAD (v5, onnxruntime): a model-based alternative to the adaptive RMS
+# VAD above. When enabled, Silero's speech probability REPLACES the RMS-derived
+# is_speech decision in the per-frame loop (see
+# BaseAudioSession._process_frame_stream); the RMS floor/gate calibration still
+# runs alongside it (cheap, harmless) but its classification is ignored while
+# Silero is active.
+#
+# Default flipped OFF → ON. Rationale: every downstream timer in the turn — the
+# adaptive flush at DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS (0.70s), the
+# sentence-completeness shortcut at DEFAULT_ENDPOINT_SHORT_SECONDS, and the
+# DEFAULT_SILENCE_TIMEOUT_SECONDS endpoint — starts counting from the frame the
+# VAD first calls silence. An RMS gate is an absolute loudness threshold, so in
+# a room louder than the one it was calibrated for it declares silence LATE (or,
+# as measured on the demo unit, never: the silence floor read RMS ~1076 against
+# a 900 gate, so silence_run_seconds never accumulated and neither the endpoint
+# nor the adaptive flush could fire at all). The adaptive floor calibration
+# added later mitigates that but still tracks loudness, not speech. Silero
+# scores speech directly, so the silence clock starts at the true end of the
+# customer's words and every timer downstream shifts earlier with it.
+#
+# Cost is small and bounded: a ~2MB int8 ONNX graph pinned to one intra-op
+# thread, run on 0.1s frames.
+#
+# Fails open — the constructor falls back to the RMS VAD if onnxruntime or the
+# model file is unavailable, so this flag cannot break a session. Set
+# KIOSK_CORE_SILERO_VAD_ENABLED=false to restore the RMS-only path.
+KIOSK_CORE_SILERO_VAD_ENABLED = os.getenv("KIOSK_CORE_SILERO_VAD_ENABLED", "true").lower() not in (
     "false",
     "0",
     "no",
