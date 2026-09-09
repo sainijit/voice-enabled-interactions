@@ -19,6 +19,53 @@ interface UseVoiceSessionOptions {
 
 const TARGET_RATE = tuning.sampleRate; // 16000
 
+// getUserMedia never settles while a permission prompt sits unanswered, and
+// some Windows device stacks stall indefinitely too. Without a bound the hook
+// parks in "preparing" forever: `recordingRef` is still false so
+// endConversation has nothing to finalise, while `phase` is already
+// 'listening' so every later start() trips its own `phase !== 'idle'` guard —
+// a dead mic button that no amount of tapping can recover. Bound the wait.
+const MIC_ACQUIRE_TIMEOUT_MS = 15000;
+
+const MIC_TIMEOUT_MESSAGE =
+  'Microphone did not respond. Check the browser permission prompt (the camera/mic icon in the address bar), then try again.';
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        window.clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Map a raw getUserMedia DOMException onto something a customer can act on. */
+function describeMicError(err: unknown): string {
+  const name = (err as { name?: string } | null)?.name;
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'Microphone permission was blocked. Allow it via the address-bar icon, then try again.';
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return 'No microphone was found. Connect one and try again.';
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return 'The microphone is in use by another application. Close it and try again.';
+    case 'OverconstrainedError':
+      return 'The selected microphone is unavailable. Pick a different device in Settings.';
+    default:
+      return err instanceof Error ? err.message : String(err);
+  }
+}
+
 export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceSessionOptions) {
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -67,6 +114,11 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
   const conversationIdRef = useRef<string>(crypto.randomUUID());
   const recordingRef = useRef(false);
   const eosRef = useRef(false);
+  // Bumped by every start() and every forceIdle(). An in-flight start()
+  // compares the generation it captured against this after each await and
+  // bails out if it has been superseded, so a slow getUserMedia that finally
+  // resolves after the user gave up cannot resurrect a torn-down session.
+  const startGenRef = useRef(0);
   const pollTimerRef = useRef<number | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
@@ -132,6 +184,24 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       pollTimerRef.current = null;
     }
   }, []);
+
+  // Hard reset back to a tappable idle state, usable from ANY phase.
+  // Deliberately unconditional: the previous recovery paths all keyed off
+  // `recordingRef.current` or `phase === 'idle'`, so a start() stalled in mic
+  // acquisition (recording not yet true, phase already 'listening') matched
+  // neither and left the button permanently inert. Bumping the generation
+  // also cancels that in-flight start().
+  const forceIdle = useCallback(() => {
+    startGenRef.current += 1;
+    recordingRef.current = false;
+    eosRef.current = false;
+    sessionIdRef.current = null;
+    stopPolling();
+    teardownCapture();
+    setPartialUser('');
+    setPartialAssistant('');
+    setPhase('idle');
+  }, [stopPolling, teardownCapture]);
 
   // ── Single poll loop: drives partial transcript, response, TTS, completion ──
   const pollLoop = useCallback(async () => {
@@ -238,6 +308,7 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       return;
     }
     if (recordingRef.current || phase !== 'idle') return;
+    const myGen = ++startGenRef.current;
     setError(null);
     audioQueue.reset();
     framesRef.current = [];
@@ -257,20 +328,34 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       const constraints: MediaStreamConstraints = {
         audio: deviceId
           ? {
-              deviceId: { exact: deviceId },
+              // `ideal`, not `exact`: a stale/unplugged device id must fall
+              // back to the default mic rather than reject the whole request
+              // with OverconstrainedError and leave the kiosk mute.
+              deviceId: { ideal: deviceId },
               echoCancellation: true,
               noiseSuppression: true,
               autoGainControl: true,
             }
           : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await withTimeout(
+        navigator.mediaDevices.getUserMedia(constraints),
+        MIC_ACQUIRE_TIMEOUT_MS,
+        MIC_TIMEOUT_MESSAGE,
+      );
+      if (myGen !== startGenRef.current) {
+        // Superseded while the permission prompt was open — release the device
+        // we just acquired rather than leaking a live mic.
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
 
       const ctx = new AudioContext();
       ctxRef.current = ctx;
       ctxRateRef.current = ctx.sampleRate;
       await ctx.audioWorklet.addModule('/pcm-capture-processor.js');
+      if (myGen !== startGenRef.current) return;
 
       const source = ctx.createMediaStreamSource(stream);
       sourceRef.current = source;
@@ -307,6 +392,7 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
         conversationIdRef.current,
         !conversationModeRef.current,
       );
+      if (myGen !== startGenRef.current) return;
       sessionIdRef.current = session_id;
 
       // Everything is live — only now is it honest to ask for speech.
@@ -316,10 +402,18 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       stopPolling();
       pollTimerRef.current = window.setTimeout(pollLoop, tuning.pollIntervalMs);
     } catch (err) {
+      if (myGen !== startGenRef.current) return;
+      recordingRef.current = false;
       teardownCapture();
       setPhase('idle');
       setPartialUser('');
-      const msg = err instanceof Error ? err.message : String(err);
+      // A failed start must also drop hands-free mode. Leaving it on rendered
+      // the button as a stop square while nothing was recording, so the next
+      // tap read as "end conversation" instead of retrying — the button
+      // appeared stuck and never sent anything.
+      conversationModeRef.current = false;
+      setConversationMode(false);
+      const msg = describeMicError(err);
       setError(msg);
       setStatusText(`❌ ${msg}`);
     }
@@ -396,10 +490,16 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       // Finalise the in-flight utterance normally (customer may be mid-order);
       // it just won't loop again once the reply/TTS for this turn are done.
       void stop();
-    } else if (phase === 'idle') {
+    } else {
+      // Nothing to finalise. This branch used to be `else if (phase ===
+      // 'idle')`, which silently did nothing whenever the hook was mid
+      // mic-acquisition or latched in 'processing' — leaving `phase` stuck
+      // non-idle so every later start() was swallowed by its own guard and the
+      // button could never be used again. Always hard-reset instead.
+      forceIdle();
       setStatusText('Tap the mic and ask a question');
     }
-  }, [audioQueue, phase, stop]);
+  }, [audioQueue, forceIdle, stop]);
 
   // ── Public: barge-in — stop the kiosk speaking and listen immediately ─────
   // Lets the customer interrupt a reply mid-playback ("stop, I want to ask
@@ -441,5 +541,7 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
     startConversation,
     endConversation,
     interruptSpeaking,
+    /** Escape hatch: force the control back to a tappable idle state. */
+    reset: forceIdle,
   };
 }

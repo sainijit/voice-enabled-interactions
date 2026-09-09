@@ -168,6 +168,17 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
   // Use measured wall E2E from turn trace; never sum stages (avoids TTS overlap error)
   const e2eMs = trace?.wall?.turn_total_ms ?? null;
   const ttfaMs = trace?.wall?.time_to_first_audio_ms ?? null;
+  // Voice-to-voice is the customer-felt clock: last word spoken -> first sound
+  // out of the speaker. It is NOT derivable from e2eMs, because e2eMs starts at
+  // the endpoint decision and so excludes the trailing-silence wait.
+  const v2vMs = trace?.wall?.voice_to_voice_ms ?? null;
+  const v2vInformativeMs = trace?.wall?.voice_to_voice_informative_ms ?? null;
+
+  // One row per request/response, newest first.
+  const recentTurns = (kpis.pipelineRecent ?? [])
+    .filter((t) => t?.wall?.voice_to_voice_ms != null)
+    .slice()
+    .reverse();
 
   return (
     <div className="space-y-3">
@@ -177,6 +188,17 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
           AI Inference Pipeline
         </h2>
         <div className="flex items-center gap-2">
+          {v2vMs !== null && (
+            <span className="rounded-full bg-purple-50 px-2.5 py-0.5 text-[11px] font-semibold text-purple-700 border border-purple-200"
+              title={
+                'Voice to voice — customer\u2019s last word to first sound out of the speaker' +
+                (v2vInformativeMs !== null
+                  ? ` (to first informative audio: ${latencyLabel(v2vInformativeMs)})`
+                  : '')
+              }>
+              V2V {latencyLabel(v2vMs)}
+            </span>
+          )}
           {ttfaMs !== null && (
             <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700 border border-green-200"
               title="Time to first audio — perceived response latency">
@@ -323,6 +345,43 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
             : ''}
           {' · E2E = measured wall-clock, capture → last audio (TTS overlaps LLM)'}
         </p>
+      )}
+
+      {/* Per-request voice-to-voice history */}
+      {recentTurns.length > 0 && (
+        <div className="pt-2 border-t border-kiosk-border">
+          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+            Voice-to-Voice per Turn
+          </h3>
+          <table className="w-full text-[10px] tabular-nums">
+            <thead>
+              <tr className="text-gray-400">
+                <th className="text-left font-medium">#</th>
+                <th className="text-right font-medium" title="Last word → first sound out">V2V</th>
+                <th className="text-right font-medium" title="Last word → first audio carrying the answer">
+                  V2V info
+                </th>
+                <th className="text-right font-medium" title="Trailing silence before the turn committed">
+                  Wait
+                </th>
+                <th className="text-right font-medium" title="Measured wall-clock, capture → last audio">
+                  E2E
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentTurns.map((t, idx) => (
+                <tr key={t.turn_id ?? idx} className={idx === 0 ? 'font-semibold text-intel-dark' : 'text-gray-500'}>
+                  <td className="text-left">{recentTurns.length - idx}</td>
+                  <td className="text-right">{latencyLabel(t.wall?.voice_to_voice_ms ?? null)}</td>
+                  <td className="text-right">{latencyLabel(t.wall?.voice_to_voice_informative_ms ?? null)}</td>
+                  <td className="text-right">{latencyLabel(t.wall?.endpoint_wait_ms ?? null)}</td>
+                  <td className="text-right">{latencyLabel(t.wall?.turn_total_ms ?? null)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

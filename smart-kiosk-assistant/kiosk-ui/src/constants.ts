@@ -34,6 +34,9 @@ export const endpoints = {
   metrics: '/metrics-svc/metrics',
   // pipeline latency (kiosk-core)
   pipelineLatest: '/api/v1/pipeline/latest',
+  // Ring buffer of recent turn traces — powers the per-request voice-to-voice
+  // history under the AI Inference Pipeline panel.
+  pipelineRecent: '/api/v1/pipeline/recent?n=8',
   // identity (biometric auth, proxied to kiosk-core; feature-flag gated)
   identityEnabled: '/api/v1/identity/enabled',
   identityChallenge: '/api/v1/identity/challenge',

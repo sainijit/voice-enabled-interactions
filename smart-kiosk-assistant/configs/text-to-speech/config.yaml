@@ -6,7 +6,15 @@
 # version regardless of changes in edge-ai-libraries.
 app:
   name: Text To Speech
-  clear_storage_on_startup: true  # true | false — delete all session folders under storage/ at startup
+  # Must stay false while TEXT_TO_SPEECH_WORKERS > 1 (the kiosk default is 2).
+  # The startup wipe runs once per uvicorn worker PROCESS and rmtree's every
+  # session folder under the SHARED storage root. Workers finish startup at
+  # different times (each does its own model load + GPU warmup synth), and
+  # uvicorn respawns a crashed worker at any moment — so a late-starting
+  # worker would delete the persisted speech.wav of sessions another worker
+  # is actively serving. Storage is disposable per-session output, so simply
+  # not wiping it is safe; it is cleaned per session by the service instead.
+  clear_storage_on_startup: false  # true | false — delete all session folders under storage/ at startup
 
 models:
   tts:

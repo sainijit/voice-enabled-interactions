@@ -75,6 +75,16 @@ export interface KpiData {
 export interface PipelineWall {
   turn_total_ms: number | null;
   time_to_first_audio_ms: number | null;
+  /** Trailing silence the endpointer waited through before committing the turn. */
+  endpoint_wait_ms: number | null;
+  /**
+   * Customer's last word -> first sound out of the speaker. The "voice to
+   * voice" clock — the only figure comparable to external voice-kiosk numbers,
+   * because unlike turn_total_ms it includes the endpoint wait.
+   */
+  voice_to_voice_ms: number | null;
+  /** Same clock, but to the first audio that carries the actual answer. */
+  voice_to_voice_informative_ms: number | null;
 }
 
 export interface PipelineAsrSpan {
@@ -124,6 +134,8 @@ export interface KpiBundle {
   rag: KpiData;
   tts: KpiData;
   pipeline?: PipelineTurnTrace | null;
+  /** Most recent turns, newest last — one entry per request/response. */
+  pipelineRecent?: PipelineTurnTrace[];
 }
 
 // ── Metrics ─────────────────────────────────────────────────────────────────

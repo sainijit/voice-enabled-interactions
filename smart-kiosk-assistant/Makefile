@@ -98,6 +98,23 @@ _IDENTITY_PROFILE  = $(if $(_IDENTITY_ON),--profile identity,)
 _IDENTITY_SVC      = $(if $(_IDENTITY_ON),identity-service,)
 export KIOSK_CORE_IDENTITY_ENABLED = $(if $(_IDENTITY_ON),true,false)
 
+# Queue/RTSP feature (profile-gated, ON by default — unlike identity above).
+# rtsp-streamer + queue-service (YOLOv8 person-counting) are CPU-hungry
+# (measured ~650-750% + ~350-500% CPU continuously, whether or not a voice
+# session is active) and share the host's CPU with the voice pipeline's
+# only CPU-bound stage, TTS. QUEUE=false frees those cores for a run,
+# useful for isolating/benchmarking voice-pipeline latency without them.
+# Reuses KIOSK_CORE_QUEUE_SERVICE_ENABLED (.env) — the same flag kiosk-core
+# already uses at the app layer to decide whether to call queue-service —
+# so one flag now controls both "is the container even running" (this
+# Makefile / compose profile) and "does kiosk-core call it" (config.py).
+# `QUEUE=true|false` on the make command line overrides it for one-off runs.
+_ENV_QUEUE_ENABLED := $(KIOSK_CORE_QUEUE_SERVICE_ENABLED)
+QUEUE          ?= $(if $(_ENV_QUEUE_ENABLED),$(_ENV_QUEUE_ENABLED),true)
+_QUEUE_ON       = $(filter true TRUE,$(QUEUE))
+_QUEUE_PROFILE  = $(if $(_QUEUE_ON),--profile queue,)
+export KIOSK_CORE_QUEUE_SERVICE_ENABLED = $(if $(_QUEUE_ON),true,false)
+
 # audio-analyzer and text-to-speech are published to Docker Hub by the
 # edge-ai-libraries CI pipeline and are always pulled — never built here.
 
@@ -348,6 +365,10 @@ show-config: ## Print resolved configuration
 	@echo "  IDENTITY          = $(IDENTITY)  (from .env KIOSK_CORE_IDENTITY_ENABLED, override with IDENTITY=true|false)"
 	@echo "  identity-service  = $$([ -n '$(_IDENTITY_SVC)' ] && echo 'enabled — will start with --profile identity' || echo 'disabled')"
 	@echo ""
+	@echo "$(YELLOW)Queue/RTSP feature:$(NC)"
+	@echo "  QUEUE             = $(QUEUE)  (from .env KIOSK_CORE_QUEUE_SERVICE_ENABLED, override with QUEUE=true|false)"
+	@echo "  rtsp-streamer/queue-service = $$([ -n '$(_QUEUE_PROFILE)' ] && echo 'enabled — will start with --profile queue' || echo 'disabled (frees ~10-12 CPU cores for voice-pipeline benchmarking)')"
+	@echo ""
 
 # =============================================================================
 # Build
@@ -357,7 +378,7 @@ build: check-env ## Pull images (default with .env); REGISTRY=false builds local
 	@echo "$(BLUE)Preparing Docker images...$(NC)"
 	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
 		echo "$(YELLOW)  REGISTRY=false → Building local services from source$(NC)"; \
-		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC); \
+		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) $(_QUEUE_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC); \
 	else \
 		echo "$(YELLOW)  REGISTRY=$(REGISTRY) → Pulling images from registry '$(_DOCKER_REGISTRY)'$(NC)"; \
 		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull $(LOCAL_ONLY_SERVICES); \
@@ -366,8 +387,10 @@ build: check-env ## Pull images (default with .env); REGISTRY=false builds local
 			REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build identity-service; \
 		fi; \
 	fi; \
-	echo "$(YELLOW)  Pulling audio-analyzer, text-to-speech, and metrics-collector from registry...$(NC)"; \
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull audio-analyzer text-to-speech; \
+	echo "$(YELLOW)  Pulling audio-analyzer from registry...$(NC)"; \
+	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull audio-analyzer; \
+	echo "$(YELLOW)  Building text-to-speech locally (registry image lacks Kokoro TTS support - see docker-compose.yml text-to-speech comment)...$(NC)"; \
+	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build text-to-speech; \
 	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull metrics-collector || \
 		echo "$(YELLOW)  ⚠ Could not pull metrics-collector (intel/hl-ai-metrics-collector) from registry -- using locally cached image if present. Build it from edge-ai-suites/health-and-life-sciences-ai-suite/multi_modal_patient_monitoring/services/metrics-collector if missing.$(NC)"
 	@echo "$(GREEN)✓ Images ready$(NC)"
@@ -378,7 +401,7 @@ build: check-env ## Pull images (default with .env); REGISTRY=false builds local
 
 up: check-env setup-dirs clean-metrics ## Start all services
 	@echo "$(BLUE)Starting Smart Kiosk Assistant...$(NC)"
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) up -d
+	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) $(_QUEUE_PROFILE) up -d
 	@echo ""
 	@echo "$(GREEN)✓ Stack started$(NC)"
 	@echo "  Kiosk UI        → http://localhost:7860"
@@ -392,17 +415,16 @@ up: check-env setup-dirs clean-metrics ## Start all services
 
 down: ## Stop all services
 	@echo "$(BLUE)Stopping Smart Kiosk Assistant...$(NC)"
-	@# Always tear down with --profile identity enabled, regardless of the
-	@# IDENTITY/.env value at the time `down` is invoked. Compose scopes
-	@# `down` to the same profile-filtered service set as `up`; if identity
-	@# was started with `make up IDENTITY=true` and the stack is later
-	@# stopped with a plain `make down` (IDENTITY unset/false), compose
-	@# never considers identity-service part of the project and leaves it
-	@# (and the network it's attached to) running — this is what caused
-	@# "Network ... Resource is still in use" and an orphaned
-	@# identity-service container. Including the profile unconditionally on
-	@# `down` is a no-op when identity-service was never started.
-	$(COMPOSE_BASE) --profile identity down
+	@# Always tear down with --profile identity/queue enabled, regardless of
+	@# the IDENTITY/QUEUE/.env value at the time `down` is invoked. Compose
+	@# scopes `down` to the same profile-filtered service set as `up`; if a
+	@# profile was active when the stack was started and is no longer active
+	@# at teardown time, compose never considers those containers part of
+	@# the project and leaves them (and the network) running — this is what
+	@# caused "Network ... Resource is still in use" and orphaned containers
+	@# in the past. Including both profiles unconditionally on `down` is a
+	@# no-op for any profile that was never started.
+	$(COMPOSE_BASE) --profile identity --profile queue down
 	@$(MAKE) --no-print-directory clean-metrics
 	@echo "$(GREEN)✓ All services stopped$(NC)"
 

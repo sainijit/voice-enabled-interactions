@@ -49,11 +49,31 @@ class AgentChatRequest(BaseModel):
         default_factory=list,
         description="Prior conversation turns [{role, content}, ...]",
     )
+    speculative: bool = Field(
+        default=False,
+        description=(
+            "If true, this is a speculative draft turn run ahead of the "
+            "customer's final (endpointed) utterance. Every mutating "
+            "ordering tool this turn is forced into dry_run mode server-side "
+            "— nothing is persisted to the orders database regardless of "
+            "what the agent decides to call. Used for cache-warming and "
+            "preview drafting; never set this for a real, confirmed turn."
+        ),
+    )
 
 
 class AgentChatResponse(BaseModel):
     reply: str
     tool_calls: list[str] = Field(default_factory=list)
+    tool_call_detail: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Exact {tool_name, kwargs, result} dispatched this turn, in call "
+            "order. On a speculative turn, a caller can replay these calls "
+            "for real (dry_run=False) instead of re-running the LLM, if the "
+            "customer's final utterance still matches the draft's input."
+        ),
+    )
     llm_ms: float | None = Field(
         default=None,
         description=(
@@ -146,6 +166,7 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
             session_id=request.session_id,
             user_id=request.user_id,
             history=request.history,
+            speculative=request.speculative,
         )
     except Exception as exc:
         logger.error("[AGENT-ENDPOINT] Unhandled error: %s", exc, exc_info=True)
@@ -160,6 +181,7 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     return AgentChatResponse(
         reply=result["reply"],
         tool_calls=result.get("tool_calls", []),
+        tool_call_detail=result.get("tool_call_detail", []),
         llm_ms=result.get("llm_ms"),
         llm_ttft_ms=result.get("llm_ttft_ms"),
         llm_calls=result.get("llm_calls", 0),
@@ -209,6 +231,7 @@ async def agent_chat_stream(request: AgentChatRequest) -> StreamingResponse:
                 user_id=request.user_id,
                 history=request.history,
                 on_safe_sentence=lambda s: queue.put_nowait({"delta": s}),
+                speculative=request.speculative,
             )
             await queue.put({"final": result})
         except Exception as exc:

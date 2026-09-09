@@ -112,6 +112,29 @@ HOST_MIC = os.getenv("HOST_MIC", "false").lower() not in ("false", "0", "no")
 # breathe — but short enough to sound continuous.
 DEFAULT_TTS_TRIM_ENABLED = os.getenv("KIOSK_CORE_TTS_TRIM_ENABLED", "true").lower() not in ("false", "0", "no")
 
+# ── TTS worker concurrency (sentence-level parallel synthesis) ─────────────
+# A multi-sentence reply is split into clauses/sentences and queued to
+# _tts_worker one at a time. Historically only ONE worker thread drained that
+# queue, so a 3-sentence reply paid 3 full synthesis round-trips back-to-back
+# even though the text-to-speech service itself now runs multiple worker
+# PROCESSES (see TEXT_TO_SPEECH_WORKERS in docker-compose.yml) and can serve
+# concurrent requests. Measured on a 3-sentence upsell reply: serial
+# ~2.9s total vs an estimated ~1.7-1.8s with 2-way parallelism.
+# Safe to parallelize: downstream consumers (kiosk_core/service.py
+# get_response_audio_path) look up a segment by its "index" field, not by
+# the order it was appended to tts_audio_segments, so segments completing
+# out of order (e.g. a short sentence 2 finishing before a long sentence 1)
+# do not affect playback ordering. TtsClient's httpx.Client is documented
+# thread-safe for concurrent calls (see tts_client.py).
+# Does not change voice_to_voice_ms (sentence 1 is still queued/synthesised
+# first either way) — this shortens total TURN completion time, i.e. less
+# dead air between sentences 2/3 for multi-sentence replies.
+# Default matches TEXT_TO_SPEECH_WORKERS (2) so kiosk-core never sends more
+# concurrent requests than the backend has workers to serve without queueing.
+DEFAULT_TTS_WORKER_CONCURRENCY = max(
+    1, int(os.getenv("KIOSK_CORE_TTS_WORKER_CONCURRENCY", "2"))
+)
+
 # ── Speech normalization ───────────────────────────────────────────────────
 # The reply text/UI keep "₹169" and "8 AM" as written; speecht5 reads those
 # literally (symbol-and-digit tokens) rather than as a spoken price/time.
@@ -163,6 +186,35 @@ DEFAULT_TTS_CLAUSE_PAD_MS = float(os.getenv("KIOSK_CORE_TTS_CLAUSE_PAD_MS", "60"
 DEFAULT_TTS_SENTENCE_PAD_MS = float(os.getenv("KIOSK_CORE_TTS_SENTENCE_PAD_MS", "150"))
 # Amplitude below this fraction of the segment peak counts as silence.
 DEFAULT_TTS_SILENCE_FLOOR = float(os.getenv("KIOSK_CORE_TTS_SILENCE_FLOOR", "0.02"))
+# Word cap applied to the FIRST spoken segment of a turn only.
+#
+# Measured Kokoro synthesis cost is ~248ms fixed + ~13.9ms per character, so
+# the first segment's length translates almost linearly into time-to-first-
+# audio. A typical order confirmation ("I've added Classic Chicken Burger to
+# your order.", 47 chars) costs ~900ms before the customer hears anything,
+# even though the leading noun phrase alone already carries the confirmation.
+#
+# Capping only the first segment lets that leading phrase reach the
+# synthesizer immediately; the remainder becomes segment 2 and is synthesized
+# while segment 1 is already playing, so it costs nothing on the critical
+# path. Later segments are deliberately NOT capped -- they are already fully
+# overlapped with playback and splitting them would only add per-segment
+# fixed cost (248ms each) and extra prosody seams.
+#
+# 5 words is chosen to land after the object noun phrase rather than inside
+# it ("I've added Classic Chicken Burger" / "to your order."). Set to 0 to
+# disable the split entirely.
+DEFAULT_TTS_FIRST_PHRASE_MAX_WORDS = int(
+    os.getenv("KIOSK_CORE_TTS_FIRST_PHRASE_MAX_WORDS", "5")
+)
+# Minimum number of words that must remain AFTER the cap for a split to be
+# worthwhile. Without this, a 6-word sentence would be chopped into a 5-word
+# head and a 1-word orphan: the orphan pays the full ~248ms fixed synthesis
+# cost and introduces an audible seam, while saving almost no time on the
+# first segment.
+DEFAULT_TTS_FIRST_PHRASE_MIN_TAIL_WORDS = int(
+    os.getenv("KIOSK_CORE_TTS_FIRST_PHRASE_MIN_TAIL_WORDS", "3")
+)
 # Linear fade-in/fade-out applied to the very edges of every trimmed segment,
 # in milliseconds. The trim cut lands on whatever raw sample index the pad
 # window computes to — not a zero-crossing — so the waveform can (and does,
@@ -264,6 +316,113 @@ DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SE
 # proven to avoid the mid-word splits above, and it only became effective again
 # because the endpoint is now longer than it. See the INVARIANT note above.
 DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.70"))
+# ── Preview flush (continuous mid-speech ASR, not just at the pause) ───────
+# Without this, a long utterance is only ever flushed to ASR once — at the
+# adaptive pause above, AFTER the customer stops talking — so the entire
+# utterance's audio is on the critical path for that one ASR round-trip. That
+# round-trip has been measured landing at ~1.23-1.28s, later than even
+# DEFAULT_ENDPOINT_SHORT_SECONDS (1.0s), which is why the completeness
+# shortcut below rarely gets a chance to fire (see
+# docs/performance-improvements-2026-09.md, "preview-ASR work").
+#
+# This flushes accumulated speech to the background ASR worker periodically
+# WHILE the customer is still talking (not just at chunk_seconds or the
+# pause), so by the time silence begins, most of the utterance has already
+# been transcribed off the critical path — the chunk flushed at the adaptive
+# pause is then much shorter (only the audio since the last preview tick),
+# lands sooner, and gives the completeness shortcut a real chance to fire.
+#
+# Every preview flush reuses the exact same _flush_chunk path as the
+# existing chunk-size-cap and adaptive-pause flushes — same
+# transcript_parts append, same DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED
+# gating, same >=0.5s minimum-content guard. It is not a separate throwaway
+# code path; it only changes WHEN a chunk boundary is cut.
+#
+# Gated by self._flush_queue.unfinished_tasks == 0 at the call site (i.e. no
+# other flush is currently in flight) because audio-analyzer serialises all
+# WhisperPipeline.generate() calls behind a single global lock — a shorter
+# fixed tick interval would just queue up requests behind an already-running
+# call rather than run concurrently.
+#
+# 1.5s default: long enough that it never fires on typical short utterances
+# ("one classic burger" ~1-2s) — behaviour there is unchanged from before.
+# It only engages on longer continuous speech, which is exactly where the
+# single end-of-utterance flush was most expensive.
+DEFAULT_PREVIEW_FLUSH_ENABLED = os.getenv("KIOSK_CORE_PREVIEW_FLUSH_ENABLED", "true").lower() == "true"
+DEFAULT_PREVIEW_FLUSH_INTERVAL_SECONDS = float(os.getenv("KIOSK_CORE_PREVIEW_FLUSH_INTERVAL_SECONDS", "1.5"))
+
+# ── Speculative drafting (Round 3: agent/TTS cache-warming ahead of endpoint) ─
+#
+# The ASR-side fixes above (persistent httpx client, preview-ASR flush)
+# close the gap on transcription only. The dominant remaining cost by far is
+# the agent/LLM call + TTS synthesis, which today only ever starts AFTER the
+# customer stops talking and the endpoint fires — this is the structural
+# reason the reference "lab" prototype reaches ~700ms voice-to-voice while
+# this pipeline sits several seconds higher: the lab fires a fresh
+# agent+TTS draft on every ASR tick DURING speech (newest-wins), so a
+# matching draft/audio usually already exists by the time its endpoint
+# fires; here, nothing downstream of ASR has reacted to a preview transcript
+# until now.
+#
+# This flag enables that: on every preview-ASR flush (see
+# DEFAULT_PREVIEW_FLUSH_ENABLED above), a background thread fires a
+# SPECULATIVE agent turn (chat(..., speculative=True)) against the
+# transcript-so-far. The server FORCES every mutating ordering tool
+# (place_order/update_order/confirm_.../cancel_order/remove_from_order) into
+# dry_run mode for the whole turn — see _MUTATING_TOOLS/_speculative_ctx in
+# plugins/kiosk/ordering_agent.py — so a speculative call built on a
+# still-changing, possibly-incomplete transcript can NEVER write a real row
+# to the orders database, no matter what the agent decides to call. This
+# was verified directly against a live SQLite file (dry_run=True leaves order/
+# order_item row counts unchanged) before this flag was wired in.
+#
+# "Newest-wins": only the LATEST-STARTED draft's result is ever kept (see
+# BaseAudioSession._speculative_generation) — an older call that happens to
+# return after a newer one started is discarded outright, since a longer or
+# corrected transcript snapshot makes it stale.
+#
+# Kept deliberately SAFE-SCOPED for this rollout: the real (endpoint-fired)
+# turn always still runs its own full, fully-guarded LLM call exactly as
+# before — nothing here skips or replaces it. The benefit is (a) the LLM's
+# own prefix-cache/tool-call code path is already warm by the time the real
+# call runs, and (b) DEFAULT_SPECULATIVE_TTS_PRESYNTH_ENABLED below can
+# pre-synthesise the draft's predicted reply so a byte-identical real
+# sentence is served instantly instead of re-synthesised. A true "skip the
+# LLM/guards entirely and replay the draft's tool calls for real" optimisation
+# (closing the rest of the gap to the lab's ~700ms) is intentionally NOT
+# implemented here — it would require replaying draft results through the
+# same guard/reply-construction pipeline the LLM path uses, not just
+# re-dispatching raw tool calls, and was judged too large/risky to rush
+# alongside everything else in this round. Recommended as a dedicated,
+# carefully-tested follow-up.
+# DEFAULTED TO FALSE (2026-09-08 live-replay finding): both the LLM (OVMS)
+# and TTS backends in this deployment serialise requests — they do not run
+# a speculative call and the real turn's call concurrently, they queue them.
+# Live replay of tests/rec2_16k.wav showed the real turn's own tts= time
+# balloon to ~21.8s, matching almost exactly the ~21s consumed synthesising
+# 5 speculative sentences immediately beforehand — i.e. the real turn was
+# stuck waiting behind its own speculative work, not helped by it. Overall
+# wall time for that turn (38.2s) was far WORSE than the pre-speculative
+# baseline (~5.8s). Until the backends are confirmed/configured to serve
+# concurrent requests (e.g. multiple OVMS/TTS worker instances or a request
+# queue with priority for the real turn), enabling this trades a latency
+# win for a latency loss. Code path is fully safety-verified (see dry_run
+# notes above) and left in place as an opt-in for when backend concurrency
+# is addressed — do not flip to "true" without re-validating via a live
+# replay first.
+DEFAULT_SPECULATIVE_DRAFT_ENABLED = os.getenv("KIOSK_CORE_SPECULATIVE_DRAFT_ENABLED", "false").lower() == "true"
+
+# Pre-synthesise the speculative draft's predicted reply sentence-by-sentence
+# during speech, cached by exact sentence text. The REAL turn's _tts_worker
+# checks this cache before calling TTS for a sentence — only a cache HIT is
+# ever served, and a hit is only possible when the real, fully-guarded reply
+# produces a sentence identical to what the draft predicted, so nothing is
+# ever spoken that the real pipeline didn't independently decide to say.
+# Defaulted to false for the same backend-serialisation reason as
+# DEFAULT_SPECULATIVE_DRAFT_ENABLED above — see that comment.
+DEFAULT_SPECULATIVE_TTS_PRESYNTH_ENABLED = (
+    os.getenv("KIOSK_CORE_SPECULATIVE_TTS_PRESYNTH_ENABLED", "false").lower() == "true"
+)
 # ── Adaptive endpoint (sentence-completeness shortcut) ──────────────────────
 # DEFAULT_SILENCE_TIMEOUT_SECONDS above has to be long enough for the WORST
 # case: a customer hesitating mid-sentence. That makes every turn pay the
@@ -287,6 +446,24 @@ DEFAULT_ENDPOINT_SHORT_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_SHORT_SECO
 # Minimum words before a transcript may be judged "finished". Two words or
 # fewer is almost always a fragment mid-utterance ("I want...").
 DEFAULT_ENDPOINT_MIN_WORDS = int(os.getenv("KIOSK_CORE_ENDPOINT_MIN_WORDS", "3"))
+# Stability window for the completeness shortcut: the transcript text must be
+# UNCHANGED for this long before "reads complete" is trusted, not just true on
+# the instant a chunk lands.
+#
+# Reference: kiosk-voice-lab-main's assess_complete(text, stable) requires two
+# consecutive tick snapshots to agree before treating a transcript as finished
+# — its own comment notes "a word list alone called 90% of fragments
+# 'finished'". _looks_complete() here is the same kind of word-list check, so
+# it inherits the same risk: a transcript that happens to end on a real word
+# the instant a chunk lands (e.g. a flush landing mid-utterance with
+# "...order one classic chicken" before "burger" has even been spoken) could
+# otherwise commit the turn on a truncated sentence.
+#
+# This only ever WITHHOLDS an early commit, never grants one the fixed timeout
+# wouldn't have — if the transcript is still changing, the full
+# silence_timeout_seconds wait is the fallback, same fail-closed posture as
+# _looks_complete's own empty-transcript case.
+DEFAULT_ENDPOINT_STABLE_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_STABLE_SECONDS", "0.2"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))
 
@@ -423,6 +600,35 @@ DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED = os.getenv(
     "KIOSK_CORE_DIARIZATION_INTERMEDIATE_ENABLED", "false"
 ).lower() not in ("false", "0", "no")
 
+# ── Enrollment priming ──────────────────────────────────────────────────────
+# The analyzer can only tag segments with is_primary once it has ENROLLED a
+# reference voice for the conversation, and it enrolls from a diarized chunk
+# containing a speech span of at least DEFAULT_DIARIZATION_ENROLL_MIN_SECONDS.
+# The final tail chunk is usually far shorter than that ("classic chicken
+# burger", ~1.2s), so if no intermediate chunk is ever diarized the analyzer
+# never enrolls, is_primary is never set on any segment, and the speaker
+# filter silently degrades to its first-speaker/semantic fallback — losing the
+# bystander protection described under DEFAULT_SPEAKER_STRICT_DROP.
+#
+# This previously worked only by accident: kiosk-core's per-request
+# `diarization` flag was not a parameter of the analyzer's endpoint, so it was
+# discarded and EVERY chunk was diarized regardless of the flag above. With the
+# flag honoured, enrollment has to be requested deliberately.
+#
+# So: diarize intermediate chunks until the conversation has an enrolled voice,
+# then stop. The cost is paid once per conversation, on an early chunk while
+# the customer is still talking — never on the final tail chunk that sits on
+# the voice-to-voice critical path.
+DEFAULT_DIARIZATION_ENROLLMENT_PRIMING_ENABLED = os.getenv(
+    "KIOSK_CORE_DIARIZATION_ENROLLMENT_PRIMING_ENABLED", "true"
+).lower() not in ("false", "0", "no")
+# Must match the analyzer's own minimum enrollment span (its
+# models.diarization.enrollment min duration). A shorter chunk cannot enroll,
+# so diarizing it would buy nothing and only add latency.
+DEFAULT_DIARIZATION_ENROLL_MIN_SECONDS = float(
+    os.getenv("KIOSK_CORE_DIARIZATION_ENROLL_MIN_SECONDS", "2.0")
+)
+
 # ── Skip empty final tail-chunk ASR call ────────────────────────────────────
 # Tier 2 roadmap item #4 ("cumulative-snapshot ASR"), adapted to this
 # codebase's actual bottleneck rather than the reference lab's design
@@ -462,6 +668,15 @@ DEFAULT_SEMANTIC_FALLBACK_THRESHOLD = float(os.getenv("KIOSK_CORE_SEMANTIC_FALLB
 # semantic heuristics instead — an escape hatch for when voice enrollment is
 # mistuned and starts rejecting the real customer.
 DEFAULT_SPEAKER_STRICT_DROP = os.getenv("KIOSK_CORE_SPEAKER_STRICT_DROP", "true").lower() not in ("false", "0", "no")
+
+# Minimum number of repeated words required before the transcript backstop
+# (BaseAudioSession._strip_duplicate_prefix) treats a leading run as an
+# analyzer re-transcription rather than genuine speech. The analyzer is
+# cumulative, and the flat-text and segment dedup paths track different
+# cursors, so a segment straddling a previous flush can re-deliver words that
+# were already committed. Three words is high enough that natural repetition
+# ("yes yes", "two two please") is never swallowed.
+DEFAULT_DUPLICATE_PREFIX_MIN_WORDS = int(os.getenv("KIOSK_CORE_DUPLICATE_PREFIX_MIN_WORDS", "3"))
 
 # Spoken replies used when a turn produces no usable transcript. The two cases
 # are NOT interchangeable and must never share a message:

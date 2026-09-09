@@ -30,6 +30,14 @@ services:
       dockerfile: Dockerfile
     image: ${REGISTRY:-intel}/rtsp-streamer:${RELEASE_TAG:-latest}
     container_name: rtsp-streamer
+    # Gated behind the `queue` compose profile (container-layer flag), same
+    # pattern as identity-service — ON by default via the Makefile's `up`
+    # target (see QUEUE/_QUEUE_PROFILE there), so plain `make up` keeps
+    # today's behaviour unchanged. Disable for a run with
+    # `make up QUEUE=false` to free the ~10-12 CPU cores this + queue-service
+    # otherwise permanently consume (measured: ~650-750% + ~350-500% CPU),
+    # e.g. to isolate/benchmark the voice pipeline's own latency.
+    profiles: ["queue"]
     user: "1000:1000"
     ports:
       - "8554:8554"
@@ -82,6 +90,9 @@ services:
       dockerfile: docker/Dockerfile
     image: ${REGISTRY:-intel}/queue-service:${RELEASE_TAG:-latest}
     container_name: queue-service
+    # Gated behind the `queue` compose profile — see rtsp-streamer above for
+    # the full rationale (ON by default; `make up QUEUE=false` disables it).
+    profiles: ["queue"]
     user: "1000:1000"
     ports:
       - "8090:8090"
@@ -153,7 +164,13 @@ services:
     # service can go back to pulling the shared image instead of shadowing it
     # with a locally-built one. Override the tag with METRICS_COLLECTOR_TAG in
     # .env if a newer version is published.
-    image: ${REGISTRY:-intel}/hl-ai-metrics-collector:${METRICS_COLLECTOR_TAG:-2026.2.0-rc2}
+    # Deliberately NOT ${REGISTRY}: that variable selects where the images we
+    # build locally are tagged/pushed (e.g. REGISTRY=false while iterating), but
+    # this image is only ever pulled from upstream, so following REGISTRY just
+    # produces "pull access denied for false/hl-ai-metrics-collector" and blocks
+    # `docker compose up` for the whole stack. Override the namespace with
+    # METRICS_COLLECTOR_REGISTRY if it is ever mirrored elsewhere.
+    image: ${METRICS_COLLECTOR_REGISTRY:-intel}/hl-ai-metrics-collector:${METRICS_COLLECTOR_TAG:-2026.2.0-rc2}
     container_name: metrics-collector
     privileged: true
     pid: host
@@ -183,6 +200,26 @@ services:
     restart: unless-stopped
 
   audio-analyzer:
+    # Built locally from the sibling edge-ai-libraries checkout, matching the
+    # text-to-speech service above, so local changes to the ASR/diarization
+    # pipeline are picked up. Comment out `build:` and rely on `image:` alone
+    # to go back to pulling the upstream prebuilt image.
+    #
+    # Uses the top-level Dockerfile rather than docker/Dockerfile: the two are
+    # identical except that this one parenthesises the torchcodec uninstall,
+    # so `|| true` applies only to that uninstall instead of swallowing a
+    # failure anywhere in the preceding pip chain (which would silently
+    # produce a broken image).
+    build:
+      context: ../../edge-ai-libraries/microservices/audio-analyzer
+      dockerfile: Dockerfile
+      # No HF_TOKEN build arg on purpose. The Dockerfile does
+      # `ENV HF_TOKEN=${HF_TOKEN}`, so passing it at build time bakes the
+      # secret permanently into an image layer (recoverable by anyone who can
+      # inspect or pull the image). It is unnecessary anyway: the token is
+      # already supplied at runtime in the environment block below, and the
+      # service loads pyannote from the pre-cached ./models with
+      # HF_HUB_OFFLINE=1, so nothing gated is fetched during the build.
     image: ${REGISTRY:-intel}/audio-analyzer:${RELEASE_TAG:-latest}
     container_name: audio-analyzer
     # Hardcoded to match the image's baked-in app user and the
@@ -239,6 +276,11 @@ services:
       # where no HF_TOKEN/model-licence acceptance is available) also skip that
       # preload, instead of crashing with an unauthenticated 403 download.
       AUDIO_ANALYZER__MODELS__ASR__DIARIZATION: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
+      # ASR inference device override — config.yaml pins "NPU" by default.
+      # Set ASR_DEVICE=GPU in .env to compare against NPU/CPU without editing
+      # the mounted config file. See config.yaml's models.asr.device comment
+      # for the NPU-vs-GPU rationale/measurements this overrides.
+      AUDIO_ANALYZER__MODELS__ASR__DEVICE: ${ASR_DEVICE:-NPU}
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
       # service config without modifying edge-ai-libraries.
@@ -285,6 +327,16 @@ services:
       # Point HF cache under ~/.cache so a single ./.cache mount persists
       # every model cache the service uses (HF, torch hub, etc.).
       HF_HOME: /app/text-to-speech/.cache/huggingface
+      # 2 uvicorn worker PROCESSES so overlapping synth calls (e.g. a
+      # speculative draft's pre-synthesis running alongside the real turn's
+      # TTS) actually run concurrently instead of queueing behind Kokoro's
+      # per-process inference lock — verified serialized on this box before
+      # this change (2 concurrent /v1/audio/speech calls: ~1.77s, barely
+      # faster than 2 sequential calls at ~1.65s). Safe on this host: 16
+      # cores, each Kokoro call caps at 4 intra-op threads, and every service
+      # measured near-idle CPU at rest (see docker stats). Costs one extra
+      # ~1GB model load (2nd worker's cold start on its first request).
+      TEXT_TO_SPEECH_WORKERS: ${TEXT_TO_SPEECH_WORKERS:-2}
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
       # service config without modifying edge-ai-libraries.
@@ -345,6 +397,10 @@ services:
       # flag alone falls back to the buffered /api/v1/agent/chat path.
       # Set AGENT_STREAM_SENTENCES=false to revert with a restart, no rebuild.
       AGENT_STREAM_SENTENCES: ${AGENT_STREAM_SENTENCES:-true}
+      # Inline <act> directive instead of a structured tool call — one
+      # generation carries both the cart mutation and the speech, so TTS can
+      # start before generation finishes. See plugins/kiosk/directive_mode.py.
+      AGENT_DIRECTIVE_MODE: ${AGENT_DIRECTIVE_MODE:-false}
       # Caps generated tokens per LLM round-trip. Decode dominates agent
       # latency, so this bounds the worst case (a turn that free-runs instead
       # of calling a tool). Generation stops at EOS, so this does NOT shorten a
@@ -521,6 +577,7 @@ services:
       --max_num_seqs ${OVMS_MAX_NUM_SEQS:-4}
       --max_num_batched_tokens ${OVMS_MAX_BATCHED_TOKENS:-4096}
       --plugin_config '{"PERFORMANCE_HINT":"LATENCY"}'
+      --metrics_enable
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/v3/models"]
       interval: 20s
@@ -572,6 +629,25 @@ services:
       # word). Default off pending live A/B measurement; see config.py for
       # the full rationale (DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED).
       KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED: ${KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED:-false}
+      # Speculative drafting (see DEFAULT_SPECULATIVE_DRAFT_ENABLED in
+      # config.py for the full rationale/safety notes — dry_run-guarded,
+      # newest-wins). Was defaulted OFF after a 2026-09-08 live-replay
+      # regression (5.8s -> 38.2s) traced to the TTS backend serializing
+      # requests. Re-tested 2026-09-09 AFTER fixing that (text-to-speech now
+      # runs TEXT_TO_SPEECH_WORKERS=2, verified concurrent — 2 parallel synth
+      # calls dropped from ~1.77s to ~1.18s — and OVMS/rag-service confirmed
+      # to already serve concurrent agent/chat calls). Still net NEGATIVE on
+      # this fixture: 3-run mean rose from 3839ms to 4061ms (+222ms). Root
+      # cause: exact-string draft-cache matching almost never hits — ASR
+      # trailing noise (e.g. a spurious "Good." segment appended after the
+      # real sentence) means the final transcript rarely matches any single
+      # earlier preview snapshot the draft ran against, so every draft/TTS
+      # presynth call in this test was 100% wasted work that still competed
+      # with the real turn's own LLM/TTS calls for the same backends. Keep
+      # OFF until draft-cache matching is made fuzzy/prefix-tolerant instead
+      # of exact-string, then re-benchmark before flipping to true.
+      KIOSK_CORE_SPECULATIVE_DRAFT_ENABLED: ${KIOSK_CORE_SPECULATIVE_DRAFT_ENABLED:-false}
+      KIOSK_CORE_SPECULATIVE_TTS_PRESYNTH_ENABLED: ${KIOSK_CORE_SPECULATIVE_TTS_PRESYNTH_ENABLED:-false}
       KIOSK_CORE_METRICS_URL:  http://metrics-collector:9000
       # Diarization — re-enable once HF terms are accepted for pyannote models.
       # Accept terms at: https://huggingface.co/pyannote/speaker-diarization-community-1
