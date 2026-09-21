@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -34,6 +35,16 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
+
+# /chat-no-adk is a lab-only A/B benchmark twin of /chat (see its docstring
+# below) that can place/confirm real orders through the same MCP tools.
+# main.py mounts this whole router in every deployment where
+# ORDERING_AGENT_ENABLED is set (the default), so without its own flag this
+# route would be reachable in production despite being intended for
+# tests/benchmarks/*_no_adk.py only. Off by default; benchmarks must opt in.
+BENCHMARK_ENDPOINTS_ENABLED = (
+    os.getenv("AGENT_BENCHMARK_ENDPOINTS_ENABLED", "false").lower() == "true"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -214,63 +225,66 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     )
 
 
-@router.post(
-    "/chat-no-adk",
-    response_model=AgentChatResponse,
-    summary="Agent ordering chat — non-ADK benchmark variant",
-)
-async def agent_chat_no_adk(request: AgentChatRequest) -> AgentChatResponse:
-    """Benchmark-only twin of ``POST /chat`` for the ADK vs non-ADK A/B.
-
-    Routes to ``plugins.kiosk.ordering_agent_without_adk.OrderingAgentWithoutADK``
-    instead of the production plugin loader — same request/response shape,
-    same MCP tools, same guards/templates where reused, but every turn is at
-    most one LLM call with no ``tools=`` field (see that module's docstring).
-    Exists only so ``tests/benchmarks/agent_latency_benchmark.py`` can hit
-    both agents by URL alone. Not registered for production traffic.
-    """
-    logger.info(
-        "[AGENT-ENDPOINT-NOADK] session=%s user=%s message=%r",
-        request.session_id,
-        request.user_id,
-        request.transcription[:100],
+if BENCHMARK_ENDPOINTS_ENABLED:
+    @router.post(
+        "/chat-no-adk",
+        response_model=AgentChatResponse,
+        summary="Agent ordering chat — non-ADK benchmark variant",
     )
+    async def agent_chat_no_adk(request: AgentChatRequest) -> AgentChatResponse:
+        """Benchmark-only twin of ``POST /chat`` for the ADK vs non-ADK A/B.
 
-    try:
-        from plugins.kiosk.ordering_agent_without_adk import get_ordering_agent_without_adk
-
-        agent = get_ordering_agent_without_adk()
-        result = await agent.chat(
-            message=request.transcription,
-            session_id=request.session_id,
-            user_id=request.user_id,
-            history=request.history,
-            speculative=request.speculative,
+        Routes to ``plugins.kiosk.ordering_agent_without_adk.OrderingAgentWithoutADK``
+        instead of the production plugin loader — same request/response shape,
+        same MCP tools, same guards/templates where reused, but every turn is at
+        most one LLM call with no ``tools=`` field (see that module's docstring).
+        Exists only so ``tests/benchmarks/agent_latency_benchmark.py`` can hit
+        both agents by URL alone. Only registered when
+        ``AGENT_BENCHMARK_ENDPOINTS_ENABLED=true`` (default: off); a normal
+        deployment never mounts this route.
+        """
+        logger.info(
+            "[AGENT-ENDPOINT-NOADK] session=%s user=%s message=%r",
+            request.session_id,
+            request.user_id,
+            request.transcription[:100],
         )
-    except Exception as exc:
-        logger.error("[AGENT-ENDPOINT-NOADK] Unhandled error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    logger.info(
-        "[AGENT-ENDPOINT-NOADK] session=%s reply_len=%d tool_calls=%s",
-        request.session_id,
-        len(result.get("reply", "")),
-        result.get("tool_calls", []),
-    )
-    return AgentChatResponse(
-        reply=result["reply"],
-        tool_calls=result.get("tool_calls", []),
-        tool_call_detail=_scoped_tool_call_detail(request, result),
-        llm_ms=result.get("llm_ms"),
-        llm_ttft_ms=result.get("llm_ttft_ms"),
-        llm_calls=result.get("llm_calls", 0),
-        retrieval_ms=result.get("retrieval_ms"),
-        mcp_ms=result.get("mcp_ms"),
-        mcp_calls=result.get("mcp_calls", 0),
-        guard_ms=result.get("guard_ms"),
-        template_ms=result.get("template_ms"),
-        templated=result.get("templated", False),
-    )
+        try:
+            from plugins.kiosk.ordering_agent_without_adk import get_ordering_agent_without_adk
+
+            agent = get_ordering_agent_without_adk()
+            result = await agent.chat(
+                message=request.transcription,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                history=request.history,
+                speculative=request.speculative,
+            )
+        except Exception as exc:
+            logger.error("[AGENT-ENDPOINT-NOADK] Unhandled error: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        logger.info(
+            "[AGENT-ENDPOINT-NOADK] session=%s reply_len=%d tool_calls=%s",
+            request.session_id,
+            len(result.get("reply", "")),
+            result.get("tool_calls", []),
+        )
+        return AgentChatResponse(
+            reply=result["reply"],
+            tool_calls=result.get("tool_calls", []),
+            tool_call_detail=_scoped_tool_call_detail(request, result),
+            llm_ms=result.get("llm_ms"),
+            llm_ttft_ms=result.get("llm_ttft_ms"),
+            llm_calls=result.get("llm_calls", 0),
+            retrieval_ms=result.get("retrieval_ms"),
+            mcp_ms=result.get("mcp_ms"),
+            mcp_calls=result.get("mcp_calls", 0),
+            guard_ms=result.get("guard_ms"),
+            template_ms=result.get("template_ms"),
+            templated=result.get("templated", False),
+        )
 
 
 @router.post("/chat/stream", summary="Agent ordering chat (streaming)")

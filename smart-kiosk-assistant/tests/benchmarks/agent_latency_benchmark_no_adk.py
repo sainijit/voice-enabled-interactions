@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -246,15 +247,23 @@ class BenchmarkReport:
 
 
 def stack_up(timeout: float) -> None:
-    """Run ``make up`` from the smart-kiosk-assistant directory."""
+    """Run ``make up`` from the smart-kiosk-assistant directory.
+
+    Forces ``AGENT_BENCHMARK_ENDPOINTS_ENABLED=true`` so rag-service mounts
+    ``/api/v1/agent/chat-no-adk`` (off by default in every normal
+    deployment — see docker-compose.yml/.env.example). Without this, `make
+    up` would bring up a stack that 404s on every request this script sends.
+    """
     workdir = STACK_DIR
-    print(f"[stack] make up  (cwd={workdir})")
+    env = dict(os.environ, AGENT_BENCHMARK_ENDPOINTS_ENABLED="true")
+    print(f"[stack] make up  (cwd={workdir}, AGENT_BENCHMARK_ENDPOINTS_ENABLED=true)")
     proc = subprocess.run(
         ["make", "up"],
         cwd=workdir,
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
     sys.stdout.write(proc.stdout)
     if proc.returncode != 0:
