@@ -69,6 +69,14 @@ def _make_session() -> BaseAudioSession:
     session._chunk_has_speech = False
     session._final_flush_skipped = False
     session._frame_duration_seconds = FRAME_DURATION_SECONDS
+    # _process_frame_stream also touches these -- __init__ normally sets
+    # them (kiosk_core/audio_session.py, BaseAudioSession.__init__), but
+    # this harness bypasses __init__ via __new__(). Continuous-streaming is
+    # off in these tests (no realtime_client), so _streaming_active must
+    # resolve to False without raising through its is_alive() check.
+    session._lock = threading.Lock()
+    session.realtime_client = None
+    session._streaming_active = False
     session.transcript_parts = []
     session.end_reason = None
     session._endpoint_wait_seconds = None

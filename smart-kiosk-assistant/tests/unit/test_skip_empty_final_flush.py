@@ -64,6 +64,15 @@ def _make_session() -> BaseAudioSession:
     session._chunk_has_speech = False
     session._final_flush_skipped = False
     session._frame_duration_seconds = FRAME_DURATION_SECONDS
+    # _process_frame_stream also touches these -- __init__ normally sets
+    # them (kiosk_core/audio_session.py, BaseAudioSession.__init__), but
+    # this harness bypasses __init__ via __new__(). Continuous-streaming is
+    # off in these tests (no realtime_client), so _streaming_active must
+    # resolve to False without raising through its is_alive() check.
+    session._lock = threading.Lock()
+    session.realtime_client = None
+    session._streaming_active = False
+    session._unconfirmed_speech_pending = False
     session.transcript_parts = []
     session.end_reason = None
     session._endpoint_wait_seconds = None
@@ -72,13 +81,26 @@ def _make_session() -> BaseAudioSession:
 
 
 def _drain_flush_queue_in_background(session: BaseAudioSession) -> list:
-    """Stand in for _flush_worker: record each item, then task_done()."""
+    """Stand in for _flush_worker: record each item, then task_done().
+
+    Also mirrors _flush_worker's real post-ASR-success side effect of
+    clearing _unconfirmed_speech_pending (kiosk_core/audio_session.py, the
+    `self._unconfirmed_speech_pending = False` line right after a chunk's
+    transcript is appended) -- without it, a chunk carrying real speech is
+    enqueued+drained here but never "confirmed", so the final-flush skip
+    logic (which requires it False) can never fire in this synchronous fake,
+    even though the real worker would have cleared it.
+    """
     items = []
 
     def _drain():
         while True:
             item = session._flush_queue.get()
             items.append(item)
+            if item is not None:
+                frames, _is_final = item
+                if any(np.any(f) for f in frames):
+                    session._unconfirmed_speech_pending = False
             session._flush_queue.task_done()
             if item is None:
                 break

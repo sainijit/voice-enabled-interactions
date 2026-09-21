@@ -1520,7 +1520,13 @@ class BaseAudioSession:
             self.client.close()
         except Exception:
             logger.exception("Session %s: failed to close analyzer client", self.session_id)
-        if self.realtime_client is not None:
+        # Unlike client/tts_client/agent_client above and below, this
+        # attribute lookup was NOT inside its own try/except -- an
+        # AttributeError from a partially-built session (e.g. a test double)
+        # would escape here, breaking the "cleanup must not raise" invariant
+        # this whole method documents. getattr(..., None) makes it consistent
+        # with the other three cleanup calls.
+        if getattr(self, "realtime_client", None) is not None:
             try:
                 self.realtime_client.close()
             except Exception:
