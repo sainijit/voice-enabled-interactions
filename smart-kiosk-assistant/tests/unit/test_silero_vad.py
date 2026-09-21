@@ -76,7 +76,7 @@ class TestSileroVADSpeechDetection:
         # Must not raise, and buffer should hold the 1600 % 512 == 64 sample
         # remainder between calls.
         vad.prob(chunk)
-        assert len(vad.buf) == FRAME_SAMPLES % SileroVAD.FRAME
+        assert len(vad.buf) == FRAME_SAMPLES % vad.frame_size
 
 
 class TestSileroVADStateHandling:

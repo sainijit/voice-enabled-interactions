@@ -35,12 +35,17 @@ class SileroVAD:
 
     Frames are accumulated internally; callers may feed chunks of any size
     (e.g. this project's 100ms/1600-sample blocks) and the wrapper slices
-    them into the model's required 512-sample (16kHz) hops, buffering any
-    remainder for the next call. State (the model's internal recurrent
-    state) and the causal left-context are carried between calls.
+    them into the model's required hop size -- 512 samples at 16kHz or 256
+    samples at 8kHz (see ``FRAME_SIZES`` and ``self.frame_size``) --
+    buffering any remainder for the next call. State (the model's internal
+    recurrent state) and the causal left-context are carried between calls.
     """
 
-    FRAME = 512
+    #: Required hop size in samples, per supported sample rate. The 16kHz
+    #: hop was previously hardcoded as a single class-level FRAME=512,
+    #: which silently fed 8kHz sessions the wrong-length input (should be a
+    #: 256-sample hop, not 512) instead of raising or falling back.
+    FRAME_SIZES = {16000: 512, 8000: 256}
 
     #: Sample rates the upstream Silero v5 graph accepts. Feeding any other
     #: rate loads successfully but fails at *inference* time deep inside the
@@ -84,6 +89,7 @@ class SileroVAD:
         self.sr = np.array(sample_rate, dtype=np.int64)
         self.buf = np.zeros(0, dtype=np.float32)
         self.last_prob = 0.0
+        self.frame_size = self.FRAME_SIZES[sample_rate]
         self.context_size = 64 if sample_rate == 16000 else 32
         self.context = np.zeros(self.context_size, dtype=np.float32)
 
@@ -97,13 +103,13 @@ class SileroVAD:
 
         Returns:
             The most recently computed speech probability in [0, 1]. If the
-            accumulated buffer hasn't reached a full 512-sample frame yet,
-            returns the previous call's probability unchanged.
+            accumulated buffer hasn't reached a full frame (self.frame_size
+            samples) yet, returns the previous call's probability unchanged.
         """
         self.buf = np.concatenate([self.buf, np.asarray(chunk, dtype=np.float32)])
-        while len(self.buf) >= self.FRAME:
-            frame = self.buf[: self.FRAME]
-            self.buf = self.buf[self.FRAME :]
+        while len(self.buf) >= self.frame_size:
+            frame = self.buf[: self.frame_size]
+            self.buf = self.buf[self.frame_size :]
             x = np.concatenate([self.context, frame])[None, :].astype(np.float32)
             out = self.sess.run(
                 None, {"input": x, "state": self.state, "sr": self.sr}

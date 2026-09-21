@@ -34,12 +34,12 @@ from kiosk_core.tts_client import TtsClient
 logger = logging.getLogger(__name__)
 
 # ── Pre-synthesized opener cache ──────────────────────────────────────────
-# Rendered at most once per (text, model, voice, language) for the whole
-# process and reused by every session, so the opener never costs TTS time on
-# the hot path. Guarded by a lock because concurrent sessions can race on the
-# first turn after startup.
+# Rendered at most once per (text, model, voice, language, instructions) for
+# the whole process and reused by every session, so the opener never costs
+# TTS time on the hot path. Guarded by a lock because concurrent sessions
+# can race on the first turn after startup.
 _opener_lock = threading.Lock()
-_opener_cache: dict[tuple[str, str, str | None, str | None], Path | None] = {}
+_opener_cache: dict[tuple[str, str, str | None, str | None, str | None], Path | None] = {}
 
 
 def _render_opener(
@@ -66,7 +66,7 @@ def _render_opener(
         cached as None so a broken TTS service cannot make every turn pay a
         failed round-trip.
     """
-    key = (text, model, voice, language)
+    key = (text, model, voice, language, instructions)
     with _opener_lock:
         if key in _opener_cache:
             return _opener_cache[key]
@@ -956,6 +956,14 @@ class BaseAudioSession:
                 if not self._speech_started:
                     if is_speech:
                         self._speech_started = True
+                        # Set here too, not just in the is_speech branch
+                        # below: this branch `continue`s before ever reaching
+                        # that one, so a short utterance whose speech never
+                        # extends past this first frame would otherwise leave
+                        # _chunk_has_speech False and get silently dropped by
+                        # the empty-final-flush skip.
+                        self._chunk_has_speech = True
+                        self._unconfirmed_speech_pending = True
                         if self._t_capture_start is None:
                             self._t_capture_start = time.monotonic()
                         while self._preroll_frames:

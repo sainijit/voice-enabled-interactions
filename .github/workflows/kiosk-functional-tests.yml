@@ -117,6 +117,30 @@ jobs:
             smart-kiosk-assistant/tests/functional/test_results.csv
           retention-days: 30
 
+      # tests/unit/ is deliberately excluded from pytest.ini's default
+      # testpaths (tests/functional only) so functional's tier1/tier2/tier3
+      # marker selection stays unambiguous. That means these regression tests
+      # — ASR endpoint/flush/VAD/speaker-filter behavior — must be invoked
+      # explicitly or they silently never run in CI. No Docker/ML models
+      # required, same as Tier 1 functional above.
+      - name: Run unit tests
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest tests/unit/ \
+            --tb=short \
+            -v \
+            --timeout=60 \
+            --junitxml=test-results/unit-results.xml
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
+        with:
+          name: unit-test-results
+          path: smart-kiosk-assistant/test-results/unit-results.xml
+          retention-days: 30
+
   # ---------------------------------------------------------------------------
   # TIER 2 — Build, deploy & full-stack integration tests
   # Covers TC #5 and TC #8–#13 from functional-test-cases-sheet.md:

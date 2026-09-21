@@ -45,11 +45,20 @@ from agentic import action_result
 logger = logging.getLogger(__name__)
 
 # Tools whose result carries an authoritative ``total`` for the customer's
-# current order. Read-only lookups (``get_current_order``) are included: a
-# stale total restated from an earlier turn is exactly the failure mode this
-# guard exists to catch.
+# current order. Read-only lookups (``get_current_order``, ``get_order``)
+# are included: a stale total restated from an earlier turn is exactly the
+# failure mode this guard exists to catch. ``remove_from_order`` is included
+# too — the MCP server returns an authoritative total for it just like the
+# other mutation tools (kiosk_core/ordering/mcp_server.py).
 _TOTAL_TOOLS = frozenset(
-    {"place_order", "update_order", "confirm_active_order", "get_current_order"}
+    {
+        "place_order",
+        "update_order",
+        "confirm_active_order",
+        "get_current_order",
+        "get_order",
+        "remove_from_order",
+    }
 )
 
 # Matches a sentence clause naming the *order total* (not a per-item price):

@@ -29,23 +29,35 @@ models:
                         # one combination the original 2026-09-07 evaluation found bug-free, and
                         # remains a possible future option at the cost of iGPU contention with
                         # LLM/TTS.
-    device: NPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
-                # Enabled after fixing ACCEL_MOUNT_PATH (was /dev/null, silently
-                # disabling NPU passthrough — see .env). NPU is now enumerated
-                # correctly. An initial A/B (NPU ~950-1,300ms vs an earlier GPU
-                # baseline of 660ms) looked like a regression, but that comparison
-                # was confounded: diarization was silently still enabled
+    device: CPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
+                # Default kept CPU on purpose: NPU requires ACCEL_MOUNT_PATH to
+                # be pointed at the host's real NPU device node, and
+                # .env.example's safe/portable default for that is /dev/null
+                # (NPU disabled) since not every deployment host has one. A
+                # mounted-config default of NPU here, paired with a /dev/null
+                # host mount, made ASR fail to start on any CPU/GPU-only host
+                # following the documented default .env. NPU is fully
+                # supported and measured competitive (see below) — opt in by
+                # setting ASR_DEVICE=NPU and ACCEL_MOUNT_PATH=/dev/accel/accel0
+                # together in .env; docker-compose.yml's
+                # AUDIO_ANALYZER__MODELS__ASR__DEVICE override matches this
+                # same CPU default so the two never disagree.
+                #
+                # Measurements from when NPU was the default here: an initial
+                # A/B (NPU ~950-1,300ms vs an earlier GPU baseline of 660ms)
+                # looked like a regression, but that comparison was confounded:
+                # diarization was silently still enabled
                 # (AUDIO_ANALYZER__MODELS__ASR__DIARIZATION env override defaults
                 # to true regardless of this file) and the GPU baseline used a
                 # different benchmark clip. A controlled re-test — same clip,
                 # same warm container, diarization forced off for the isolation
                 # test only — showed NPU (542-557ms) and GPU (533-584ms)
-                # effectively tied for whisper-small on this hardware. Keeping
-                # NPU: it frees the iGPU for ovms-llm/text-to-speech, matching
-                # the reference prototype's (kiosk-voice-handoff.pdf) rationale
-                # for putting ASR on NPU even though it uses a smaller distilled
-                # model (distil-whisper distil-small.en) that we don't have
-                # exported offline.
+                # effectively tied for whisper-small on this hardware. NPU
+                # remains attractive because it frees the iGPU for
+                # ovms-llm/text-to-speech, matching the reference prototype's
+                # (kiosk-voice-handoff.pdf) rationale for putting ASR on NPU
+                # even though it uses a smaller distilled model (distil-whisper
+                # distil-small.en) that we don't have exported offline.
     weight_format: int8 # OpenVINO: int8 | fp16 | null; int8 for distil-small.en-int8 OV model
     temperature: 0.0
     # Preview-pool override (2026-09-10, endpoint-latency work): the preview

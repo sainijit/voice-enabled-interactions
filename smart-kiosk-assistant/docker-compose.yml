@@ -211,7 +211,7 @@ services:
     # failure anywhere in the preceding pip chain (which would silently
     # produce a broken image).
     build:
-      context: ../../edge-ai-libraries/microservices/audio-analyzer
+      context: ../edge-ai-libraries/microservices/audio-analyzer
       dockerfile: Dockerfile
       # No HF_TOKEN build arg on purpose. The Dockerfile does
       # `ENV HF_TOKEN=${HF_TOKEN}`, so passing it at build time bakes the
@@ -276,11 +276,12 @@ services:
       # where no HF_TOKEN/model-licence acceptance is available) also skip that
       # preload, instead of crashing with an unauthenticated 403 download.
       AUDIO_ANALYZER__MODELS__ASR__DIARIZATION: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
-      # ASR inference device override — config.yaml pins "NPU" by default.
-      # Set ASR_DEVICE=GPU in .env to compare against NPU/CPU without editing
-      # the mounted config file. See config.yaml's models.asr.device comment
-      # for the NPU-vs-GPU rationale/measurements this overrides.
-      AUDIO_ANALYZER__MODELS__ASR__DEVICE: ${ASR_DEVICE:-NPU}
+      # ASR inference device override — config.yaml pins "CPU" by default
+      # (see its models.asr.device comment for why NPU is opt-in only). Set
+      # ASR_DEVICE=NPU (and ACCEL_MOUNT_PATH to the real device node) in
+      # .env to compare against CPU/GPU without editing the mounted config
+      # file.
+      AUDIO_ANALYZER__MODELS__ASR__DEVICE: ${ASR_DEVICE:-CPU}
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
       # service config without modifying edge-ai-libraries.
@@ -311,7 +312,7 @@ services:
     # `build:` and rely on `image:` alone to go back to pulling the
     # upstream prebuilt image (SpeechT5/Qwen only, no Kokoro).
     build:
-      context: ../../edge-ai-libraries/microservices/text-to-speech
+      context: ../edge-ai-libraries/microservices/text-to-speech
       dockerfile: Dockerfile
     image: ${REGISTRY:-intel}/text-to-speech:${RELEASE_TAG:-latest}
     container_name: text-to-speech
@@ -613,6 +614,13 @@ services:
       # per the original rationale: visible here, swappable without touching
       # config.yaml. Full Kokoro voice list is in configs/text-to-speech/config.yaml.
       KIOSK_CORE_TTS_VOICE:    am_michael
+      # kiosk_core.config.DEFAULT_TTS_MODEL falls back to "qwen-tts" when this
+      # is unset. TtsClient sends whatever this resolves to as the model name
+      # on every request, and the TTS backend now matches by substring on
+      # "kokoro" (components/tts/kokoro/kokoro_tts.py::matches_model_name) —
+      # without this override every request would ask for qwen-tts against a
+      # service now configured for the kokoro runtime.
+      KIOSK_CORE_TTS_MODEL:    kokoro
       # ── Pre-synthesized opener ────────────────────────────────────────
       # An ordering turn's reply is templated only after the tool returns, so
       # the model emits no prose to stream and the customer hears ~2s of
