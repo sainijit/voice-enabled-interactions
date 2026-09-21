@@ -38,6 +38,22 @@ def test_currency_symbol_preserved():
     assert _normalize_sentence_for_cache_key(a) != _normalize_sentence_for_cache_key(b)
 
 
+def test_decimal_point_preserved():
+    # ₹169.50 and ₹16950 must NOT collapse to the same key: stripping "."
+    # unconditionally (as generic punctuation) changes the actual amount.
+    a = "Your total is now ₹169.50"
+    b = "Your total is now ₹16950"
+    assert _normalize_sentence_for_cache_key(a) != _normalize_sentence_for_cache_key(b)
+
+
+def test_trailing_period_after_decimal_amount_still_stripped():
+    # The sentence-ending "." must still be treated as formatting drift even
+    # when the sentence also contains a genuine decimal amount earlier.
+    a = "Your total is now ₹169.50"
+    b = "Your total is now ₹169.50."
+    assert _normalize_sentence_for_cache_key(a) == _normalize_sentence_for_cache_key(b)
+
+
 def test_different_wording_still_misses():
     a = "Would you also like Classic French Fries?"
     b = "Would you like some fries with that?"

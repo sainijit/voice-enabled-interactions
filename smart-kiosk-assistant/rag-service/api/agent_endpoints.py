@@ -69,9 +69,15 @@ class AgentChatResponse(BaseModel):
         default_factory=list,
         description=(
             "Exact {tool_name, kwargs, result} dispatched this turn, in call "
-            "order. On a speculative turn, a caller can replay these calls "
-            "for real (dry_run=False) instead of re-running the LLM, if the "
-            "customer's final utterance still matches the draft's input."
+            "order. Populated ONLY when the request itself had "
+            "speculative=true (its only real consumer: a caller replaying "
+            "these calls for real, dry_run=False, instead of re-running the "
+            "LLM, if the customer's final utterance still matches the "
+            "draft's input). Always [] for normal (non-speculative) turns —"
+            " this endpoint has no request authentication and rag-service's "
+            "port is published in docker-compose.yml, so kwargs/results "
+            "(user IDs, order IDs, cart contents, internal error payloads) "
+            "must not be returned to every caller by default."
         ),
     )
     llm_ms: float | None = Field(
@@ -135,6 +141,20 @@ class AgentChatResponse(BaseModel):
     )
 
 
+def _scoped_tool_call_detail(request: AgentChatRequest, result: dict) -> list[dict]:
+    """Return ``tool_call_detail`` only for the speculative-replay use case.
+
+    This endpoint has no request authentication and rag-service's port is
+    published in docker-compose.yml, so raw tool kwargs/results (user IDs,
+    order IDs, cart contents, internal error payloads) must not go out to
+    every caller by default -- only to the one flow that actually needs them
+    (a speculative turn's caller replaying its dry-run calls for real).
+    """
+    if not request.speculative:
+        return []
+    return result.get("tool_call_detail", [])
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -181,7 +201,7 @@ async def agent_chat(request: AgentChatRequest) -> AgentChatResponse:
     return AgentChatResponse(
         reply=result["reply"],
         tool_calls=result.get("tool_calls", []),
-        tool_call_detail=result.get("tool_call_detail", []),
+        tool_call_detail=_scoped_tool_call_detail(request, result),
         llm_ms=result.get("llm_ms"),
         llm_ttft_ms=result.get("llm_ttft_ms"),
         llm_calls=result.get("llm_calls", 0),
@@ -240,7 +260,7 @@ async def agent_chat_no_adk(request: AgentChatRequest) -> AgentChatResponse:
     return AgentChatResponse(
         reply=result["reply"],
         tool_calls=result.get("tool_calls", []),
-        tool_call_detail=result.get("tool_call_detail", []),
+        tool_call_detail=_scoped_tool_call_detail(request, result),
         llm_ms=result.get("llm_ms"),
         llm_ttft_ms=result.get("llm_ttft_ms"),
         llm_calls=result.get("llm_calls", 0),
@@ -292,6 +312,12 @@ async def agent_chat_stream(request: AgentChatRequest) -> StreamingResponse:
                 on_safe_sentence=lambda s: queue.put_nowait({"delta": s}),
                 speculative=request.speculative,
             )
+            if not request.speculative:
+                # Same gating as _scoped_tool_call_detail() above -- this
+                # streaming path bypasses AgentChatResponse entirely and
+                # dumps `result` straight into the wire, so it must scrub
+                # this key itself instead of relying on the pydantic model.
+                result = {k: v for k, v in result.items() if k != "tool_call_detail"}
             await queue.put({"final": result})
         except Exception as exc:
             logger.error(

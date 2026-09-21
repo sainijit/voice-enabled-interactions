@@ -46,6 +46,38 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+/**
+ * Acquire the microphone with a bound wait, disposing a late-resolving
+ * stream instead of leaking it.
+ *
+ * `withTimeout` only rejects its own wrapper promise -- it cannot cancel the
+ * underlying `getUserMedia()` call. If the permission prompt is answered
+ * after the timeout has already fired (and the caller has moved on, e.g. to
+ * an error state), `getUserMedia()` still resolves with a live
+ * `MediaStream` later; without this, nothing ever stops its tracks, so the
+ * mic (and its OS-level "in use" indicator) stays live indefinitely.
+ */
+function acquireMicWithTimeout(
+  constraints: MediaStreamConstraints,
+  ms: number,
+  message: string,
+): Promise<MediaStream> {
+  let settled = false;
+  const micPromise = navigator.mediaDevices.getUserMedia(constraints);
+  micPromise.then(
+    (stream) => {
+      if (!settled) return; // still within the timeout window -- withTimeout below owns it
+      stream.getTracks().forEach((t) => t.stop());
+    },
+    () => {
+      /* rejection is handled by withTimeout below; nothing to dispose */
+    },
+  );
+  return withTimeout(micPromise, ms, message).finally(() => {
+    settled = true;
+  });
+}
+
 /** Map a raw getUserMedia DOMException onto something a customer can act on. */
 function describeMicError(err: unknown): string {
   const name = (err as { name?: string } | null)?.name;
@@ -338,11 +370,7 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
             }
           : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       };
-      const stream = await withTimeout(
-        navigator.mediaDevices.getUserMedia(constraints),
-        MIC_ACQUIRE_TIMEOUT_MS,
-        MIC_TIMEOUT_MESSAGE,
-      );
+      const stream = await acquireMicWithTimeout(constraints, MIC_ACQUIRE_TIMEOUT_MS, MIC_TIMEOUT_MESSAGE);
       if (myGen !== startGenRef.current) {
         // Superseded while the permission prompt was open — release the device
         // we just acquired rather than leaking a live mic.

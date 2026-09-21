@@ -196,12 +196,22 @@ _SPEC_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 # sentences that differ in WORDING (the dominant real-world case, since the
 # same LLM prompt rarely regenerates byte-identical prose) still miss, by
 # design: presynthesised audio for text B must never be played for text A.
-_CACHE_KEY_PUNCT_RE = re.compile(r"[^\w\s₹$€£]", re.UNICODE)
+#
+# "." is deliberately kept out of the strip set here (unlike other
+# punctuation) because a period between two digits is a DECIMAL POINT, not
+# formatting drift -- ₹169.50 and ₹16950 are different amounts. A period
+# that is NOT strictly between two digits (a sentence-ending "." included)
+# is stripped separately below, by _CACHE_KEY_NON_DECIMAL_DOT_RE.
+_CACHE_KEY_PUNCT_RE = re.compile(r"[^\w\s₹$€£.]", re.UNICODE)
+# Matches a "." that is not sandwiched between two digits, i.e. every "."
+# except a decimal point.
+_CACHE_KEY_NON_DECIMAL_DOT_RE = re.compile(r"(?<!\d)\.|\.(?!\d)")
 
 
 def _normalize_sentence_for_cache_key(text: str) -> str:
     """Collapse whitespace/case/punctuation-only drift for _tts_cache keys."""
     normalized = _CACHE_KEY_PUNCT_RE.sub("", text.lower())
+    normalized = _CACHE_KEY_NON_DECIMAL_DOT_RE.sub("", normalized)
     return re.sub(r"\s+", " ", normalized).strip()
 
 

@@ -1062,7 +1062,12 @@ def _open_session(sr: int, history: list[dict] | None = None) -> dict[str, Any]:
             "silence_threshold": 900,
             "language": "en", "temperature": 0.0,
             "analyzer_url": ANALYZER_URL, "rag_url": RAG_URL, "tts_url": TTS_URL,
-            "tts_model": "speecht5", "tts_language": "English",
+            # tts_model intentionally omitted: kiosk-core's SessionStartRequest
+            # defaults it to config.DEFAULT_TTS_MODEL (currently "kokoro" via
+            # docker-compose.yml). This used to hardcode "speecht5", silently
+            # overriding that default and keeping this legacy Gradio UI on
+            # the old backend even after the TTS service switched to Kokoro.
+            "tts_language": "English",
             "history": _recent_history_payload(history),
         })
     r.raise_for_status(); return r.json()

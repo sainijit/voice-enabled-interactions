@@ -51,7 +51,12 @@ export async function startStreamSession(
       silence_threshold: 900,
       language: 'en',
       temperature: 0.0,
-      tts_model: 'speecht5',
+      // tts_model intentionally omitted: kiosk-core's SessionStartRequest
+      // defaults it to config.DEFAULT_TTS_MODEL (server-side, currently
+      // "kokoro" via KIOSK_CORE_TTS_MODEL in docker-compose.yml). This used
+      // to hardcode 'speecht5', which silently overrode that default and
+      // kept every browser session on the old backend even after the TTS
+      // service switched to Kokoro.
       tts_language: 'English',
       history,
       // Persistent conversation ID — reused across all voice turns so the
