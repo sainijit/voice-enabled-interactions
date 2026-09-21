@@ -198,6 +198,17 @@ services:
       start_period: 20s
       retries: 3
     restart: unless-stopped
+    # qmassa (run by /scripts/collect_gpu.sh under supervisord) writes one
+    # continuously-appended JSON document and only closes it validly on a
+    # graceful exit. supervisord's default per-program shutdown wait is 10s,
+    # racing Docker's own default 10s container stop timeout -- when several
+    # services are torn down together (`make down`/`docker compose down`),
+    # this can lose the race and Docker SIGKILLs the container before qmassa
+    # finishes flushing/closing the JSON, leaving a truncated file that
+    # parse_qmassa_metrics_to_json.py rejects with "No valid state data
+    # found". Giving this one container extra shutdown slack fixes it
+    # without touching the (pulled, not built) image or its supervisord.conf.
+    stop_grace_period: 30s
 
   audio-analyzer:
     # Built locally from the sibling edge-ai-libraries checkout, matching the

@@ -165,6 +165,11 @@ help: ## Show this help message
 	@echo "  make logs-tts          Tail text-to-speech logs"
 	@echo "  make logs-metrics      Tail metrics-collector logs"
 	@echo ""
+	@echo "$(YELLOW)Benchmark:$(NC)"
+	@echo "  make benchmark            Run the voice-to-voice latency benchmark (brings stack up/down itself)"
+	@echo "  make consolidate-metrics  Consolidate ./metrics + ./results into results/consolidated_metrics.csv"
+	@echo "  make plot-metrics         Generate results/plot_metrics.png (CPU/GPU/NPU/memory usage)"
+	@echo ""
 	@echo "$(YELLOW)Development:$(NC)"
 	@echo "  make dev-build         Build a single service: make dev-build SVC=rag-service"
 	@echo "  make clean             Stop containers and remove named volumes"
@@ -176,10 +181,12 @@ help: ## Show this help message
 	@echo "  make up                           # start the stack"
 	@echo "  make build SVC=kiosk-ui           # rebuild a single service"
 	@echo "  make setup-models TARGET_DEVICE=CPU  # CPU-only setup"
+	@echo "  make benchmark && make consolidate-metrics && make plot-metrics  # full benchmark + report flow"
 	@echo ""
 	@echo "$(YELLOW)Current settings:$(NC)"
 	@echo "  REGISTRY=$(REGISTRY)  TARGET_DEVICE=$(TARGET_DEVICE)  OVMS_MODEL_NAME=$(OVMS_MODEL_NAME)"
 	@echo ""
+
 
 # =============================================================================
 # Setup
@@ -435,7 +442,17 @@ down: ## Stop all services
 	@# in the past. Including both profiles unconditionally on `down` is a
 	@# no-op for any profile that was never started.
 	$(COMPOSE_BASE) --profile identity --profile queue down
-	@$(MAKE) --no-print-directory clean-metrics
+	@# Deliberately NOT clean-metrics here (only `up` clears it, as a
+	@# prerequisite before the next run starts). `make benchmark`'s
+	@# orchestrator calls `make down` internally right after the measured
+	@# run, in a `finally:` block, before this Makefile's
+	@# consolidate-metrics/plot-metrics targets ever run -- clearing
+	@# ./metrics/ here deleted the just-collected qmassa/cpu/memory data
+	@# (including the qmassa*-tool-generated.json file) before anyone could
+	@# read it. Bind-mounted files surviving `docker compose down` is exactly
+	@# how order-accuracy/take-away's flow works too: nothing removes
+	@# collected metrics between stack teardown and the human/consolidate
+	@# step, only between one run's teardown and the next run's startup.
 	@echo "$(GREEN)✓ All services stopped$(NC)"
 
 restart: down up ## Stop then restart all services
@@ -582,7 +599,19 @@ update-submodule update-submodules: ## Initialize and update the performance-too
 		exit 1; \
 	fi
 	@git -C .. submodule update --init --recursive --remote performance-tools
+	@$(MAKE) --no-print-directory install-benchmark-orchestrator
 	@echo "$(GREEN)Submodules updated successfully.$(NC)"
+
+install-benchmark-orchestrator: ## Reinstall benchmark_smart_kiosk_v2v.py into the performance-tools submodule
+	@# `submodule update` above resets performance-tools' working tree to the
+	@# pinned upstream commit, which wipes this untracked orchestrator file
+	@# (see its docstring / tests/benchmarks/perf-tools-orchestrator/README.md
+	@# for why it lives there instead of being upstreamed). Restore it from
+	@# the tracked backup so `make benchmark` keeps working after every
+	@# `make update-submodules`.
+	@cp tests/benchmarks/perf-tools-orchestrator/benchmark_smart_kiosk_v2v.py \
+		../performance-tools/benchmark-scripts/benchmark_smart_kiosk_v2v.py
+	@echo "$(GREEN)✓ benchmark_smart_kiosk_v2v.py installed into performance-tools/benchmark-scripts$(NC)"
 
 fetch-benchmark:
 	@echo "$(BLUE)Fetching benchmark image from registry...$(NC)"
@@ -617,19 +646,23 @@ build-benchmark:
 # V2V_SCRIPT=order-simple (or order-multi/order-drift/order-upsell) to opt
 # back into one of the legacy hardcoded named conversations instead.
 V2V_SCRIPT      ?=
-V2V_RUNS        ?= 12
+V2V_RUNS        ?= 1
 V2V_LABEL       ?= v2v-perf-tools
 V2V_ARGS        ?=
-# Lives in this repo (tests/benchmarks/perf-tools-orchestrator/), NOT inside
-# the performance-tools submodule -- see that script's module docstring for
-# why (an uncommitted file inside a submodule vanishes for anyone else who
-# clones this repo and runs `git submodule update`).
-_V2V_PERF_TOOLS  = tests/benchmarks/perf-tools-orchestrator
+# Lives inside the performance-tools submodule (benchmark-scripts/), next to
+# benchmark_order_accuracy.py, so it can bring the stack up the same way that
+# script does and chain straight into consolidate-metrics/plot-metrics below
+# without crossing repos. It is untracked there (not upstreamed) -- see
+# tests/benchmarks/perf-tools-orchestrator/README.md and the
+# install-benchmark-orchestrator target above for how it survives
+# `make update-submodules`.
+_PERF_TOOLS_DIR  = ../performance-tools/benchmark-scripts
+_V2V_PERF_TOOLS  = $(_PERF_TOOLS_DIR)
 
 benchmark: check-env ## Run the voice-to-voice latency benchmark via performance-tools
 	@if [ ! -f "$(_V2V_PERF_TOOLS)/benchmark_smart_kiosk_v2v.py" ]; then \
-		echo "$(RED)benchmark orchestrator not found at $(_V2V_PERF_TOOLS)$(NC)"; \
-		exit 1; \
+		echo "$(YELLOW)benchmark orchestrator not found at $(_V2V_PERF_TOOLS) -- reinstalling from backup...$(NC)"; \
+		$(MAKE) --no-print-directory install-benchmark-orchestrator; \
 	fi
 	@echo "$(BLUE)Running voice-to-voice benchmark (script=$(if $(V2V_SCRIPT),$(V2V_SCRIPT),Sample_data/conversation.jsonl), runs=$(V2V_RUNS))...$(NC)"
 	cd $(_V2V_PERF_TOOLS) && python3 benchmark_smart_kiosk_v2v.py \
@@ -639,3 +672,76 @@ benchmark: check-env ## Run the voice-to-voice latency benchmark via performance
 		--runs $(V2V_RUNS) \
 		--label $(V2V_LABEL) \
 		$(V2V_ARGS)
+
+# =============================================================================
+# Metrics processing (performance-tools orchestrated)
+# =============================================================================
+# Chains straight off `make benchmark`'s output. Two directories exist:
+#   ./metrics/  -- continuous OS-level counters from the always-on
+#                  metrics-collector container (cpu_usage.log, memory_usage.log,
+#                  npu_usage.csv, qmassa<card>-<device>-<driver>-tool-generated.json)
+#   ./results/  -- per-run application-level metrics from the v2v orchestrator
+#                  (vlm_application_metrics_*.txt and its own JSON/CSV reports)
+#
+# consolidate_multiple_run_of_metrics.py matches KPI extractors by filename
+# SUBSTRING across every file under --root_directory (e.g. its "camera"
+# extractor matches any file merely named *camera*, like kiosk-ui's
+# useCamera.ts) -- pointing it at the whole app repo silently misparses
+# unrelated source files and crashes. So sync-metrics-into-results copies the
+# known hardware-counter filenames from ./metrics/ into ./results/ first,
+# and both targets below only ever point at ./results -- which, unlike the
+# repo root, contains nothing but benchmark output.
+#
+# Both targets use a throwaway venv inside performance-tools (same pattern as
+# `make benchmark`/order-accuracy's Makefile) since these scripts need
+# pandas/natsort/matplotlib, which this app's own requirements.txt does not
+# carry.
+_PERF_TOOLS_VENV = . venv/bin/activate
+
+sync-metrics-into-results: setup-dirs ## Copy OS-level hardware counters from ./metrics into ./results
+	@cp -f metrics/cpu_usage.log metrics/memory_usage.log metrics/npu_usage.csv \
+		results/ 2>/dev/null || true
+	@cp -f metrics/qmassa*-tool-generated.json results/ 2>/dev/null || true
+	@# qmassa rewrites its whole JSON document from scratch on every sample
+	@# rather than appending; a container killed mid-write (or -- observed in
+	@# practice -- CPU/IO contention while `docker compose down` tears down
+	@# the whole stack in parallel, even with metrics-collector's own
+	@# stop_grace_period) can leave this file truncated mid-object, which
+	@# parse_qmassa_metrics_to_json.py then rejects outright. Repair any
+	@# truncation in place before that parser ever sees the file -- see
+	@# tests/benchmarks/repair_qmassa_json.py's docstring for the approach.
+	@python3 tests/benchmarks/repair_qmassa_json.py --dir results --keyword qmassa
+
+parse-qmassa-metrics: sync-metrics-into-results ## Parse raw qmassa*-tool-generated.json into qmassa*-parsed.json
+	@# consolidate-metrics and plot-metrics only match *parsed*.json, not the
+	@# raw tool-generated file collect_gpu.sh writes -- this must run first.
+	cd $(_PERF_TOOLS_DIR) && \
+	( \
+		python3 -m venv venv && \
+		$(_PERF_TOOLS_VENV) && \
+		pip3 install -q -r requirements.txt && \
+		python3 parse_qmassa_metrics_to_json.py -d $(CURDIR)/results -k qmassa; \
+		deactivate \
+	)
+
+consolidate-metrics: parse-qmassa-metrics ## Consolidate hardware + benchmark metrics into one CSV
+	@echo "$(BLUE)Consolidating metrics from ./results...$(NC)"
+	cd $(_PERF_TOOLS_DIR) && \
+	( \
+		$(_PERF_TOOLS_VENV) && \
+		python3 consolidate_multiple_run_of_metrics.py \
+			--root_directory $(CURDIR)/results \
+			--output $(CURDIR)/results/consolidated_metrics.csv; \
+		deactivate \
+	)
+	@echo "$(GREEN)✓ Wrote results/consolidated_metrics.csv$(NC)"
+
+plot-metrics: parse-qmassa-metrics ## Generate a CPU/GPU/NPU/memory usage graph from ./results
+	@echo "$(BLUE)Generating metrics plot from ./results...$(NC)"
+	cd $(_PERF_TOOLS_DIR) && \
+	( \
+		$(_PERF_TOOLS_VENV) && \
+		timeout 60s python3 usage_graph_plot.py --dir $(CURDIR)/results || true; \
+		deactivate \
+	)
+	@echo "$(GREEN)✓ Wrote results/plot_metrics.png$(NC)"

@@ -6,18 +6,28 @@ Orchestrates a voice-pipeline benchmark run for the Smart AI Kiosk the same way
 orchestrates the vision pipelines: bring the application stack up, run a fixed
 workload against it, collect metrics into ``results/``, tear the stack down.
 
-NOTE ON LOCATION: this script intentionally lives in the *application* repo
-(``smart-kiosk-assistant/tests/benchmarks/perf-tools-orchestrator/``), not in
-the ``performance-tools`` submodule, even though it plays the same role as
-that submodule's other ``benchmark_*.py`` orchestrators and is invoked the
-same way (``make benchmark``, see the Makefile). It has not been upstreamed
-into ``intel-retail/performance-tools`` -- committing it inside the submodule
-would leave it untracked there (submodule commits are pinned/read-only from
-this repo's perspective), so it would silently vanish for anyone who clones
-this repo fresh and runs ``git submodule update``. Keeping it here means it is
-a normal, version-controlled file that ships with the app. If/when this is
-upstreamed, this file should move back into the submodule and the Makefile
-path updated accordingly.
+NOTE ON LOCATION: this script lives inside the ``performance-tools``
+submodule (``performance-tools/benchmark-scripts/``), alongside
+``benchmark_order_accuracy.py``, so that it can bring the Smart Kiosk stack up
+the same way that script brings the vision-pipeline stacks up, and so
+``consolidate_multiple_run_of_metrics.py``/``usage_graph_plot.py`` in this
+same directory can be chained straight after it without crossing repos.
+
+This is a deliberate trade-off: it is NOT upstreamed into
+``intel-retail/performance-tools``, so from this submodule's perspective it is
+an untracked file sitting on top of a pinned upstream commit. Concretely:
+
+* ``git status`` inside ``performance-tools/`` will show this file as ``??``.
+* ``make update-submodules`` (``git submodule update --init --recursive
+  --remote performance-tools``) resets the submodule's working tree to the
+  pinned upstream commit and DOES wipe this file if the pinned commit changes.
+  A copy of this exact file is tracked in the application repo at
+  ``smart-kiosk-assistant/tests/benchmarks/perf-tools-orchestrator/`` purely
+  as a recovery backup (not the copy that runs) -- if this file goes missing,
+  copy it back from there. ``make update-submodules`` does this
+  automatically; see the Makefile.
+* If this is ever upstreamed into ``intel-retail/performance-tools`` proper,
+  delete both the backup and this note.
 
 Differences from the vision-pipeline benchmarks, and why:
 
