@@ -8,7 +8,8 @@
 .PHONY: help init-env setup-dirs setup-models download-sample-video check-env show-config \
 		build up down restart status logs \
 		logs-ovms logs-rag logs-core logs-ui logs-audio logs-tts logs-metrics \
-		test clean clean-metrics dev-build
+		test clean clean-metrics dev-build update-submodule update-submodules \
+		benchmark-v2v
 
 # =============================================================================
 # Load .env (silent if missing — check-env will warn)
@@ -116,7 +117,12 @@ _QUEUE_PROFILE  = $(if $(_QUEUE_ON),--profile queue,)
 export KIOSK_CORE_QUEUE_SERVICE_ENABLED = $(if $(_QUEUE_ON),true,false)
 
 # audio-analyzer and text-to-speech are published to Docker Hub by the
-# edge-ai-libraries CI pipeline and are always pulled — never built here.
+# edge-ai-libraries CI pipeline and are pulled by default. With
+# REGISTRY=false they are instead built locally from the sibling
+# ../../edge-ai-libraries/microservices/{audio-analyzer,text-to-speech}
+# checkout (see their build.context in docker-compose.yml). In pull mode,
+# text-to-speech is still always built locally because the registry image
+# lacks Kokoro TTS support (see docker-compose.yml text-to-speech comment).
 
 # Colors
 RED    := \033[0;31m
@@ -379,6 +385,10 @@ build: check-env ## Pull images (default with .env); REGISTRY=false builds local
 	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
 		echo "$(YELLOW)  REGISTRY=false → Building local services from source$(NC)"; \
 		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) $(_QUEUE_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC); \
+		echo "$(YELLOW)  Building audio-analyzer locally from ../../edge-ai-libraries/microservices/audio-analyzer...$(NC)"; \
+		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build audio-analyzer; \
+		echo "$(YELLOW)  Building text-to-speech locally from ../../edge-ai-libraries/microservices/text-to-speech...$(NC)"; \
+		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build text-to-speech; \
 	else \
 		echo "$(YELLOW)  REGISTRY=$(REGISTRY) → Pulling images from registry '$(_DOCKER_REGISTRY)'$(NC)"; \
 		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull $(LOCAL_ONLY_SERVICES); \
@@ -386,11 +396,11 @@ build: check-env ## Pull images (default with .env); REGISTRY=false builds local
 			echo "$(YELLOW)  Building identity-service locally (no registry image)...$(NC)"; \
 			REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) build identity-service; \
 		fi; \
+		echo "$(YELLOW)  Pulling audio-analyzer from registry...$(NC)"; \
+		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull audio-analyzer; \
+		echo "$(YELLOW)  Building text-to-speech locally (registry image lacks Kokoro TTS support - see docker-compose.yml text-to-speech comment)...$(NC)"; \
+		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build text-to-speech; \
 	fi; \
-	echo "$(YELLOW)  Pulling audio-analyzer from registry...$(NC)"; \
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull audio-analyzer; \
-	echo "$(YELLOW)  Building text-to-speech locally (registry image lacks Kokoro TTS support - see docker-compose.yml text-to-speech comment)...$(NC)"; \
-	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) build text-to-speech; \
 	REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) pull metrics-collector || \
 		echo "$(YELLOW)  ⚠ Could not pull metrics-collector (intel/hl-ai-metrics-collector) from registry -- using locally cached image if present. Build it from edge-ai-suites/health-and-life-sciences-ai-suite/multi_modal_patient_monitoring/services/metrics-collector if missing.$(NC)"
 	@echo "$(GREEN)✓ Images ready$(NC)"
@@ -562,3 +572,70 @@ clean-metrics: ## Delete collected OS metrics dumps (metrics/)
 		fi; \
 	fi
 	@mkdir -p metrics
+
+
+update-submodule update-submodules: ## Initialize and update the performance-tools submodule
+	@echo "$(BLUE)Cloning/updating performance tool repositories...$(NC)"
+	@if ! git -C .. ls-files --error-unmatch performance-tools >/dev/null 2>&1; then \
+		echo "$(RED)performance-tools is not registered as a submodule in the Git root.$(NC)"; \
+		echo "  Register it once with: git -C .. submodule add --branch main https://github.com/intel-retail/performance-tools.git performance-tools"; \
+		exit 1; \
+	fi
+	@git -C .. submodule update --init --recursive --remote performance-tools
+	@echo "$(GREEN)Submodules updated successfully.$(NC)"
+
+fetch-benchmark:
+	@echo "$(BLUE)Fetching benchmark image from registry...$(NC)"
+	docker pull $(REGISTRY_BENCHMARK)
+	@echo "$(GREEN)Benchmark image ready$(NC)"
+
+build-benchmark:
+	@echo "$(BLUE)Building benchmark Docker image...$(NC)"
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		$(MAKE) fetch-benchmark; \
+	else \
+		cd ../performance-tools && $(MAKE) build-benchmark-docker; \
+	fi
+
+# =============================================================================
+# Voice-to-voice latency benchmark (performance-tools orchestrated)
+# =============================================================================
+# Runs the shared performance-tools orchestrator, which brings this stack up
+# with the CPU-hungry vision services and diarization OFF, replays a scripted
+# conversation through the real start-stream pipeline, and writes both the
+# benchmark's own JSON report and vlm_application_metrics_*.txt files that the
+# performance-tools collectors understand.
+#
+# The orchestrator owns the stack lifecycle (it calls `make up`/`make down`
+# itself), so do NOT run this against an already-running stack unless you also
+# pass V2V_ARGS="--skip_stack".
+#
+# V2V_SCRIPT is empty by default: with no --script, the orchestrator's child
+# script (tests/benchmarks/v2v_scripted_conversation_benchmark.py) reads its
+# own Sample_data/conversation.jsonl -- edit that one file to change the
+# scripted conversation without touching this Makefile or the submodule. Set
+# V2V_SCRIPT=order-simple (or order-multi/order-drift/order-upsell) to opt
+# back into one of the legacy hardcoded named conversations instead.
+V2V_SCRIPT      ?=
+V2V_RUNS        ?= 12
+V2V_LABEL       ?= v2v-perf-tools
+V2V_ARGS        ?=
+# Lives in this repo (tests/benchmarks/perf-tools-orchestrator/), NOT inside
+# the performance-tools submodule -- see that script's module docstring for
+# why (an uncommitted file inside a submodule vanishes for anyone else who
+# clones this repo and runs `git submodule update`).
+_V2V_PERF_TOOLS  = tests/benchmarks/perf-tools-orchestrator
+
+benchmark: check-env ## Run the voice-to-voice latency benchmark via performance-tools
+	@if [ ! -f "$(_V2V_PERF_TOOLS)/benchmark_smart_kiosk_v2v.py" ]; then \
+		echo "$(RED)benchmark orchestrator not found at $(_V2V_PERF_TOOLS)$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(BLUE)Running voice-to-voice benchmark (script=$(if $(V2V_SCRIPT),$(V2V_SCRIPT),Sample_data/conversation.jsonl), runs=$(V2V_RUNS))...$(NC)"
+	cd $(_V2V_PERF_TOOLS) && python3 benchmark_smart_kiosk_v2v.py \
+		--app_dir $(CURDIR) \
+		--results_dir $(CURDIR)/results \
+		$(if $(V2V_SCRIPT),--script $(V2V_SCRIPT),) \
+		--runs $(V2V_RUNS) \
+		--label $(V2V_LABEL) \
+		$(V2V_ARGS)

@@ -83,6 +83,15 @@ class TurnMeasurement:
     # kiosk-core trace
     wall_total_ms: float | None = None
     time_to_first_audio_ms: float | None = None
+    # Two clocks, never blended: endpoint_wait_ms is how long the customer sat
+    # in trailing silence before the endpoint committed; voice_to_voice_ms is
+    # last-word -> first-sound and is the only one comparable to external
+    # voice-kiosk figures (see docs/performance-summary-for-leadership.md and
+    # v2v_fixture_benchmark.py, which measures it against real recordings at
+    # realtime_factor=1.0 rather than this script's sped-up replay).
+    endpoint_wait_ms: float | None = None
+    voice_to_voice_ms: float | None = None
+    voice_to_voice_informative_ms: float | None = None
     asr_ms: float | None = None
     asr_chunks: int | None = None
     agent_ttft_ms: float | None = None
@@ -221,6 +230,9 @@ def replay_turn(
 
     m.wall_total_ms = wall.get("turn_total_ms")
     m.time_to_first_audio_ms = wall.get("time_to_first_audio_ms")
+    m.endpoint_wait_ms = wall.get("endpoint_wait_ms")
+    m.voice_to_voice_ms = wall.get("voice_to_voice_ms")
+    m.voice_to_voice_informative_ms = wall.get("voice_to_voice_informative_ms")
     m.asr_ms = asr.get("ms")
     m.asr_chunks = asr.get("chunks")
     m.agent_ttft_ms = agent.get("ttft_ms")
@@ -246,6 +258,8 @@ def _stats(values: list[float]) -> dict[str, float] | None:
     if not vals:
         return None
     vals_sorted = sorted(vals)
+    # p95 (not just p90/median) is the customer-facing target: a single bad
+    # tail turn is what a real customer notices, and median hides it.
     return {
         "n": len(vals),
         "mean": round(statistics.fmean(vals), 1),
@@ -253,6 +267,68 @@ def _stats(values: list[float]) -> dict[str, float] | None:
         "min": round(min(vals), 1),
         "max": round(max(vals), 1),
         "p90": round(vals_sorted[max(0, int(len(vals_sorted) * 0.9) - 1)], 1),
+        "p95": round(vals_sorted[max(0, int(len(vals_sorted) * 0.95) - 1)], 1),
+    }
+
+
+def build_kpi_vocabulary(stages: dict[str, Any], asr_chunks_mean: float | None) -> dict[str, Any]:
+    """Restate this replay's stage timings using the shared cross-team KPI vocabulary.
+
+    See ``benchmark-vocabolary.txt`` / ``v2v_fixture_benchmark.build_kpi_vocabulary``
+    for the canonical definitions and the full-fidelity version of this same
+    mapping. This is a deliberately reduced version: this harness runs with
+    ``realtime_factor=100`` (see ``replay_turn``), so ``endpoint_wait_ms`` and
+    ``voice_to_voice_ms`` here do NOT reflect a real customer's trailing-silence
+    wait -- only the field names/terms are aliased for consistency across
+    reports, NOT a customer-experience classification (no CX band is emitted;
+    use ``v2v_fixture_benchmark.py``, which replays at ``realtime_factor=1.0``
+    against real recordings, for that).
+    """
+
+    def _median(field_name: str) -> float | None:
+        st = stages.get(field_name)
+        return st["median"] if isinstance(st, dict) else None
+
+    asr_total = _median("asr_ms")
+    per_call = round(asr_total / asr_chunks_mean, 1) if asr_total and asr_chunks_mean else None
+
+    def _kpi(term: str, source: str, starts: str, stops: str, note: str = "") -> dict[str, Any]:
+        st = stages.get(source)
+        return {
+            "term": term,
+            "source_field": source,
+            "starts": starts,
+            "stops": stops,
+            "p50_ms": st["median"] if isinstance(st, dict) else None,
+            "p95_ms": st["p95"] if isinstance(st, dict) else None,
+            "note": note,
+        }
+
+    return {
+        "not_customer_facing": (
+            "This harness runs at realtime_factor=100 (sped-up replay, not a "
+            "live mic) -- endpointing_delay/voice_to_voice_latency below are "
+            "NOT the customer-felt clock. Use v2v_fixture_benchmark.py / "
+            "v2v_scripted_conversation_benchmark.py for that number."
+        ),
+        "voice_to_voice_latency": _kpi(
+            "Voice-to-voice latency", "voice_to_voice_ms",
+            "customer's last word", "first sound at speaker",
+        ),
+        "endpointing_delay": _kpi(
+            "Endpointing delay", "endpoint_wait_ms",
+            "customer's last word", "turn-end decision",
+        ),
+        "transcription_latency": {
+            "term": "Transcription latency", "source_field": "asr_ms / asr_chunks",
+            "starts": "speech in", "stops": "transcript out",
+            "p50_ms": per_call, "p95_ms": None,
+            "note": f"Per ASR call ({asr_chunks_mean} calls/turn mean). Target <200ms.",
+        },
+        "llm_time_to_first_token": _kpi(
+            "LLM time to first token (TTFT)", "agent_ttft_ms",
+            "prompt in", "first token out",
+        ),
     }
 
 
@@ -261,6 +337,15 @@ def build_summary(turns: list[TurnMeasurement]) -> dict[str, Any]:
     fields_of_interest = {
         "wall_total_ms": [t.wall_total_ms for t in ok],
         "time_to_first_audio_ms": [t.time_to_first_audio_ms for t in ok],
+        # Note: this replay drives kiosk-core with realtime_factor=100 (see
+        # replay_turn), so endpoint_wait_ms/voice_to_voice_ms here do NOT
+        # reflect a customer's real trailing-silence wait -- use
+        # v2v_fixture_benchmark.py (realtime_factor=1.0, real recordings) for
+        # the customer-facing voice-to-voice number. These are captured here
+        # only so per-stage attribution stays complete and comparable.
+        "endpoint_wait_ms": [t.endpoint_wait_ms for t in ok],
+        "voice_to_voice_ms": [t.voice_to_voice_ms for t in ok],
+        "voice_to_voice_informative_ms": [t.voice_to_voice_informative_ms for t in ok],
         "asr_ms": [t.asr_ms for t in ok],
         "agent_ttft_ms": [t.agent_ttft_ms for t in ok],
         "agent_total_ms": [t.agent_total_ms for t in ok],
@@ -282,6 +367,8 @@ def build_summary(turns: list[TurnMeasurement]) -> dict[str, Any]:
                 share[key] = round(st["mean"] / wall_mean * 100, 1)
 
     llm_calls = [t.llm_calls for t in ok if t.llm_calls]
+    asr_chunks = [t.asr_chunks for t in ok if t.asr_chunks is not None]
+    asr_chunks_mean = round(statistics.fmean(asr_chunks), 2) if asr_chunks else None
     return {
         "turns_total": len(turns),
         "turns_ok": len(ok),
@@ -291,6 +378,7 @@ def build_summary(turns: list[TurnMeasurement]) -> dict[str, Any]:
         "llm_calls_per_turn_mean": round(statistics.fmean(llm_calls), 2) if llm_calls else None,
         "retrieval_invoked_turns": sum(1 for t in ok if t.retrieval_invoked),
         "tts_overlapped_turns": sum(1 for t in ok if t.tts_overlapped),
+        "kpi_vocabulary": build_kpi_vocabulary(stages, asr_chunks_mean),
     }
 
 
@@ -303,7 +391,7 @@ def print_report(report: ReplayReport) -> None:
     print(f"turns      : {s['turns_ok']} ok / {s['turns_total']} total")
     print()
 
-    print(f"{'#':>2}  {'wall':>8} {'TTFA':>8} {'ASR':>7} {'agentTot':>9} "
+    print(f"{'#':>2}  {'wall':>8} {'TTFA':>8} {'V2V':>8} {'ASR':>7} {'agentTot':>9} "
           f"{'LLM':>7} {'TTS':>7}  utterance")
     print("-" * 78)
     for t in report.turns:
@@ -316,19 +404,19 @@ def print_report(report: ReplayReport) -> None:
 
         print(
             f"{t.index:>2}  {f(t.wall_total_ms):>8} {f(t.time_to_first_audio_ms):>8} "
-            f"{f(t.asr_ms):>7} {f(t.agent_total_ms):>9} {f(t.llm_ms):>7} "
+            f"{f(t.voice_to_voice_ms):>8} {f(t.asr_ms):>7} {f(t.agent_total_ms):>9} {f(t.llm_ms):>7} "
             f"{f(t.tts_ms):>7}  {t.prompt[:28]}"
         )
 
     print("\n" + "-" * 78)
     print("STAGE STATISTICS (ms)")
     print("-" * 78)
-    print(f"{'stage':<26}{'mean':>9}{'median':>9}{'p90':>9}{'min':>9}{'max':>9}")
+    print(f"{'stage':<26}{'mean':>9}{'median':>9}{'p90':>9}{'p95':>9}{'min':>9}{'max':>9}")
     for key, st in (s.get("stages_ms") or {}).items():
         if not st:
             continue
         print(f"{key:<26}{st['mean']:>9,.0f}{st['median']:>9,.0f}"
-              f"{st['p90']:>9,.0f}{st['min']:>9,.0f}{st['max']:>9,.0f}")
+              f"{st['p90']:>9,.0f}{st['p95']:>9,.0f}{st['min']:>9,.0f}{st['max']:>9,.0f}")
 
     print("\nSHARE OF WALL CLOCK (stages overlap; will not sum to 100%)")
     for key, pct in (s.get("share_of_wall_pct") or {}).items():

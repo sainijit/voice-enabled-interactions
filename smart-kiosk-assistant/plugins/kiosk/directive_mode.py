@@ -50,6 +50,7 @@ from typing import Any, Callable
 import httpx
 
 from agentic import config as agent_cfg
+from agentic import llm_metrics
 from agentic.action_result import unwrap
 from agentic.mcp_client import call_tool
 
@@ -71,10 +72,41 @@ DIRECTIVE_MODE: bool = os.getenv(
 # Read timeout for the tool-free directive completion.
 LLM_TIMEOUT: float = float(os.getenv("AGENT_LLM_TIMEOUT", "120"))
 
-# A directive is only honoured at the very start of the reply, which is where
-# the prompt tells the model to put it. Anything later is prose that happens
-# to contain the tag and must not silently mutate the customer's cart.
-_ACT_RE = re.compile(r"^\s*<act>(.*?)</act>", re.DOTALL)
+# Process-wide pooled client to OVMS. stream_completion() used to open a new
+# httpx.AsyncClient (and therefore a new TCP connection) on every single turn
+# — measured live, the directive that this module's docstring claims appears
+# at ~137ms was instead landing at ~525ms, and connection setup on every call
+# is exactly the kind of fixed per-call cost that would explain it. One
+# pooled client, created lazily and reused for the life of the process, lets
+# httpx keep the OVMS connection alive between turns instead of paying a
+# fresh TCP (and any local proxy/DNS resolution) handshake each time.
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+_HTTP_CLIENT_LOCK = asyncio.Lock()
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    """Return the process-wide pooled OVMS client, creating it on first use."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None:
+        async with _HTTP_CLIENT_LOCK:
+            if _HTTP_CLIENT is None:  # re-check inside the lock
+                _HTTP_CLIENT = httpx.AsyncClient(
+                    timeout=LLM_TIMEOUT,
+                    limits=httpx.Limits(
+                        max_keepalive_connections=4,
+                        max_connections=8,
+                        keepalive_expiry=60.0,
+                    ),
+                )
+    return _HTTP_CLIENT
+
+
+async def close_http_client() -> None:
+    """Close the pooled OVMS client. Call once, at process shutdown."""
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is not None:
+        await _HTTP_CLIENT.aclose()
+        _HTTP_CLIENT = None
 
 # Sentence boundary for releasing speech to TTS early. Deliberately requires
 # whitespace-or-end after the terminator so "₹169." or "No. 2" do not split.
@@ -246,23 +278,25 @@ def build_directive_spec(menu_block: str) -> str:
     """
     return f"""
 ORDERING FORMAT — follow this exactly.
-When the customer orders, changes, or cancels something, begin your reply with ONE directive
-describing ONLY what this sentence changes, then speak a SHORT confirmation of that change:
+When the customer orders, changes, or cancels something, speak a SHORT confirmation of that
+change FIRST, THEN end your reply with ONE directive describing ONLY what this sentence changed:
 <act>add|EXACT ITEM NAME|QUANTITY</act>
 <act>remove|EXACT ITEM NAME|QUANTITY</act>
 <act>confirm</act>
-Several changes in one sentence go in one directive separated by semicolons.
-Use item names EXACTLY as they appear in the menu below.
-Never speak a directive out loud. Never reply with a directive alone. Questions get no directive.
+The directive is the LAST thing in your reply, after all spoken words — never before them, never
+in the middle, and never on its own with no spoken words. Several changes in one sentence go in
+one directive separated by semicolons. Use item names EXACTLY as they appear in the menu below.
+Never speak a directive out loud. Questions get no directive.
 
 CRITICAL: never say any price, total, or amount of money. Do not offer or suggest extra items.
 Those are added for you automatically.
-Begin the spoken part with a TWO-WORD acknowledgement sentence ending in a full stop
-("Got it." / "Sure thing." / "All set."), then ONE short confirmation sentence naming the item.
+Begin with a TWO-WORD acknowledgement sentence ending in a full stop
+("Got it." / "Sure thing." / "All set."), then ONE short confirmation sentence naming the item,
+THEN the directive.
 
 Example:
 Customer: two classic chicken burgers
-You: <act>add|Classic Chicken Burger|2</act>Got it. Two chicken burgers.
+You: Got it. Two chicken burgers.<act>add|Classic Chicken Burger|2</act>
 
 MENU:
 {menu_block}
@@ -412,29 +446,29 @@ async def stream_completion(
     url = agent_cfg.LLM_URL.rstrip("/") + "/chat/completions"
 
     out: list[str] = []
-    async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
-        async with client.stream("POST", url, json=body) as response:
-            response.raise_for_status()
-            try:
-                async for line in response.aiter_lines():
-                    line = line.strip()
-                    if not line.startswith("data:"):
-                        continue
-                    chunk = line[5:].strip()
-                    if chunk == "[DONE]":
-                        break
-                    try:
-                        delta = json.loads(chunk)["choices"][0].get("delta", {})
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
-                    text = delta.get("content") or ""
-                    if text:
-                        out.append(text)
-                        on_delta(text)
-            except _StopGeneration:
-                # The callback decided the rest of the generation is unusable.
-                # Returning here closes the stream and skips the wasted tokens.
-                pass
+    client = await _get_http_client()
+    async with client.stream("POST", url, json=body) as response:
+        response.raise_for_status()
+        try:
+            async for line in response.aiter_lines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                chunk = line[5:].strip()
+                if chunk == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(chunk)["choices"][0].get("delta", {})
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
+                text = delta.get("content") or ""
+                if text:
+                    out.append(text)
+                    on_delta(text)
+        except _StopGeneration:
+            # The callback decided the rest of the generation is unusable.
+            # Returning here closes the stream and skips the wasted tokens.
+            pass
     return "".join(out)
 
 
@@ -478,10 +512,21 @@ async def run_turn(
 ) -> dict[str, Any] | None:
     """Run one ordering turn in directive mode.
 
-    The tool call is dispatched the moment ``</act>`` is seen, so it overlaps
-    the generation of the prose that follows it. Prose sentences are released
-    to TTS as they complete, which is the entire point of this path: audio
-    starts while the model is still generating.
+    Speech is released to TTS as prose sentences complete, and the directive
+    is now the LAST thing the model emits (see ``build_directive_spec``) —
+    reversed from the original "directive, then prose" layout. Measured live
+    against this exact deployment: the model decodes at a very consistent
+    ~28 ms/token, and the old layout forced "Got it." to wait behind the
+    ~12-token ``<act>add|Classic Chicken Burger|1</act>`` directive before it
+    could even start (~307ms of pure decode paid before the first speakable
+    word), pushing first-audio out to ~600ms even though the raw first token
+    landed at ~135-210ms. Putting prose first means the first sentence is
+    gated only by however many tokens THAT sentence needs (~3-5 for "Got
+    it."), cutting first-audio roughly in half. The cart mutation dispatch
+    correspondingly moves later (after the confirmation prose instead of
+    before it) — harmless, since it was always fire-and-forget and does not
+    gate audio in either layout, only how soon the (price-bearing) tail is
+    ready, which happens well after first-audio regardless.
 
     Args:
         message: The customer's utterance.
@@ -501,48 +546,33 @@ async def run_turn(
     system_prompt = base_instruction + build_directive_spec(menu_block)
 
     state: dict[str, Any] = {
-        "buf": "", "task": None, "spoken": [], "rest": "", "seen_act": False,
+        "buf": "", "task": None, "spoken": [], "rest": "",
+        # True once "<act>" has appeared anywhere in the stream. From that
+        # point on, prose is FROZEN at buf.split("<act>", 1)[0] — nothing
+        # after the tag is prose, so this can only go from False to True once.
+        "act_started": False,
+        # True once the directive has been fully parsed (both "<act>" and
+        # "</act>" seen) and dispatch attempted. Distinct from act_started so
+        # a directive left unclosed by a truncated/aborted generation is
+        # still correctly treated as "no usable directive" by the fallback
+        # check below.
+        "act_dispatched": False,
         # Sentences pulled off the stream so far (>= len(spoken), because
         # facts-bearing sentences are consumed but never spoken).
         "consumed": 0,
         # Set once the model starts narrating prices; all further prose is
         # dropped in favour of the payload-derived tail.
         "prose_closed": False,
+        # First-delta wall-clock, for llm_ttft_ms below — directive mode is a
+        # single raw completion (no ADK LiteLlm wrapper), so nothing else
+        # times its prefill separately.
+        "first_delta_ms": None,
     }
 
-    def on_delta(_text: str) -> None:
-        state["buf"] += _text
-        buf: str = state["buf"]
-
-        # Dispatch the cart mutation as soon as the directive is closed,
-        # rather than waiting for the rest of the sentence to generate.
-        if not state["seen_act"] and "</act>" in buf:
-            state["seen_act"] = True
-            match = _ACT_RE.match(buf)
-            if match:
-                actions = parse_directive(match.group(1))
-                if actions:
-                    state["task"] = asyncio.create_task(_execute(actions, user_id))
-                else:
-                    state["task"] = "unparseable"
-
-        if not state["seen_act"]:
+    def _emit_prose(prose: str) -> None:
+        """Pull any newly-completed sentences out of ``prose`` and speak them."""
+        if state["prose_closed"]:
             return
-
-        # Everything after the directive is speech.
-        prose = buf.split("</act>", 1)[1] if "</act>" in buf else ""
-
-        # A second directive means the model has started a fresh turn on its
-        # own. Nothing after this point is usable, so stop reading the stream
-        # instead of paying for tokens that will only be thrown away.
-        if "<act>" in prose:
-            if not state["prose_closed"]:
-                logger.info(
-                    "[DIRECTIVE] second directive emitted — closing prose and aborting stream"
-                )
-            state["prose_closed"] = True
-            prose = prose.split("<act>", 1)[0]
-
         complete, remainder = _split_sentences(prose)
         state["rest"] = remainder
         new = complete[state["consumed"]:]
@@ -554,14 +584,12 @@ async def run_turn(
             # the tool payload, so refuse to speak it: stop accepting prose and
             # let _facts_tail() supply the numbers.
             if _FACTS_TAIL_RE.match(sentence):
-                if not state["prose_closed"]:
-                    logger.info(
-                        "[DIRECTIVE] model began speaking facts — suppressing prose from %r",
-                        sentence[:60],
-                    )
+                logger.info(
+                    "[DIRECTIVE] model began speaking facts — suppressing prose from %r",
+                    sentence[:60],
+                )
                 state["prose_closed"] = True
-            if state["prose_closed"]:
-                continue
+                return
             sentence = scrub_directives(sentence)
             if not sentence:
                 continue
@@ -569,7 +597,52 @@ async def run_turn(
             if on_safe_sentence is not None:
                 on_safe_sentence(sentence)
 
+    def on_delta(_text: str) -> None:
+        if state["first_delta_ms"] is None:
+            state["first_delta_ms"] = (time.monotonic() - t0) * 1000.0
+        state["buf"] += _text
+        buf: str = state["buf"]
+
+        if not state["act_started"] and "<act>" in buf:
+            state["act_started"] = True
+
+        # Prose is everything before the first "<act>" tag — frozen the
+        # instant that tag appears, since the directive is now expected to be
+        # the last thing in the reply. Everything from here on speaks only
+        # what was already buffered before the tag showed up.
+        prose = buf.split("<act>", 1)[0] if state["act_started"] else buf
+        _emit_prose(prose)
+
         if state["prose_closed"]:
+            raise _StopGeneration
+
+        if state["act_started"] and not state["act_dispatched"] and "</act>" in buf:
+            state["act_dispatched"] = True
+            # Prose is frozen now (no further growth possible), so flush
+            # whatever incomplete sentence is still sitting in the remainder
+            # rather than silently dropping it — the model may not always
+            # close the final sentence with punctuation before starting the
+            # directive tag.
+            leftover = (state["rest"] or "").strip()
+            if leftover and not state["prose_closed"] and not _FACTS_TAIL_RE.match(leftover):
+                leftover = scrub_directives(leftover)
+                if leftover:
+                    state["spoken"].append(leftover)
+                    if on_safe_sentence is not None:
+                        on_safe_sentence(leftover)
+            state["rest"] = ""
+
+            after_open = buf.split("<act>", 1)[1]
+            directive_body, closed, _ = after_open.partition("</act>")
+            if closed:
+                actions = parse_directive(directive_body)
+                if actions:
+                    state["task"] = asyncio.create_task(_execute(actions, user_id))
+                else:
+                    state["task"] = "unparseable"
+            # Nothing usable follows the directive in this layout — it is
+            # the last thing in the reply — so stop reading the stream
+            # instead of paying for tail tokens that will only be discarded.
             raise _StopGeneration
 
     try:
@@ -593,11 +666,20 @@ async def run_turn(
                 logger.exception("[DIRECTIVE] dispatch task failed during generation error")
         raise
     gen_ms = (time.monotonic() - t0) * 1000.0
+    # Recorded here (not by a wrapper like ADK's _TimedLiteLlm) because
+    # directive mode calls the raw completion API directly — nothing else
+    # times this call. Without this, llm_metrics' accumulators stay at their
+    # reset() defaults for every directive-mode turn, and mcp_ms/mcp_calls
+    # below would report the current call_tool() round-trip as if it never
+    # happened once read back via mcp_snapshot() (its own accumulator is
+    # independent and unaffected, but keeping llm/mcp recorded the same way
+    # for every code path is what makes the two comparable turn-to-turn).
+    llm_metrics.record(gen_ms, ttft_ms=state["first_delta_ms"])
 
-    if not state["seen_act"] or state["task"] == "unparseable" or state["task"] is None:
+    if not state["act_dispatched"] or state["task"] == "unparseable" or state["task"] is None:
         logger.info(
-            "[DIRECTIVE] no usable directive (seen_act=%s) — falling back | gen=%.0fms raw=%r",
-            state["seen_act"], gen_ms, raw[:120],
+            "[DIRECTIVE] no usable directive (act_dispatched=%s) — falling back | gen=%.0fms raw=%r",
+            state["act_dispatched"], gen_ms, raw[:120],
         )
         return None
 
@@ -614,12 +696,19 @@ async def run_turn(
                 "cannot fall back without double-applying | gen=%.0fms",
                 committed, gen_ms,
             )
+            _mcp = llm_metrics.mcp_snapshot()
             return {
                 "reply": _PARTIAL_FAILURE_REPLY,
                 "streamed": " ".join(state["spoken"]).strip(),
                 "tool_calls": tools_called,
                 "llm_calls": 1,
                 "llm_ms": gen_ms,
+                "llm_ttft_ms": state["first_delta_ms"],
+                "retrieval_ms": None,
+                "mcp_ms": _mcp["ms"],
+                "mcp_calls": _mcp["calls"],
+                "guard_ms": None,
+                "template_ms": None,
                 "templated": True,
                 "directive": True,
             }
@@ -628,11 +717,11 @@ async def run_turn(
     payload = executed
 
     # The model spoke a price-free confirmation; every number the customer
-    # hears is appended here, verbatim from the tool result.
+    # hears is appended here, verbatim from the tool result. (state["rest"]
+    # is always empty here — any trailing incomplete sentence was already
+    # flushed and spoken the moment the directive tag appeared, since prose
+    # is frozen at that point and cannot grow further.)
     spoken = " ".join(state["spoken"]).strip()
-    tail = (state["rest"] or "").strip()
-    if tail and not state["prose_closed"] and not _FACTS_TAIL_RE.match(tail):
-        spoken = f"{spoken} {scrub_directives(tail)}".strip()
     # Last line of defence: whatever happens above, directive markup never
     # reaches TTS or the screen.
     reply = scrub_directives(f"{spoken} {_facts_tail(payload)}".strip())
@@ -641,12 +730,19 @@ async def run_turn(
         "[DIRECTIVE] turn complete | gen=%.0fms sentences_streamed=%d reply=%r",
         gen_ms, len(state["spoken"]), reply[:120],
     )
+    _mcp = llm_metrics.mcp_snapshot()
     return {
         "reply": reply,
         "streamed": " ".join(state["spoken"]).strip(),
         "tool_calls": tools_called,
         "llm_calls": 1,
         "llm_ms": gen_ms,
+        "llm_ttft_ms": state["first_delta_ms"],
+        "retrieval_ms": None,
+        "mcp_ms": _mcp["ms"],
+        "mcp_calls": _mcp["calls"],
+        "guard_ms": None,
+        "template_ms": None,
         "templated": True,
         "directive": True,
     }

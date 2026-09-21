@@ -152,6 +152,10 @@ class AgentClient:
             "_llm_ttft_ms": llm_ttft_ms,
             "_llm_calls": llm_calls,
             "_retrieval_ms": retrieval_ms,
+            "_mcp_ms": data.get("mcp_ms"),
+            "_mcp_calls": data.get("mcp_calls", 0),
+            "_guard_ms": data.get("guard_ms"),
+            "_template_ms": data.get("template_ms"),
         }
 
     def get_speculative_draft(
@@ -307,6 +311,10 @@ class AgentClient:
             "_llm_ttft_ms": final.get("llm_ttft_ms"),
             "_llm_calls": final.get("llm_calls", 0),
             "_retrieval_ms": final.get("retrieval_ms"),
+            "_mcp_ms": final.get("mcp_ms"),
+            "_mcp_calls": final.get("mcp_calls", 0),
+            "_guard_ms": final.get("guard_ms"),
+            "_template_ms": final.get("template_ms"),
         }
 
 

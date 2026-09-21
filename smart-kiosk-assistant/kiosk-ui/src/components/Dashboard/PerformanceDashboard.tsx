@@ -28,6 +28,7 @@ import type { KpiBundle, MetricsResponse, VoicePhase } from '../../types';
 import { PipelineFlow } from './PipelineFlow';
 import { ExecutiveKpis } from './ExecutiveKpis';
 import { HardwareCharts } from './HardwareCharts';
+import { VoiceToVoiceTable } from './VoiceToVoiceTable';
 import DeviceSettings from '../Panels/DeviceSettings';
 import KnowledgeBase from '../Panels/KnowledgeBase';
 import QsrPanel from '../Panels/QsrPanel';
@@ -105,6 +106,11 @@ export function PerformanceDashboard({
 
             {/* Executive KPIs */}
             <ExecutiveKpis kpis={kpis} />
+
+            <div className="h-px bg-gray-200" />
+
+            {/* Voice-to-Voice per turn — the ASR-latency-optimisation numbers */}
+            <VoiceToVoiceTable turns={kpis.pipelineRecent ?? []} />
 
             <div className="flex items-start justify-between gap-4">
               <p className="min-w-0 flex-1 text-justify text-[10px] leading-snug text-gray-400 italic">

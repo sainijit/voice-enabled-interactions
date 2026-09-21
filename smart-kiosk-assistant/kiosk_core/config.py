@@ -14,6 +14,63 @@ DEFAULT_TTS_URL = os.getenv(
     "KIOSK_CORE_TTS_URL",
     "http://127.0.0.1:8011/v1/audio/speech",
 )
+# ── Continuous ASR streaming (WebSocket to audio-analyzer's /v1/realtime) ────
+#
+# When enabled, kiosk-core opens one persistent WebSocket per audio session
+# and streams PCM frames to the analyzer continuously as they're captured,
+# instead of POSTing a WAV file per flush. ASR then runs throughout speech
+# (not just after a pause begins), so a fresh transcript is usually already
+# available the instant the endpoint/silence decision fires -- this is what
+# activates the otherwise-inert DEFAULT_ENDPOINT_SHORT_SECONDS shortcut above.
+#
+# This is a single global flag (not a per-session/per-request option) so the
+# same kiosk-ui and benchmark REST APIs exercise whichever mode is selected
+# server-side, with zero client-side changes either way. The file-based POST
+# path (AnalyzerClient) remains untouched as the fallback: if the socket
+# fails to connect for a given session, that session transparently falls
+# back to the file-based path rather than failing the turn.
+DEFAULT_ANALYZER_STREAMING_ENABLED = os.getenv(
+    "KIOSK_CORE_ANALYZER_STREAMING_ENABLED", "false"
+).lower() not in ("false", "0", "no")
+
+# Cadence of non-blocking "preview" commits while streaming is active. Each
+# commit only tells the analyzer "transcribe what's buffered so far" -- it
+# never blocks the frame-capture loop. Matches the kiosk-voice-lab reference
+# design's 0.4s rolling-snapshot cadence.
+DEFAULT_REALTIME_PREVIEW_COMMIT_SECONDS = float(
+    os.getenv("KIOSK_CORE_REALTIME_PREVIEW_COMMIT_SECONDS", "0.4")
+)
+
+# Faster preview-ping cadence used ONLY once trailing silence has begun
+# (silence_run_seconds > 0), mirroring kiosk-voice-lab-main's
+# tick_quiet_s=0.15 (pipeline/config.py): orchestrator.py's live loop switches
+# `tick_s = 0.15 if in_silence else self.TICK_S` the instant its endpointer
+# detects quiet, so a fresh transcript snapshot is almost always available
+# well within endpoint_short_ms (150ms) of the customer's last word.
+#
+# Without this, VEI kept the flat 0.4s cadence during silence too, so
+# whether the DEFAULT_ENDPOINT_SHORT_SECONDS completeness shortcut got a
+# chance to fire depended on the luck of where in the 0.4s cycle speech
+# happened to stop -- measured firing as low as 1/5 turns. Matching the
+# lab's quiet-mode acceleration here removes that timing race.
+DEFAULT_REALTIME_PREVIEW_COMMIT_QUIET_SECONDS = float(
+    os.getenv("KIOSK_CORE_REALTIME_PREVIEW_COMMIT_QUIET_SECONDS", "0.15")
+)
+
+# Bounded wait for the FINAL commit of a turn only. If the analyzer's
+# completion event doesn't land within this timeout, kiosk-core proceeds
+# with whatever transcript snapshot is already available rather than
+# hanging the turn.
+DEFAULT_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS = float(
+    os.getenv("KIOSK_CORE_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS", "2.5")
+)
+
+# Bounded wait for the initial WebSocket handshake/session.update round trip
+# when opening a streaming session.
+DEFAULT_REALTIME_CONNECT_TIMEOUT_SECONDS = float(
+    os.getenv("KIOSK_CORE_REALTIME_CONNECT_TIMEOUT_SECONDS", "5.0")
+)
+
 DEFAULT_TTS_MODEL = os.getenv("KIOSK_CORE_TTS_MODEL", "qwen-tts")
 DEFAULT_TTS_VOICE = os.getenv("KIOSK_CORE_TTS_VOICE")
 DEFAULT_TTS_LANGUAGE = os.getenv("KIOSK_CORE_TTS_LANGUAGE", "English")
@@ -255,6 +312,48 @@ DEFAULT_TTS_GAIN_DB = float(os.getenv("KIOSK_CORE_TTS_GAIN_DB", "4.0"))
 # Safety ceiling on total applied gain (normalization + boost combined).
 DEFAULT_TTS_GAIN_MAX_DB = float(os.getenv("KIOSK_CORE_TTS_GAIN_MAX_DB", "15.0"))
 
+# ── Opener TTS cache ────────────────────────────────────────────────────────
+# Process-wide reuse of already-synthesised SHORT opener segments ("Got it.",
+# "Sure.", "Of course.") across turns and sessions.
+#
+# Why this exists: measured on Kokoro/CPU, synthesising the single word-pair
+# "Got it." costs ~270-300 ms, and that cost sits squarely on the critical
+# path — it is the last stage before the customer hears anything, so it is
+# ~27% of a ~1030 ms voice-to-voice turn. The agent opens the overwhelming
+# majority of ordering turns with the same handful of stock phrases, so the
+# same audio is paid for again on every single turn.
+#
+# How it differs from DEFAULT_SPECULATIVE_TTS_PRESYNTH_ENABLED (which is off
+# by default, and should stay off): speculative pre-synthesis ISSUES EXTRA TTS
+# REQUESTS ahead of the real turn, and because the TTS backend serialises
+# requests those extras queue in front of the real reply and make the turn
+# dramatically slower (see the 2026-09-08 note on the speculative flags).
+# This cache never issues a request of its own. It only ever keeps a COPY of a
+# segment the real pipeline already synthesised, fully trimmed and gain-
+# adjusted, and replays that identical file. Worst case on a miss is the
+# status quo; there is no path by which it adds load.
+#
+# Safety: an entry is only served when the normalized sentence text AND the
+# full voice/model/language/instructions tuple match, so a cached clip can
+# never be spoken for different text or in the wrong voice.
+DEFAULT_TTS_OPENER_CACHE_ENABLED = os.getenv(
+    "KIOSK_CORE_TTS_OPENER_CACHE_ENABLED", "true"
+).lower() not in ("false", "0", "no")
+# Only segments at or below this many characters are cached. Deliberately
+# small: stock openers are short and highly repetitive, whereas the sentences
+# that carry order details ("Your total is now ₹169.") are long, vary every
+# turn, and would never be hit again — caching them would only burn disk.
+DEFAULT_TTS_OPENER_CACHE_MAX_CHARS = int(
+    os.getenv("KIOSK_CORE_TTS_OPENER_CACHE_MAX_CHARS", "24")
+)
+# Hard ceiling on retained entries, so an unexpectedly chatty model cannot
+# grow the cache without bound over a long kiosk uptime. Once full, the cache
+# simply stops admitting new phrases (the common openers are learned within
+# the first few turns, so eviction churn buys nothing).
+DEFAULT_TTS_OPENER_CACHE_MAX_ENTRIES = int(
+    os.getenv("KIOSK_CORE_TTS_OPENER_CACHE_MAX_ENTRIES", "32")
+)
+
 # Metrics collector – base URL of the standalone metrics-collector container.
 # Within Docker the service is reachable as http://metrics-collector:9000.
 METRICS_COLLECTOR_URL = os.getenv(
@@ -300,7 +399,14 @@ DEFAULT_CHUNK_SECONDS = float(os.getenv("KIOSK_CORE_CHUNK_SECONDS", "6.0"))
 # so Whisper only ever received 1.8-2.5s of truncated audio and had to guess
 # the item name. A genuine end-of-turn pause is ~1.0-1.5s, so this tolerates
 # hesitation while keeping the reply prompt.
-DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SECONDS", "1.5"))
+#
+# 1.1s (kiosk-voice-lab-main parity): the lab's SmartEndpointer waits 1.1s for
+# an "unfinished" turn (endpoint_long_ms). Lowered from 1.5s to match. This is
+# the ceiling every turn without an early completeness commit still pays, so
+# it inherits the same mid-sentence-hesitation risk the 1.5s value was chosen
+# to avoid — re-validate against the fixture benchmark before trusting this
+# in the live demo (see docs/performance-improvements-2026-09.md).
+DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SECONDS", "1.1"))
 # Adaptive mid-utterance flush: when silence reaches this threshold but hasn't
 # yet hit silence_timeout_seconds, flush the accumulated chunk to the background
 # ASR worker so processing starts immediately. The tail chunk at true endpoint
@@ -310,12 +416,24 @@ DEFAULT_SILENCE_TIMEOUT_SECONDS = float(os.getenv("KIOSK_CORE_SILENCE_TIMEOUT_SE
 # "chicken" and "burger") triggered an adaptive flush mid-word, clearing
 # chunk_frames so the next word had no sentence context — Whisper then
 # hallucinated ("chip" for "chicken") or misread the isolated tail ("Kin Burger"
-# for "burger").  0.70s is still well below a genuine inter-utterance pause
-# (~1.0-1.5s) but avoids splitting mid-sentence breathing pauses.
-# Kept at 0.70 (not lowered) when the endpoint moved to 1.5s: 0.70 is the value
-# proven to avoid the mid-word splits above, and it only became effective again
-# because the endpoint is now longer than it. See the INVARIANT note above.
-DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.70"))
+# for "burger").
+#
+# Lowered 0.70 -> 0.50s (2026-09-10, ITEP endpoint-latency work): re-tested the
+# boundary with tests/benchmarks/v2v_fixture_benchmark.py against rec1_16k.wav
+# and rec2_16k.wav (real recorded speech, 3 runs each):
+#   * 0.50s: transcripts identical/correct vs the 0.70s baseline on both
+#     fixtures, 6/6 runs. endpoint_wait_ms dropped ~150ms (rec1: ~1,000ms ->
+#     ~900ms). SAFE.
+#   * 0.40s: reproduced the same class of hallucination the 0.30s value
+#     caused originally — "Good." became "Good, good, good." (repeated word)
+#     and a phantom "Bye, bye." was inserted; rec2's trailing "french fry" was
+#     truncated to "one Fr". REGRESSION, do not use.
+# 0.50s is therefore the validated floor for this ASR model/hardware, not a
+# guess — do not lower further without re-running that benchmark and manually
+# inspecting transcripts for repeated/phantom words the way this note did.
+# Kept above DEFAULT_ENDPOINT_SHORT_SECONDS's inert threshold — see the
+# INVARIANT note above (that check still can't fire before this flush lands).
+DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS", "0.50"))
 # ── Preview flush (continuous mid-speech ASR, not just at the pause) ───────
 # Without this, a long utterance is only ever flushed to ASR once — at the
 # adaptive pause above, AFTER the customer stops talking — so the entire
@@ -349,6 +467,22 @@ DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS = float(os.getenv("KIOSK_CORE_ADAPTIVE_FLUS
 # It only engages on longer continuous speech, which is exactly where the
 # single end-of-utterance flush was most expensive.
 DEFAULT_PREVIEW_FLUSH_ENABLED = os.getenv("KIOSK_CORE_PREVIEW_FLUSH_ENABLED", "true").lower() == "true"
+# 0.4s (kiosk-voice-lab-main parity, change #1 "continuous listening"): lowered
+# from 1.5s. This is a TRIGGER threshold, not a guaranteed cadence — the loop
+# only fires the next preview flush once flush_queue.unfinished_tasks == 0, so
+# real cadence is bounded below by however long the previous ASR call took to
+# come back (whisper-small/NPU: ~500-550ms fixed cost per call, per
+# configs/audio-analyzer/config.yaml), not by this constant. Lowering it to
+# 0.4s just removes the ARTIFICIAL 1.5s gap on top of that natural floor, so
+# transcripts arrive roughly every ASR-round-trip instead of every 1.5s.
+#
+# NOTE: full kiosk-voice-lab-main parity (distil-whisper distil-small.en on
+# NPU, ~40-70ms/snapshot) is NOT used here — that model has a confirmed
+# state-corruption bug on this NPU + openvino_genai stack when the same
+# pipeline instance processes varying clip lengths back-to-back (exactly what
+# a growing rolling snapshot does). See configs/audio-analyzer/config.yaml's
+# models.asr.name comment. whisper-small does not corrupt under the same
+# conditions (verified), so it stays the model here despite being slower.
 DEFAULT_PREVIEW_FLUSH_INTERVAL_SECONDS = float(os.getenv("KIOSK_CORE_PREVIEW_FLUSH_INTERVAL_SECONDS", "1.5"))
 
 # ── Speculative drafting (Round 3: agent/TTS cache-warming ahead of endpoint) ─
@@ -438,11 +572,28 @@ DEFAULT_SPECULATIVE_TTS_PRESYNTH_ENABLED = (
 # If ASR has not returned yet, the text is empty or stale, the check fails
 # closed and behaviour is identical to the fixed timeout.
 #
-# INVARIANT: must be strictly greater than DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS
-# (0.70) and strictly less than DEFAULT_SILENCE_TIMEOUT_SECONDS (1.5), so the
-# adaptive flush has fired and its ASR result has had time to land.
+# INVARIANT (WAIVED, see below): the guard normally requires this to be
+# strictly greater than DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS (0.50) and
+# strictly less than DEFAULT_SILENCE_TIMEOUT_SECONDS (1.1), so the adaptive
+# flush has fired and its ASR result has had time to land before the
+# completeness check runs.
+#
+# 0.15s (kiosk-voice-lab-main parity, endpoint_short_ms): matches the lab's
+# value for a transcript that already reads as finished. KNOWN LIMITATION:
+# on THIS pipeline the value is inert at 0.15s, because the adaptive flush
+# that produces the transcript the completeness check reads does not fire
+# until 0.50s of silence (DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS) — the
+# `_adaptive_flushed` guard in audio_session.py is still False at 0.15s, so
+# every turn falls through to the DEFAULT_SILENCE_TIMEOUT_SECONDS wait
+# regardless of this setting. The lab reaches 0.15s because its NPU runs
+# continuous ASR (a rolling transcript snapshot every ~0.4s WHILE the
+# customer is still talking — see kiosk-voice-handoff.pdf, change #1), so a
+# fresh transcript is always available well before 150ms of silence. Set to
+# 0.15 here as a forward-looking value; it becomes load-bearing once
+# continuous/rolling ASR replaces the flush-on-pause design (tracked as the
+# lab's change #1: "put listening on the NPU, and do it continuously").
 DEFAULT_ENDPOINT_COMPLETE_ENABLED = os.getenv("KIOSK_CORE_ENDPOINT_COMPLETE_ENABLED", "true").lower() == "true"
-DEFAULT_ENDPOINT_SHORT_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_SHORT_SECONDS", "1.0"))
+DEFAULT_ENDPOINT_SHORT_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_SHORT_SECONDS", "0.15"))
 # Minimum words before a transcript may be judged "finished". Two words or
 # fewer is almost always a fragment mid-utterance ("I want...").
 DEFAULT_ENDPOINT_MIN_WORDS = int(os.getenv("KIOSK_CORE_ENDPOINT_MIN_WORDS", "3"))
@@ -466,6 +617,39 @@ DEFAULT_ENDPOINT_MIN_WORDS = int(os.getenv("KIOSK_CORE_ENDPOINT_MIN_WORDS", "3")
 DEFAULT_ENDPOINT_STABLE_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_STABLE_SECONDS", "0.2"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))
+
+# ── ASR trailing-silence trim (kiosk-voice-lab-main parity) ──────────────────
+# Whisper hallucinates a sentence-completing word/phrase when fed audio that
+# ends in "dangling speech + silence" — e.g. "...one classic chicken" + a
+# beat of quiet gets decoded as "...one classic chicken burger. Good." This
+# is the source of the spurious trailing tokens (measured: "Good.") that
+# break EXACT-STRING speculative-draft matching (see
+# DEFAULT_SPECULATIVE_DRAFT_ENABLED) — the final transcript rarely matches
+# byte-for-byte any earlier preview-transcript snapshot, so drafts almost
+# never hit.
+#
+# kiosk-voice-lab-main's fix (pipeline/orchestrator.py, AdaptivePipeline):
+# trim the audio actually SENT to ASR down to
+# "last detected speech sample + a short decay tail", discarding the rest of
+# the accumulated silence. This changes only what ASR is asked to transcribe
+# — it does NOT touch endpoint/silence-timeout timing, which keeps counting
+# the full silence_run_seconds exactly as before.
+#
+# Feature-flagged OFF by default: needs a live A/B (transcript accuracy,
+# hallucination rate, and — the actual payoff — speculative-draft hit rate)
+# before being trusted in production. See docs/performance-improvements-
+# 2026-09.md for the kind of validation this class of change gets before
+# being flipped on.
+DEFAULT_ASR_TRIM_TRAILING_SILENCE_ENABLED = (
+    os.getenv("KIOSK_CORE_ASR_TRIM_TRAILING_SILENCE_ENABLED", "false").lower() == "true"
+)
+# How much trailing silence to KEEP (the "decay tail") when trimming — mirrors
+# kiosk-voice-lab-main's 0.15s exactly (speech_end_samples + int(0.15 * sr)).
+# Too short risks clipping genuine trailing speech if VAD's silence-onset
+# detection lags by a frame or two; too long re-invites the hallucination the
+# trim exists to prevent.
+DEFAULT_ASR_TRIM_DECAY_SECONDS = float(os.getenv("KIOSK_CORE_ASR_TRIM_DECAY_SECONDS", "0.15"))
+
 
 # ── Adaptive VAD (noise-floor calibration) ────────────────────────────────────
 # DEFAULT_SILENCE_THRESHOLD is an absolute int16 RMS value, which is only ever
@@ -524,7 +708,7 @@ DEFAULT_PREROLL_SECONDS = float(os.getenv("KIOSK_CORE_PREROLL_SECONDS", "0.3"))
 # Silero is active.
 #
 # Default flipped OFF → ON. Rationale: every downstream timer in the turn — the
-# adaptive flush at DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS (0.70s), the
+# adaptive flush at DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS (0.50s), the
 # sentence-completeness shortcut at DEFAULT_ENDPOINT_SHORT_SECONDS, and the
 # DEFAULT_SILENCE_TIMEOUT_SECONDS endpoint — starts counting from the frame the
 # VAD first calls silence. An RMS gate is an absolute loudness threshold, so in

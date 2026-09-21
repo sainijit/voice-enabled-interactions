@@ -509,6 +509,10 @@ services:
   #
   # OVMS_TOOL_GUIDED constrains decoding to the tool JSON schema. It is the main
   # mitigation for small models emitting raw tool-result JSON instead of prose.
+  # Tested (Qwen3-4B-int4, this deployment): a controlled A/B at the real agent
+  # endpoint showed no TTFT improvement over unguided decoding (grammar-
+  # constraint overhead offsets any preamble-token savings). Left disabled
+  # (default false); revisit if a future model shows raw-JSON leakage.
   #
   # Speculative decoding (--draft_source_model, a Qwen3-0.6B draft model) was
   # benchmarked and REJECTED — see
@@ -621,14 +625,48 @@ services:
       # already reads as a finished sentence. Fails closed to
       # KIOSK_CORE_SILENCE_TIMEOUT_SECONDS when no transcript has arrived.
       KIOSK_CORE_ENDPOINT_COMPLETE_ENABLED: ${KIOSK_CORE_ENDPOINT_COMPLETE_ENABLED:-true}
-      KIOSK_CORE_ENDPOINT_SHORT_SECONDS:    ${KIOSK_CORE_ENDPOINT_SHORT_SECONDS:-1.0}
+      # 0.15s (kiosk-voice-lab-main parity) — see config.py's
+      # DEFAULT_ENDPOINT_SHORT_SECONDS docstring: inert until continuous ASR
+      # replaces the flush-on-pause design (currently gated by
+      # KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS=0.50).
+      KIOSK_CORE_ENDPOINT_SHORT_SECONDS:    ${KIOSK_CORE_ENDPOINT_SHORT_SECONDS:-0.15}
       KIOSK_CORE_ENDPOINT_MIN_WORDS:        ${KIOSK_CORE_ENDPOINT_MIN_WORDS:-3}
+      # Same explicit-allowlist gotcha as ADAPTIVE_FLUSH_PAUSE_SECONDS below:
+      # setting this in .env alone does nothing without this line. Trimmed
+      # from the 0.2s code default to 0.15s so short+stable totals ~0.30s
+      # (down from ~0.35s), keeping ~30-50ms of margin above
+      # KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS=0.30 (the real commit must
+      # still win the race -- see that var's comment below).
+      KIOSK_CORE_ENDPOINT_STABLE_SECONDS:  ${KIOSK_CORE_ENDPOINT_STABLE_SECONDS:-0.2}
+      # Was previously never actually wired through from .env to the
+      # container (only referenced in a comment above) — this compose file
+      # uses an explicit environment: allowlist, not a blanket .env
+      # passthrough, so every KIOSK_CORE_* override needs its own line here
+      # regardless of what .env sets. Lowered from the 0.50s code default:
+      # in streaming sessions the endpoint-completeness shortcut fires at
+      # ~0.35-0.40s (ENDPOINT_SHORT_SECONDS + ENDPOINT_STABLE_SECONDS),
+      # before the 0.50s adaptive-pause real commit ever got a chance to
+      # run — so the real, diarized commit never fired mid-utterance and
+      # the mandatory final-chunk flush had to transcribe the WHOLE
+      # utterance from scratch every turn (the dominant cost in
+      # WallTimes.final_flush_wait_ms, observed 250-600ms). Set below the
+      # shortcut's firing point so the real commit wins the race instead.
+      KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS: ${KIOSK_CORE_ADAPTIVE_FLUSH_PAUSE_SECONDS:-0.30}
       # Tier 2 roadmap item #4 (cumulative-snapshot ASR), adapted: skip the
       # final tail-chunk ASR call when it holds no unflushed speech (pure
       # trailing silence — the adaptive-pause flush already sent every real
       # word). Default off pending live A/B measurement; see config.py for
       # the full rationale (DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED).
       KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED: ${KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED:-false}
+      # ASR trailing-silence trim (kiosk-voice-lab-main parity): trims the
+      # audio actually SENT TO ASR down to "last speech + a short decay tail"
+      # before every adaptive-pause/final flush, to stop Whisper hallucinating
+      # a completion word from dangling speech + silence (measured artifact:
+      # a spurious trailing "Good."). Does not touch endpoint/silence-timeout
+      # timing. Default off pending live A/B; see config.py for the full
+      # rationale (DEFAULT_ASR_TRIM_TRAILING_SILENCE_ENABLED).
+      KIOSK_CORE_ASR_TRIM_TRAILING_SILENCE_ENABLED: ${KIOSK_CORE_ASR_TRIM_TRAILING_SILENCE_ENABLED:-false}
+      KIOSK_CORE_ASR_TRIM_DECAY_SECONDS:             ${KIOSK_CORE_ASR_TRIM_DECAY_SECONDS:-0.15}
       # Speculative drafting (see DEFAULT_SPECULATIVE_DRAFT_ENABLED in
       # config.py for the full rationale/safety notes — dry_run-guarded,
       # newest-wins). Was defaulted OFF after a 2026-09-08 live-replay
@@ -667,13 +705,22 @@ services:
       KIOSK_CORE_DIARIZATION_ENABLED: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
       # Silero VAD (v5, onnxruntime): model-based replacement for the adaptive
       # RMS VAD's speech/silence decision. Default ON — every turn timer (the
-      # 0.70s adaptive flush, the sentence-completeness shortcut and the 1.5s
+      # 0.50s adaptive flush, the sentence-completeness shortcut and the 1.1s
       # silence endpoint) starts from the frame the VAD first calls silence, so
       # a loudness gate that declares silence late in a noisy room delays the
       # whole turn. See DEFAULT_SILERO_VAD_* in kiosk_core/config.py for the
       # full writeup and kiosk_core/silero_vad.py for the wrapper. Fails open to
       # the RMS VAD. Set to false to restore the RMS-only path.
       KIOSK_CORE_SILERO_VAD_ENABLED: ${KIOSK_CORE_SILERO_VAD_ENABLED:-true}
+      # Continuous ASR streaming: PCM frames sent over a persistent WebSocket
+      # to audio-analyzer's /v1/realtime instead of POSTing a WAV file per
+      # flush, so a fresh transcript is available throughout speech (not
+      # just after a pause begins). This is what lets the sentence-
+      # completeness shortcut (KIOSK_CORE_ENDPOINT_SHORT_SECONDS) actually
+      # fire early instead of falling through to the full silence-timeout
+      # wait most turns. Falls back to the file-POST path per-session if the
+      # socket fails to connect — never fails the turn. Default OFF.
+      KIOSK_CORE_ANALYZER_STREAMING_ENABLED: ${KIOSK_CORE_ANALYZER_STREAMING_ENABLED:-false}
       # Consecutive rejected turns (speaker filter dropped every segment as
       # non-primary) required before the kiosk speaks
       # KIOSK_CORE_UNRECOGNIZED_SPEAKER_PROMPT instead of staying silent.

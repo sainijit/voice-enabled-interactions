@@ -1,0 +1,195 @@
+1. Core vocabulary they expect
+
+The second slide is the clearest definition:
+
+Term	Starts	Stops	What it represents
+Voice-to-voice latency	Customer's last word	First sound at speaker	The complete latency the customer actually experiences
+Endpointing delay	Customer's last word	Turn-end decision	How long the system waits to decide the customer has finished
+Processing latency	Turn-end decision	First sound at speaker	Everything after the system decides the turn is complete
+Transcription latency	Speech in	Transcript out	ASR processing time
+LLM time to first token (TTFT)	Prompt in	First token out	LLM generation latency
+TTS time to first byte (TTFB)	Text in	First audio byte	TTS audio-generation latency
+The most important distinction
+
+They are explicitly separating:
+
+Customer's last word → turn-end decision
+
+from:
+
+Turn-end decision → first sound
+
+So:
+
+Voice-to-voice latency = Endpointing delay + Processing latency
+
+For the prototype shown:
+
+Endpointing delay = 593 ms median
+Processing latency = 194 ms median
+Voice-to-voice = 775 ms median
+
+The numbers don't add perfectly because of measurement/rounding details, but that's the conceptual decomposition they're asking everyone to use.
+
+2. What they want to call the main KPI
+
+The slide strongly suggests that the primary KPI should be:
+
+Voice-to-voice latency
+
+Measured:
+
+Customer's last word → first sound at the speaker
+
+Not:
+
+turn-end decision → first audio
+
+And not:
+
+LLM request → first token
+
+And not:
+
+TTS request → first byte.
+
+This is because voice-to-voice is what the customer actually feels at the kiosk.
+
+They explicitly propose:
+
+“Retire ‘time to first audio’ as a KPI name.”
+
+because different teams/vendors may be using that phrase to mean different things.
+
+3. The three KPI levels they are effectively asking you to track
+
+From the slides, I'd structure the kiosk metrics like this:
+
+KPI 1 — Transcription latency
+
+Speech → transcript
+
+Prototype:
+
+115 ms/call
+
+Target shown:
+
+< 200 ms
+
+KPI 2 — Processing latency
+
+Turn-end decision → first sound
+
+Prototype:
+
+194 ms median
+
+This consists roughly of things such as:
+
+Turn-end decision
+       ↓
+LLM TTFT
+       ↓
+LLM generation / response handling
+       ↓
+TTS TTFB
+       ↓
+audio/playback
+       ↓
+First sound at speaker
+
+The slide specifically calls out:
+
+LLM TTFT = 88 ms
+TTS TTFB ≈ 80 ms for a 3-word opener
+Processing latency = 194 ms median
+KPI 3 — Voice-to-voice latency
+
+Customer's last word → first sound at speaker
+
+Prototype:
+
+775 ms median
+1,368 ms p95
+
+This is the customer-facing KPI.
+
+4. The vocabulary around endpointing is especially important
+
+They are basically saying your system shouldn't immediately assume:
+
+“ASR has produced a transcript, therefore customer has finished.”
+
+Instead, you need an end-of-turn / turn-end decision.
+
+The terminology they use is:
+
+Endpointing delay
+
+The quiet period between:
+
+customer's last word
+
+and
+
+system deciding the customer has finished.
+
+Their prototype currently has:
+
+593 ms median endpointing delay
+
+And they explicitly say this is not primarily a hardware limitation.
+
+That's a very important distinction for your kiosk work.
+
+5. Their proposed human-conversation terminology
+
+The first slide introduces three ranges:
+
+Human gap
+
+0–200 ms
+
+They describe this as the natural conversational gap.
+
+They cite typical human conversational response timing around:
+
+110–200 ms median
+
+Kiosk target — typical
+
+300–600 ms
+
+This is the range they say partners are sizing the use case around.
+
+They also reference:
+
+300 ms — kiosk partner feedback/stretch target
+
+and:
+
+500 ms — Epic's voice-to-voice interpretation
+
+Reads as hesitation
+
+>700 ms
+
+The slide says a gap past roughly 700 ms starts to feel like hesitation.
+
+Reads as a machine
+
+>1,000 ms
+
+Above approximately 1 second, it starts feeling machine-like.
+
+And the slide says:
+
+failure past ~4 s
+
+So their conceptual customer-experience scale is approximately:
+
+0          200       300       600       700       1000
+|-----------|---------|---------|---------|----------|
+ Human       Kiosk target       Hesitation Machine
+ gap         typical

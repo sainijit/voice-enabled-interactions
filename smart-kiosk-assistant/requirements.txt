@@ -30,6 +30,7 @@ scikit-learn==1.9.0
 requests==2.34.2
 python-certifi-win32==1.6.1
 uvicorn==0.35.0
+websockets==16.0
 
 # Ordering feature
 aiosqlite==0.20.0

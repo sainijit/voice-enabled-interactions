@@ -107,6 +107,18 @@ def _run(session: BaseAudioSession) -> list:
 
 
 class TestSkipEmptyFinalFlush:
+    @pytest.fixture(autouse=True)
+    def _isolate_from_endpoint_completeness(self, monkeypatch):
+        # See the identical fixture in test_asr_trim_trailing_silence.py:
+        # these tests use short silence_timeout_seconds values that can
+        # overlap config.DEFAULT_ENDPOINT_SHORT_SECONDS's default and let the
+        # unrelated completeness shortcut fire, changing frame-count timing.
+        monkeypatch.setattr(config, "DEFAULT_ENDPOINT_COMPLETE_ENABLED", False)
+        # Same reasoning for config.DEFAULT_PREVIEW_FLUSH_INTERVAL_SECONDS
+        # (0.4s default): it can now fire mid-speech within these tests'
+        # short continuous-speech runs, splitting one chunk into two.
+        monkeypatch.setattr(config, "DEFAULT_PREVIEW_FLUSH_ENABLED", False)
+
     def test_disabled_still_enqueues_silent_final_flush(self, monkeypatch):
         """Default behavior (flag off): the final tail chunk is always
         enqueued, even when it is pure trailing silence."""

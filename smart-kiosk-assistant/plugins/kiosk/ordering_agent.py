@@ -2432,6 +2432,18 @@ class OrderingAgent:
         speculative_token = _speculative_ctx.set(speculative)
         tool_call_log_token = _tool_call_log_ctx.set([])
 
+        # Must happen BEFORE the directive-mode branch below, not after it
+        # (the original position, further down this function). Directive
+        # mode returns early on a hit, and every accumulator in llm_metrics
+        # (_mcp_stats, _llm_stats, etc.) starts as None until reset() runs —
+        # record_mcp()/record() silently no-op on a None accumulator. With
+        # reset() only called after the directive-mode return, every
+        # directive-mode turn's real call_tool() timing (confirmed via logs
+        # to actually execute — e.g. place_order) was captured into a dead
+        # accumulator and discarded, so mcp_ms/mcp_calls always came back
+        # None/0 even though the MCP round-trip genuinely happened.
+        llm_metrics.reset()
+
         # Directive mode: one tool-free completion that carries both the cart
         # mutation and the speech, so TTS can start while the model is still
         # generating. Restricted to turns with explicit mutation intent —

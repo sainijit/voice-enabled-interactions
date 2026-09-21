@@ -23,7 +23,7 @@ import pytest
 # tests/functional/conftest.py. Must run before the kiosk_core import below.
 sys.modules.setdefault("sounddevice", MagicMock())
 
-from kiosk_core.audio_session import _looks_complete  # noqa: E402
+from kiosk_core.audio_session import _looks_complete, _endpoint_stability_key  # noqa: E402
 
 MIN_WORDS = 3
 
@@ -81,3 +81,41 @@ def test_whisper_question_mark_cannot_rescue_a_dangling_word():
 
 def test_punctuation_and_case_do_not_break_the_word_scan():
     assert _looks_complete("Order one classic chicken burger.", MIN_WORDS) is True
+
+
+class TestEndpointStabilityKey:
+    """_endpoint_stability_key() backs _endpoint_transcript_stable()'s
+    change-detection: it must treat a punctuation-only ASR hallucination on
+    the trailing silence tail (e.g. a stray extra ".") as NO change, while
+    still treating any real new/changed word as a change — otherwise the
+    stability window resets right when it should be confirming, which is
+    exactly the observed 0%-80% shortcut firing-rate swing.
+    """
+
+    def test_trailing_hallucinated_period_is_ignored(self):
+        before = "Hi, I would like to order one classic chicken burger. Please."
+        after = "Hi, I would like to order one classic chicken burger. Please. ."
+        assert _endpoint_stability_key(before) == _endpoint_stability_key(after)
+
+    def test_repeated_trailing_period_is_ignored(self):
+        assert _endpoint_stability_key("One coke please.") == _endpoint_stability_key(
+            "One coke please.."
+        )
+
+    def test_case_and_whitespace_do_not_count_as_a_change(self):
+        assert _endpoint_stability_key("One Coke Please.") == _endpoint_stability_key(
+            "  one coke please  "
+        )
+
+    def test_a_genuinely_new_word_still_counts_as_a_change(self):
+        before = "I would like one classic chicken burger"
+        after = "I would like one classic chicken burger and"
+        assert _endpoint_stability_key(before) != _endpoint_stability_key(after)
+
+    def test_a_changed_word_still_counts_as_a_change(self):
+        before = "Can I get a coke"
+        after = "Can I get a sprite"
+        assert _endpoint_stability_key(before) != _endpoint_stability_key(after)
+
+    def test_none_and_empty_are_equivalent(self):
+        assert _endpoint_stability_key(None) == _endpoint_stability_key("")

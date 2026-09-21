@@ -21,10 +21,11 @@ import sounddevice as sd
 from kiosk_core import config, conversation_recorder
 from kiosk_core.agent_client import AgentClient
 from kiosk_core.analyzer_client import AnalyzerClient
+from kiosk_core.realtime_analyzer_client import RealtimeAnalyzerClient, derive_realtime_ws_url
 from kiosk_core.models import FileSessionStartRequest, SessionStartRequest
 from kiosk_core.pipeline_latency import (
-    AgentSpan, AsrSpan, LlmSpan, PipelineLatencyStore, RetrievalSpan,
-    TtsSpan, TurnTrace, WallTimes, pipeline_store,
+    AgentSpan, AsrSpan, GuardSpan, LlmSpan, McpSpan, PipelineLatencyStore,
+    RetrievalSpan, TemplateSpan, TtsSpan, TurnTrace, WallTimes, pipeline_store,
 )
 from kiosk_core.rag_client import RagClient
 from kiosk_core.tts_client import TtsClient
@@ -172,7 +173,7 @@ def _normalize_card_cart_homophone(text: str) -> str:
 # "Thank you." and would otherwise start a spurious agent turn. Matching the
 # whole utterance keeps genuine speech containing these words intact.
 _WHISPER_FILLER = re.compile(
-    r"^\W*(?:you|thank you|thanks(?: for watching)?|bye|okay|ok|uh|um|"
+    r"^\W*(?:you|thank you|thanks(?: for watching)?|bye|okay|ok|good|uh|um|"
     r"thank you\.? bye|please subscribe)\W*$",
     re.IGNORECASE,
 )
@@ -185,6 +186,72 @@ _DEDUP_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
 # boundaries; a cache hit only requires the real _tts_worker to later
 # synthesise a byte-identical sentence string, whatever split produced it.
 _SPEC_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+# Normalizes whitespace/case/punctuation-only differences between a
+# speculative draft's predicted sentence and the real turn's actual sentence
+# so the _tts_cache lookup in _tts_worker isn't defeated by trivial
+# formatting drift (double spaces, curly vs straight quotes, a trailing
+# period the real reply omits, ₹ spacing, etc.) that doesn't change what is
+# actually spoken. Deliberately NOT true fuzzy/edit-distance matching — two
+# sentences that differ in WORDING (the dominant real-world case, since the
+# same LLM prompt rarely regenerates byte-identical prose) still miss, by
+# design: presynthesised audio for text B must never be played for text A.
+_CACHE_KEY_PUNCT_RE = re.compile(r"[^\w\s₹$€£]", re.UNICODE)
+
+
+def _normalize_sentence_for_cache_key(text: str) -> str:
+    """Collapse whitespace/case/punctuation-only drift for _tts_cache keys."""
+    normalized = _CACHE_KEY_PUNCT_RE.sub("", text.lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+# ── Process-wide opener TTS cache ───────────────────────────────────────────
+# Maps a (normalized sentence, model, voice, language, instructions) tuple to
+# an already-synthesised WAV that has ALREADY been trimmed and gain-adjusted
+# exactly as _tts_worker would. Shared across every session in the process so
+# a stock opener ("Got it.") is synthesised once per kiosk boot rather than
+# once per turn — see DEFAULT_TTS_OPENER_CACHE_ENABLED in config.py for why
+# this is safe where speculative pre-synthesis is not.
+#
+# Entries are only ever written from a real turn's completed output, so this
+# cache never causes a TTS request that would not otherwise have happened.
+_OPENER_TTS_CACHE: dict[tuple, str] = {}
+_OPENER_TTS_CACHE_LOCK = threading.Lock()
+_OPENER_TTS_CACHE_DIR = Path(__file__).resolve().parent.parent / "generated_audio" / "_opener_cache"
+
+# Sentences containing a digit are order-specific ("Your total is now ₹169.",
+# "That's 2 burgers.") and, being short enough to pass the length filter, would
+# otherwise be admitted. They can never be replayed -- the next order has a
+# different total -- so each one permanently burns a slot, and a long kiosk
+# uptime would fill the cache with dead total-variants and then stop admitting
+# the genuine stock openers this cache exists for. Excluding digits keeps
+# admission to phrasing that actually recurs ("Got it.", "Sure.").
+_OPENER_VOLATILE_RE = re.compile(r"\d")
+
+
+def _opener_cache_key(sentence: str, request) -> tuple | None:
+    """Build an opener-cache key, or None if this sentence is not cacheable.
+
+    The voice/model/language/instructions are part of the key because two
+    sessions may legitimately request different voices; a clip synthesised for
+    one must never be replayed for another.
+    """
+    if not config.DEFAULT_TTS_OPENER_CACHE_ENABLED:
+        return None
+    if len(sentence) > config.DEFAULT_TTS_OPENER_CACHE_MAX_CHARS:
+        return None
+    normalized = _normalize_sentence_for_cache_key(sentence)
+    if not normalized:
+        return None
+    if _OPENER_VOLATILE_RE.search(sentence):
+        return None
+    return (
+        normalized,
+        request.tts_model,
+        request.tts_voice,
+        request.tts_language,
+        request.tts_instructions,
+    )
 
 
 def _collapse_repeated_phrases(text: str) -> str:
@@ -272,6 +339,25 @@ def _looks_complete(text: str, min_words: int) -> bool:
     # Whisper punctuates fragments with "?" and ".", so punctuation cannot
     # rescue a dangling word — judge on the final word itself.
     return words[-1] not in _INCOMPLETE_TAIL_WORDS
+
+
+def _endpoint_stability_key(text: str) -> str:
+    """Normalize a candidate transcript for the endpoint stability check.
+
+    _endpoint_transcript_stable() must only reset its confirmation timer when
+    the WORDS actually change, not on punctuation-only noise. Whisper
+    frequently hallucinates a stray trailing "." (or repeats one) while
+    decoding the customer's own trailing silence tail -- e.g. "...please."
+    becoming "...please. ." a tick later with no new word spoken. Compared as
+    raw strings that reads as "the transcript changed", which restarts the
+    stability window right when it should be confirming, and is exactly why
+    the shortcut's measured firing rate swings so widely run to run (see
+    _endpoint_transcript_stable's docstring). Reusing _looks_complete's own
+    word-extraction regex means this can never treat a genuine new word as
+    unchanged -- it only ignores differences _looks_complete itself already
+    ignores.
+    """
+    return " ".join(_ENDPOINT_WORD_RE.sub("", (text or "").strip().lower()).split())
 
 
 def _assemble_transcript(parts: list[str]) -> str:
@@ -377,6 +463,37 @@ class BaseAudioSession:
     _enrolled_scopes: set[str] = set()
     _enrolled_scopes_lock = threading.Lock()
 
+    @property
+    def _streaming_active(self) -> bool:
+        """Whether continuous ASR streaming is live for this session.
+
+        Backed by __streaming_active_flag (set once at connect time) AND a
+        liveness check on realtime_client -- a WS that dies mid-session
+        (server restart, network blip) previously left __streaming_active_flag
+        stuck True forever, so every later send_frame/preview/commit call
+        silently no-op'd (RuntimeError on a closed asyncio loop, swallowed)
+        and the session was stuck replaying one stale/frozen transcript with
+        no fallback. Now this flips False the instant the client reports it
+        died, so callers fall back to the file-based AnalyzerClient path the
+        same way a failed initial connect is already handled.
+        """
+        if not self.__streaming_active_flag:
+            return False
+        if self.realtime_client is None or not self.realtime_client.is_alive():
+            if self.__streaming_active_flag:
+                logger.warning(
+                    "[SESSION] session=%s | realtime analyzer connection lost; "
+                    "falling back to file-based ASR for the rest of this session",
+                    self.session_id,
+                )
+            self.__streaming_active_flag = False
+            return False
+        return True
+
+    @_streaming_active.setter
+    def _streaming_active(self, value: bool) -> None:
+        self.__streaming_active_flag = value
+
     def __init__(
         self,
         request: SessionStartRequest,
@@ -443,6 +560,43 @@ class BaseAudioSession:
         # Initialised from our own session_id; the analyzer echoes/normalises
         # it via the X-Session-ID response header, which we then reuse.
         self._analyzer_session_id: str = self.session_id
+
+        # ── Continuous ASR streaming (optional, feature-flagged) ────────────
+        # When enabled, frames are streamed continuously to the analyzer over
+        # a persistent WebSocket (see kiosk_core/realtime_analyzer_client.py)
+        # instead of being POSTed as WAV files per flush. Falls back to the
+        # file-based AnalyzerClient (self.client, above) for this session if
+        # the socket fails to connect — never fails the turn.
+        self.realtime_client: RealtimeAnalyzerClient | None = None
+        self.__streaming_active_flag = False
+        # Timer for the non-destructive preview ping cadence (independent of
+        # chunk_frames -- see the streaming preview-flush block).
+        self._last_preview_ping_at: float = 0.0
+        if config.DEFAULT_ANALYZER_STREAMING_ENABLED:
+            try:
+                self.realtime_client = RealtimeAnalyzerClient(
+                    ws_url=derive_realtime_ws_url(request.analyzer_url),
+                    session_id=self._analyzer_session_id,
+                    speaker_scope_id=self.agent_session_id,
+                    diarization=config.DEFAULT_DIARIZATION_ENABLED,
+                    language=request.language,
+                )
+                self.realtime_client.start(
+                    timeout=config.DEFAULT_REALTIME_CONNECT_TIMEOUT_SECONDS
+                )
+                self.__streaming_active_flag = True
+                logger.info(
+                    "[SESSION] session=%s | continuous ASR streaming ENABLED", self.session_id
+                )
+            except Exception:
+                logger.exception(
+                    "[SESSION] session=%s | failed to open realtime analyzer stream; "
+                    "falling back to file-based ASR for this session",
+                    self.session_id,
+                )
+                self.realtime_client = None
+                self.__streaming_active_flag = False
+
         # Highest segment end-time already consumed from the analyzer. The
         # analyzer runs in append_to_session mode (session_id is reused) and
         # returns the cumulative segment list on every chunk with offset-
@@ -531,6 +685,22 @@ class BaseAudioSession:
         # Used only when KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED is set —
         # see config.py for the full rationale.
         self._chunk_has_speech = False
+        # True whenever speech has been captured this turn that has NOT yet
+        # been confirmed transcribed by a successful (non-empty) ASR flush.
+        # Unlike _chunk_has_speech (which resets the instant a flush is
+        # QUEUED, regardless of what comes back), this only clears once
+        # _flush_chunk actually appends real text to transcript_parts — see
+        # its assignment there. This exists because _chunk_has_speech alone
+        # was unsafe to skip the final flush on: a chunk can be enqueued
+        # (resetting _chunk_has_speech) and then have its ASR call come back
+        # empty (e.g. a transient audio-analyzer miss on real speech) with no
+        # later chunk to catch it, silently losing the whole utterance.
+        # Reproduced live on rec1_16k.wav (2026-09-15): a chunk-size-cap
+        # flush containing the entire order came back 0-segment, the final
+        # flush was then skipped because _chunk_has_speech read False, and
+        # the turn ended with an empty transcript. This flag makes the skip
+        # safe: it can only fire once real content has actually landed.
+        self._unconfirmed_speech_pending = False
         # Count of turns where the final tail-chunk flush was skipped because
         # it held no unflushed speech, purely for observability/metrics.
         self._final_flush_skipped = False
@@ -551,6 +721,13 @@ class BaseAudioSession:
         # All _t_* fields are set during _finalize_run / _stream_rag_response.
         # Using time.monotonic() for accurate durations; datetime only for display.
         self._t_capture_start: float | None = None  # first speech frame detected
+        # File-replay only: monotonic instant the fixture began streaming
+        # (set at the very first line of FileAudioSession._run(), before any
+        # frame is read). Ground-truth anchor for benchmark v2v — pairs with
+        # an offline, VAD-independent measurement of where the fixture's real
+        # speech ends (see tests/benchmarks/v2v_fixture_benchmark.py). None
+        # for microphone/browser-stream sessions.
+        self._t_playback_start: float | None = None
         self._asr_ms_total: float = 0.0             # summed transcribe_file time
         self._asr_chunks: int = 0                   # number of transcribe calls
         self._t_turn_start: float | None = None     # start of _finalize_run
@@ -562,8 +739,29 @@ class BaseAudioSession:
         # reconstructing "t0 - endpoint_wait_seconds" fixes a real undercount
         # in voice-to-voice latency that previously ignored that round-trip.
         self._t_last_word: float | None = None
+        # Directly-observed instant of the LAST audio frame actually
+        # containing speech that kiosk-core sent to audio-analyzer (updated
+        # every time — see the send_frame() call sites in
+        # _process_frame_stream — so only the most recent one survives).
+        # _t_last_word above is *derived*: "now minus silence_run_seconds" at
+        # the moment the endpoint fires, which assumes the frame-processing
+        # loop's own silence_run_seconds counter tracks real elapsed time
+        # exactly — true only if frames are read at a perfectly steady
+        # cadence. Bursty delivery (GC pause, scheduler jitter, a slow VAD
+        # inference tick) can make that counter run ahead of or behind the
+        # wall clock, silently skewing every v2v number derived from it. This
+        # field is not derived from anything — it is the wall-clock instant
+        # send_frame() was actually called for the last speech-containing
+        # frame — so it is preferred over the derived value wherever both
+        # exist (see _log_last_word_spoken).
+        self._t_last_speech_frame_sent: float | None = None
         self._t_agent_start: float | None = None    # just before agent HTTP call
         self._t_agent_end: float | None = None      # agent reply received
+        # End of the token stream / trailing-text handling — before
+        # _stop_tts_workers() runs in the turn's finally block. Isolates the
+        # real agent+tool round-trip from the TTS-synthesis drain that
+        # follows it, which _t_turn_end (below) otherwise bundles in.
+        self._t_agent_stream_end: float | None = None
         self._t_first_tts: float | None = None      # first TTS sentence queued
         # First audio the customer could actually hear, stamped when the audio
         # EXISTS (opener file copied, or first synthesized segment written to
@@ -576,6 +774,30 @@ class BaseAudioSession:
         # turn. Needed to report voice-to-voice latency, because every other
         # timestamp in the trace starts after this wait has already elapsed.
         self._endpoint_wait_seconds: float | None = None
+        # How long the mandatory drain-and-join after the endpoint decision
+        # (self._flush_queue.join(), a few lines above _finalize_run) actually
+        # blocked for — i.e. the final chunk's real ASR round-trip. See the
+        # comment on _t_last_word above: this is the gap between _t_last_word
+        # and _t_turn_start that endpoint_wait_seconds does not cover. Exposed
+        # as its own field so voice_to_voice_ms is reconstructable from parts
+        # (endpoint_wait_ms + final_flush_wait_ms + time_to_first_audio_ms)
+        # instead of silently vanishing into an unexplained gap.
+        self._final_flush_wait_seconds: float | None = None
+        # Monotonic instant the final-flush drain-and-join sequence began
+        # (right after the endpoint decision / mic-release signal was
+        # processed). Paired with _t_last_word to compute
+        # WallTimes.post_speech_gap_ms -- see that field's docstring.
+        self._t_final_flush_start: float | None = None
+        # Whether THIS turn committed via the sentence-completeness shortcut
+        # (DEFAULT_ENDPOINT_SHORT_SECONDS path) rather than the full
+        # silence_timeout_seconds fallback. None until the turn ends via one
+        # of the two silence-based commit branches (stays None for
+        # "stopped_by_api"/"max_duration_reached"/etc., where neither ran).
+        # Added to answer, empirically per-turn rather than by inference from
+        # endpoint_wait_ms alone, "is the adaptive shortcut actually firing,
+        # or is ASR too slow for it to ever get a chance?" — see
+        # docs/performance-improvements-2026-09.md.
+        self._endpoint_shortcut_fired: bool | None = None
         # Endpoint completeness stability tracking (see
         # config.DEFAULT_ENDPOINT_STABLE_SECONDS): the transcript text last
         # seen by the completeness shortcut, and when it started reading
@@ -740,21 +962,70 @@ class BaseAudioSession:
                             buffered = self._preroll_frames.popleft()
                             chunk_frames.append(buffered)
                             self._captured_samples += len(buffered)
+                            if self._streaming_active:
+                                self.realtime_client.send_frame(buffered.tobytes())
                         chunk_frames.append(frame)
                         self._captured_samples += len(frame)
+                        if self._streaming_active:
+                            self.realtime_client.send_frame(frame.tobytes())
+                        # Every frame reaching this branch is speech by
+                        # construction (the preroll-drain loop above only
+                        # ever buffered frames while still deciding, and this
+                        # one just triggered is_speech=True itself).
+                        self._t_last_speech_frame_sent = time.monotonic()
                     else:
                         self._preroll_frames.append(frame)
                     continue
 
                 chunk_frames.append(frame)
                 self._captured_samples += len(frame)
+                if self._streaming_active:
+                    self.realtime_client.send_frame(frame.tobytes())
+                    if is_speech:
+                        # Overwritten every time -- only the LAST speech
+                        # frame's send instant survives by the time the
+                        # endpoint fires. See the field's docstring in
+                        # __init__ for why this is preferred over deriving
+                        # the same instant from silence_run_seconds.
+                        self._t_last_speech_frame_sent = time.monotonic()
 
                 if is_speech:
                     silence_run_seconds = 0.0
                     _adaptive_flushed = False  # new speech: allow adaptive flush again
                     self._chunk_has_speech = True
+                    self._unconfirmed_speech_pending = True
+                    # New speech resets the silence-domain clock to 0, so any
+                    # stability state left over from a PRIOR silence run must
+                    # be cleared too -- otherwise the next silence run's
+                    # _endpoint_transcript_stable() call would diff its fresh
+                    # (small) silence_run_seconds against a stale, much larger
+                    # _endpoint_stable_since from before, and could never
+                    # read stable again this turn.
+                    self._endpoint_stable_transcript = None
+                    self._endpoint_stable_since = None
                 else:
                     silence_run_seconds += self._frame_duration_seconds
+                    # Fire an immediate preview the instant speech is believed
+                    # to end, instead of waiting for the next scheduled
+                    # DEFAULT_REALTIME_PREVIEW_COMMIT_SECONDS (0.4s) tick
+                    # below. Previously the buffer covering the customer's
+                    # actual last word only got re-transcribed on whatever
+                    # tick happened to land next -- up to 0.4s of pure
+                    # scheduling lag before ASR even started on the complete
+                    # utterance (measured: this was the largest single
+                    # contributor to asr_last_word_to_transcript_ms). Gated
+                    # the same way as the periodic ping (silence_run_seconds
+                    # == exactly one frame means this is the FIRST silence
+                    # frame this run) so it never fires more than once per
+                    # utterance boundary.
+                    if (
+                        self._streaming_active
+                        and config.DEFAULT_PREVIEW_FLUSH_ENABLED
+                        and self._chunk_has_speech
+                        and silence_run_seconds == self._frame_duration_seconds
+                    ):
+                        self.realtime_client.preview()
+                        self._last_preview_ping_at = time.monotonic()
 
                 # ── Adaptive pause flush ────────────────────────────────────
                 # When the speaker pauses for adaptive_flush_pause_seconds
@@ -825,7 +1096,9 @@ class BaseAudioSession:
                         )
                         # Not the final chunk — see DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED
                         # in config.py for why this one is flagged non-final.
-                        self._flush_queue.put((chunk_frames, False))
+                        self._flush_queue.put(
+                            (self._trim_trailing_silence(chunk_frames, silence_run_seconds), False)
+                        )
                         chunk_frames = []
                         _adaptive_flushed = True
                         self._chunk_has_speech = False
@@ -847,6 +1120,51 @@ class BaseAudioSession:
                     continue
 
                 # ── Preview flush (continuous ASR during active speech) ─────
+                # Streaming mode: send a cheap, NON-destructive preview ping
+                # over the already-open socket instead of a real (destructive)
+                # flush. The analyzer transcribes everything buffered since
+                # the last real commit without clearing it, so this always
+                # has full utterance context (never a mid-word slice) and
+                # never touches the official, persisted transcript -- that
+                # is still built exclusively by real commits below (adaptive-
+                # pause flush / final flush), at the same safe cadence/spans
+                # as the file-based path. See
+                # kiosk_core/realtime_analyzer_client.py's module docstring
+                # and RealtimeAnalyzerClient.preview() for the full rationale.
+                #
+                # Timed independently of chunk_frames (which only tracks
+                # audio for the next REAL commit) via _last_preview_ping_at,
+                # so ticking previews never interfere with adaptive/final
+                # flush accounting.
+                if self._streaming_active:
+                    now_mono = time.monotonic()
+                    # Once trailing silence has begun, ping much more often
+                    # (matching kiosk-voice-lab-main's tick_quiet_s=0.15
+                    # quiet-mode acceleration) so a fresh, complete-looking
+                    # snapshot is almost always ready within
+                    # DEFAULT_ENDPOINT_SHORT_SECONDS of the customer's last
+                    # word -- see DEFAULT_REALTIME_PREVIEW_COMMIT_QUIET_SECONDS's
+                    # docstring in config.py for why the flat cadence made the
+                    # completeness shortcut a timing coin-flip.
+                    _preview_interval = (
+                        config.DEFAULT_REALTIME_PREVIEW_COMMIT_QUIET_SECONDS
+                        if silence_run_seconds > 0
+                        else config.DEFAULT_REALTIME_PREVIEW_COMMIT_SECONDS
+                    )
+                    if (
+                        config.DEFAULT_PREVIEW_FLUSH_ENABLED
+                        and silence_run_seconds < adaptive_pause
+                        and self._chunk_has_speech
+                        and (now_mono - self._last_preview_ping_at) >= _preview_interval
+                    ):
+                        self.realtime_client.preview()
+                        self._last_preview_ping_at = now_mono
+                    # Deliberately no `continue` here (unlike the file-based
+                    # block below, which owns chunk_frames/_flush_queue and
+                    # DOES `continue` when it fires): a preview ping never
+                    # consumes chunk_frames, so execution must still reach
+                    # the Endpoint check below on every frame.
+
                 # Flush the accumulated chunk to the background ASR worker
                 # periodically WHILE the customer is still talking — not just
                 # at the chunk-size cap (6.0s) or the end-of-utterance pause
@@ -867,8 +1185,13 @@ class BaseAudioSession:
                 # up behind the first rather than run in parallel — this
                 # check makes each tick self-relaunching (fire again as soon
                 # as the previous one lands) instead of piling up requests.
+                #
+                # Streaming mode handles previews entirely via the
+                # non-destructive ping above -- this destructive file-based
+                # flush must not also run for those sessions.
                 if (
-                    config.DEFAULT_PREVIEW_FLUSH_ENABLED
+                    not self._streaming_active
+                    and config.DEFAULT_PREVIEW_FLUSH_ENABLED
                     and silence_run_seconds < adaptive_pause
                     and self._chunk_duration_seconds(chunk_frames) >= config.DEFAULT_PREVIEW_FLUSH_INTERVAL_SECONDS
                     and self._chunk_has_speech
@@ -881,7 +1204,18 @@ class BaseAudioSession:
                     )
                     # Not the final chunk — see DEFAULT_DIARIZATION_INTERMEDIATE_ENABLED
                     # in config.py for why this one is flagged non-final.
-                    self._flush_queue.put((chunk_frames, False))
+                    #
+                    # This flush can itself land mid-pause (the interval
+                    # boundary reached while silence_run_seconds is small but
+                    # non-zero) — that dangling trailing silence is exactly
+                    # what makes the analyzer's cumulative Whisper buffer
+                    # hallucinate a completion word (measured: "Good."
+                    # appearing at the THIRD preview flush, well before the
+                    # customer's true end of speech). Trim it the same way as
+                    # the adaptive-pause/final flushes.
+                    self._flush_queue.put(
+                        (self._trim_trailing_silence(chunk_frames, silence_run_seconds), False)
+                    )
                     chunk_frames = []
                     self._chunk_has_speech = False
                     continue
@@ -892,6 +1226,22 @@ class BaseAudioSession:
                 # looks mid-thought keeps the full silence_timeout_seconds.
                 # _looks_complete fails closed, so if the adaptive flush's ASR
                 # has not landed yet this is exactly the old fixed behaviour.
+                #
+                # Streaming mode: judge completeness against the OFFICIAL
+                # transcript (real commits only) PLUS the latest non-
+                # destructive preview of whatever's been said since the last
+                # real commit -- this is what lets the shortcut fire the
+                # instant silence starts, without waiting on a real commit's
+                # ASR round trip. The preview text is used for this decision
+                # ONLY; transcript_parts (the actual turn text) is still
+                # built exclusively by real commits below.
+                _endpoint_candidate_transcript = _assemble_transcript(self.transcript_parts)
+                if self._streaming_active:
+                    _preview_text = self.realtime_client.latest_preview_text()
+                    if _preview_text:
+                        _endpoint_candidate_transcript = (
+                            f"{_endpoint_candidate_transcript} {_preview_text}".strip()
+                        )
                 if (
                     config.DEFAULT_ENDPOINT_COMPLETE_ENABLED
                     and silence_run_seconds >= config.DEFAULT_ENDPOINT_SHORT_SECONDS
@@ -900,23 +1250,30 @@ class BaseAudioSession:
                     # held back. chunk_frames is NOT a usable test here: every
                     # frame is appended to it, silence included, so it refills
                     # the moment the adaptive flush clears it.
-                    and _adaptive_flushed
+                    #
+                    # Streaming mode doesn't need this gate: the preview ping
+                    # above already keeps _endpoint_candidate_transcript fresh
+                    # continuously, independent of whether/when the file-based
+                    # adaptive flush would have fired.
+                    and (self._streaming_active or _adaptive_flushed)
                     # ...and every flushed chunk has been transcribed. Without
                     # this, an in-flight tail could leave a truncated transcript
                     # that still reads as a finished sentence ("Order one
                     # classic"), and the turn would commit on the wrong words.
-                    and self._flush_queue.unfinished_tasks == 0
+                    and (self._streaming_active or self._flush_queue.unfinished_tasks == 0)
                     and _looks_complete(
-                        _assemble_transcript(self.transcript_parts),
+                        _endpoint_candidate_transcript,
                         config.DEFAULT_ENDPOINT_MIN_WORDS,
                     )
                     # See DEFAULT_ENDPOINT_STABLE_SECONDS / kiosk-voice-lab-main
                     # assess_complete(text, stable): "reads complete" must hold
                     # unchanged for a short window, not just on the instant a
                     # chunk lands, before it is trusted to shorten the wait.
-                    and self._endpoint_transcript_stable(
-                        _assemble_transcript(self.transcript_parts)
-                    )
+                    # Clocked on silence_run_seconds (audio-domain), not
+                    # wall-clock -- see _endpoint_transcript_stable's
+                    # docstring for why: bursty frame delivery can advance
+                    # silence_run_seconds far faster than real time elapses.
+                    and self._endpoint_transcript_stable(_endpoint_candidate_transcript, silence_run_seconds)
                 ):
                     logger.info(
                         "[ENDPOINT] session=%s | early commit at %.2fs "
@@ -926,13 +1283,24 @@ class BaseAudioSession:
                         self.request.silence_timeout_seconds - silence_run_seconds,
                     )
                     self._endpoint_wait_seconds = silence_run_seconds
+                    self._endpoint_shortcut_fired = True
                     end_reason = "silence_timeout"
                     self._log_last_word_spoken(silence_run_seconds)
                     break
 
                 if silence_run_seconds >= self.request.silence_timeout_seconds:
                     self._endpoint_wait_seconds = silence_run_seconds
-                    end_reason = "silence_timeout"
+                    self._endpoint_shortcut_fired = False
+                    logger.info(
+                        "[ENDPOINT] session=%s | fallback commit at full "
+                        "silence_timeout_seconds=%.2fs (completeness shortcut "
+                        "did not fire — transcript not stable/complete in time, "
+                        "or ASR round-trip had not returned by "
+                        "%.2fs)",
+                        self.session_id,
+                        self.request.silence_timeout_seconds,
+                        config.DEFAULT_ENDPOINT_SHORT_SECONDS,
+                    )
                     self._log_last_word_spoken(silence_run_seconds)
                     break
 
@@ -959,17 +1327,37 @@ class BaseAudioSession:
         # flush already sent every real word — chunk_frames is trailing
         # silence only), skip this call entirely rather than pay Whisper's
         # fixed per-call round trip to transcribe silence into "".
-        if (
-            chunk_frames
-            and self._speech_started
-            and (config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED is False or self._chunk_has_speech)
-        ):
-            self._flush_queue.put((chunk_frames, True))
+        #
+        # Drain the queue BEFORE reading _unconfirmed_speech_pending: an
+        # earlier chunk (adaptive-pause or timed-cap flush) may still be
+        # in-flight on the worker thread, and its outcome is exactly what
+        # decides whether skipping here is safe. Skipped when the flag is
+        # already known-clear, so this is a no-op (immediate return) in the
+        # overwhelmingly common case where that earlier flush finished
+        # during the trailing-silence wait, as designed — it only actually
+        # blocks in the rare case that ASR round-trip was unusually slow.
+        # Timed from here (not just the final put+join below) so that rare
+        # blocking case is still fully accounted for in final_flush_wait_ms
+        # rather than silently absorbed before the clock starts.
+        _t_final_flush_start = time.monotonic()
+        self._t_final_flush_start = _t_final_flush_start
+        if config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED and self._unconfirmed_speech_pending:
+            self._flush_queue.join()
+        skip_final_flush = (
+            config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED
+            and not self._chunk_has_speech
+            and not self._unconfirmed_speech_pending
+        )
+        if chunk_frames and self._speech_started and not skip_final_flush:
+            self._flush_queue.put(
+                (self._trim_trailing_silence(chunk_frames, silence_run_seconds), True)
+            )
         elif chunk_frames and self._speech_started:
             self._final_flush_skipped = True
             logger.info(
                 "[CHUNK] session=%s | skipped empty final tail-chunk flush "
-                "(%.2fs of silence, no unflushed speech since last flush)",
+                "(%.2fs of silence, no unflushed/unconfirmed speech since last "
+                "successful flush)",
                 self.session_id,
                 self._chunk_duration_seconds(chunk_frames),
             )
@@ -980,8 +1368,17 @@ class BaseAudioSession:
         # worker is what now owns every transcript_parts append. This is the
         # only wait left in the critical path: just the last chunk's ASR
         # latency, no longer serialised behind an earlier chunk's.
+        #
+        # Timed explicitly (rather than left as an implicit gap between
+        # _t_last_word and _t_turn_start) because it was previously invisible
+        # in the trace: endpoint_wait_ms only reports the trailing-silence
+        # wait, so a turn's reported wait+compute numbers silently undercounted
+        # voice_to_voice_ms by however long this join blocked — on some turns
+        # the single largest stage in the whole clock. See
+        # WallTimes.final_flush_wait_ms.
         self._flush_queue.put(None)
         self._flush_queue.join()
+        self._final_flush_wait_seconds = time.monotonic() - _t_final_flush_start
 
         return final_status, end_reason
 
@@ -1123,6 +1520,11 @@ class BaseAudioSession:
             self.client.close()
         except Exception:
             logger.exception("Session %s: failed to close analyzer client", self.session_id)
+        if self.realtime_client is not None:
+            try:
+                self.realtime_client.close()
+            except Exception:
+                logger.exception("Session %s: failed to close realtime analyzer client", self.session_id)
         # Same cleanup for the TTS and agent clients' persistent connections
         # (see TtsClient/AgentClient __init__ for why these are now
         # session-scoped, reused httpx.Client instances instead of one per
@@ -1153,22 +1555,44 @@ class BaseAudioSession:
     def _log_last_word_spoken(self, silence_run_seconds: float) -> None:
         """Log the wall-clock instant the customer stopped talking.
 
-        This is the true start of the voice-to-voice clock: the endpoint
-        algorithm only *decides* to commit `silence_run_seconds` later, once
-        the trailing-silence window has elapsed, so the last real word was
-        spoken that many seconds before "now". Backdating `datetime.now(UTC)`
-        by that amount gives an accurate wall-clock timestamp that can be
-        grepped and lined up against other services' logs (e.g. audio-
-        analyzer, rag-service, text-to-speech) using a shared session/
-        conversation id.
+        This is the true start of the voice-to-voice clock. Two ways to get
+        it:
+
+        1. Derived: the endpoint algorithm only *decides* to commit
+           ``silence_run_seconds`` later, once the trailing-silence window
+           has elapsed, so "now minus that many seconds" should be the last
+           real word. This assumes the frame-processing loop's own
+           ``silence_run_seconds`` counter tracks wall-clock time exactly —
+           true only under perfectly steady frame delivery.
+        2. Observed: ``self._t_last_speech_frame_sent``, stamped at the
+           actual instant ``send_frame()`` was called for the last
+           speech-containing frame (see _process_frame_stream). Not derived
+           from anything, so immune to the drift (1) is exposed to (bursty
+           delivery, GC pauses, a slow VAD tick).
+
+        Prefer (2) whenever it exists — streaming sessions always have it
+        once real speech was captured. The derived value is logged alongside
+        it (drift_ms) so a growing gap between the two is visible in the
+        trace rather than silently biasing v2v numbers one way or the other.
         """
-        last_word_ts = datetime.now(UTC) - timedelta(seconds=silence_run_seconds)
-        self._t_last_word = time.monotonic() - silence_run_seconds
+        derived_t_last_word = time.monotonic() - silence_run_seconds
+        drift_ms = 0.0
+        if self._t_last_speech_frame_sent is not None:
+            self._t_last_word = self._t_last_speech_frame_sent
+            drift_ms = (derived_t_last_word - self._t_last_speech_frame_sent) * 1000
+        else:
+            self._t_last_word = derived_t_last_word
+        last_word_ts = datetime.now(UTC) - timedelta(
+            seconds=time.monotonic() - self._t_last_word
+        )
         logger.info(
             "[VOICE2VOICE] session=%s conversation=%s event=last_word_spoken "
-            "ts=%s (endpoint committed after %.2fs trailing silence)",
+            "ts=%s (endpoint committed after %.2fs trailing silence, "
+            "source=%s, derived_vs_observed_drift_ms=%.1f)",
             self.session_id, self.agent_session_id,
             last_word_ts.isoformat(), silence_run_seconds,
+            "observed" if self._t_last_speech_frame_sent is not None else "derived",
+            drift_ms,
         )
 
     def _log_first_response_audio(self, latency_ms: float) -> None:
@@ -1272,6 +1696,10 @@ class BaseAudioSession:
         _llm_ttft_ms: float | None = None
         _llm_calls: int = 0
         _retrieval_ms: float | None = None
+        _mcp_ms: float | None = None
+        _mcp_calls: int = 0
+        _guard_ms: float | None = None
+        _template_ms: float | None = None
         # t_agent_start set here — generator body (HTTP call) runs on first iteration
         if self.agent_client is not None:
             self._t_agent_start = time.monotonic()
@@ -1285,6 +1713,10 @@ class BaseAudioSession:
                     _llm_ttft_ms = token.get("_llm_ttft_ms")
                     _llm_calls = token.get("_llm_calls", 0)
                     _retrieval_ms = token.get("_retrieval_ms")
+                    _mcp_ms = token.get("_mcp_ms")
+                    _mcp_calls = token.get("_mcp_calls", 0)
+                    _guard_ms = token.get("_guard_ms")
+                    _template_ms = token.get("_template_ms")
                     continue
 
                 with self._lock:
@@ -1325,6 +1757,14 @@ class BaseAudioSession:
             if self._t_agent_start is not None and self._t_agent_end is None:
                 self._t_agent_end = time.monotonic()
 
+            # Stamped here — BEFORE _stop_tts_workers() below drains any
+            # still-synthesising TTS segments — so agent.stream_ms measures
+            # only the LLM/tool round-trip a reply actually took, not that
+            # plus however long TTS still had left to run. agent.total_ms
+            # (existing metric) intentionally keeps including the TTS drain;
+            # this is the isolated figure for anyone debugging tool/LLM time.
+            self._t_agent_stream_end = time.monotonic()
+
         finally:
             self._stop_tts_workers(sentence_queue, workers)
             self._t_turn_end = time.monotonic()
@@ -1333,7 +1773,8 @@ class BaseAudioSession:
 
         # ── Record pipeline turn trace ──────────────────────────────────────
         self._record_turn_trace(
-            _tool_calls, _llm_ms, _llm_calls, _retrieval_ms, _llm_ttft_ms
+            _tool_calls, _llm_ms, _llm_calls, _retrieval_ms, _llm_ttft_ms,
+            _mcp_ms, _mcp_calls, _guard_ms, _template_ms,
         )
 
     def _record_turn_trace(
@@ -1343,6 +1784,10 @@ class BaseAudioSession:
         llm_calls: int = 0,
         retrieval_ms: float | None = None,
         llm_ttft_ms: float | None = None,
+        mcp_ms: float | None = None,
+        mcp_calls: int = 0,
+        guard_ms: float | None = None,
+        template_ms: float | None = None,
     ) -> None:
         """Build and persist a TurnTrace for the completed voice turn."""
         t0 = self._t_turn_start
@@ -1361,10 +1806,29 @@ class BaseAudioSession:
         # be derived from turn_start, because every chunk is already transcribed
         # by the time _finalize_run stamps t0.
         asr_ms = round(self._asr_ms_total, 1) if self._asr_chunks else None
+        # Continuous-streaming mode only: customer's last word -> transcript
+        # ready, with the deliberate trailing-silence wait excluded (that's
+        # endpoint_wait_ms, a design choice, not ASR compute time). See
+        # AsrSpan.last_word_to_transcript_ms's docstring for the rationale.
+        asr_last_word_to_transcript_ms = None
+        if self.realtime_client is not None and self._t_last_word is not None:
+            _landed_at = self.realtime_client.first_content_landed_at_or_after(self._t_last_word)
+            if _landed_at is not None:
+                asr_last_word_to_transcript_ms = round(
+                    max(0.0, (_landed_at - self._t_last_word) * 1000), 1
+                )
         # Agent TTFT = from agent_start to when first token (reply) arrived
         ttft_ms = _ms(t_agent_s, t_agent_e)
         # Agent total = from agent_start to last TTS segment done (whole orchestration)
         agent_total_ms = _ms(t_agent_s, t_end)
+        # Agent stream = from agent_start to the end of the token stream,
+        # BEFORE the TTS-drain wait _stop_tts_workers() blocks on. This is
+        # the actual LLM+tool round-trip time — agent_total_ms above
+        # includes however long TTS still had left to run afterward, which
+        # made it look ~2x larger than the real agent/tool cost on turns
+        # with a long reply (confirmed: ~774ms real vs ~2,500ms reported for
+        # rec1's place_order turn, the gap matching tts_ms almost exactly).
+        agent_stream_ms = _ms(t_agent_s, self._t_agent_stream_end)
         # TTS = from first sentence queued to last segment written
         tts_ms = _ms(t_first, t_last)
         # Time to first audio = from end of speech (t0, stamped by
@@ -1395,7 +1859,34 @@ class BaseAudioSession:
             if self._endpoint_wait_seconds is not None
             else None
         )
+        final_flush_wait_ms = (
+            round(self._final_flush_wait_seconds * 1000, 1)
+            if self._final_flush_wait_seconds is not None
+            else None
+        )
         t_last_word = self._t_last_word
+        # Gap between the customer's true last speech frame and the instant
+        # the flush/turn-start sequence began.
+        #
+        # Only meaningful on the browser mic-release path (endpoint_wait_ms
+        # is None there): reports the full, real wall-clock gap -- how long
+        # after the customer's last word they took to release the mic
+        # button, plus any trailing buffered frames. Both ends are backend
+        # monotonic timestamps, no browser clock involved.
+        #
+        # Forced to 0 on the silence-timeout path (endpoint_wait_ms is set):
+        # that field is measured in AUDIO-DOMAIN time (silence_run_seconds,
+        # counted from audio samples), not wall-clock time, so it is NOT
+        # safe to subtract it from a wall-clock gap here -- whenever frames
+        # arrive faster than real-time (bursty delivery, a fixture pushed
+        # without exact real-time pacing), the audio-domain duration can be
+        # far larger than the true wall-clock gap, which previously produced
+        # nonsensical negative values. The silence wait is already fully
+        # reported via endpoint_wait_ms; there is nothing left to add here.
+        if endpoint_wait_ms is not None:
+            post_speech_gap_ms = 0.0
+        else:
+            post_speech_gap_ms = _ms(t_last_word, self._t_final_flush_start)
         if t_last_word is not None:
             v2v_ms = _ms(t_last_word, self._t_first_audio or t_first)
         else:
@@ -1404,6 +1895,17 @@ class BaseAudioSession:
                 if endpoint_wait_ms is not None and ttfa_ms is not None
                 else None
             )
+        # v2v with BOTH deliberate/customer-side waiting time subtracted back
+        # out: the endpoint's trailing-silence wait AND the post-speech gap
+        # (mic-release reaction time). Neither is pipeline compute cost, so
+        # neither belongs in the number meant to answer "how fast is our
+        # compute pipeline" -- see WallTimes.voice_to_voice_post_endpoint_ms.
+        # Left over is exactly final_flush_wait_ms + time_to_first_audio_ms.
+        v2v_post_endpoint_ms = (
+            round(v2v_ms - (endpoint_wait_ms or 0) - max(post_speech_gap_ms or 0, 0), 1)
+            if v2v_ms is not None
+            else None
+        )
         # Same clock, but to the first sound that actually answers. The opener
         # is deliberately excluded here: it breaks the silence but tells the
         # customer nothing, so counting it as "the reply" would flatter the
@@ -1423,6 +1925,11 @@ class BaseAudioSession:
         t_e2e_start = self._t_capture_start or t0
         wall_total_ms = _ms(t_e2e_start, t_end)
 
+        # File-replay ground-truth anchor (see _t_playback_start comment) —
+        # only ever set on FileAudioSession, so this is None on a live mic or
+        # browser-stream turn.
+        playback_to_first_audio_ms = _ms(self._t_playback_start, self._t_first_audio or t_first)
+
         retrieval_invoked = any(
             "retrieval" in tc.lower() or "knowledge" in tc.lower() or "lookup" in tc.lower()
             for tc in tool_calls
@@ -1437,13 +1944,24 @@ class BaseAudioSession:
                 turn_total_ms=wall_total_ms,
                 time_to_first_audio_ms=ttfa_ms,
                 endpoint_wait_ms=endpoint_wait_ms,
+                final_flush_wait_ms=final_flush_wait_ms,
                 voice_to_voice_ms=v2v_ms,
+                voice_to_voice_post_endpoint_ms=v2v_post_endpoint_ms,
+                post_speech_gap_ms=post_speech_gap_ms,
                 voice_to_voice_informative_ms=v2v_informative_ms,
+                playback_to_first_audio_ms=playback_to_first_audio_ms,
+                endpoint_shortcut_fired=self._endpoint_shortcut_fired,
             ),
-            asr=AsrSpan(ms=asr_ms, chunks=self._asr_chunks, final_flush_skipped=self._final_flush_skipped),
+            asr=AsrSpan(
+                ms=asr_ms,
+                chunks=self._asr_chunks,
+                final_flush_skipped=self._final_flush_skipped,
+                last_word_to_transcript_ms=asr_last_word_to_transcript_ms,
+            ),
             agent=AgentSpan(
                 ttft_ms=ttft_ms,
                 total_ms=agent_total_ms,
+                stream_ms=agent_stream_ms,
                 retrieval=RetrievalSpan(
                     invoked=retrieval_invoked,
                     ms=retrieval_ms,
@@ -1454,6 +1972,9 @@ class BaseAudioSession:
                     calls=llm_calls,
                     device="GPU",
                 ),
+                mcp=McpSpan(ms=mcp_ms, calls=mcp_calls),
+                guard=GuardSpan(ms=guard_ms, calls=0 if guard_ms is None else 1),
+                template=TemplateSpan(ms=template_ms, calls=0 if template_ms is None else 1),
             ),
             tts=TtsSpan(
                 ms=tts_ms,
@@ -1464,7 +1985,7 @@ class BaseAudioSession:
         pipeline_store.record(trace)
         logger.info(
             "[PIPELINE] turn=%s wall=%.0fms asr=%.0fms(%d) ttft=%.0fms tts=%.0fms "
-            "llm=%.0fms(%d) retrieval=%s/%.0fms tools=%s",
+            "llm=%.0fms(%d) agent_stream=%.0fms mcp=%.0fms(%d) retrieval=%s/%.0fms tools=%s",
             self.session_id,
             wall_total_ms or 0,
             asr_ms or 0,
@@ -1473,6 +1994,9 @@ class BaseAudioSession:
             tts_ms or 0,
             llm_ms or 0,
             llm_calls,
+            agent_stream_ms or 0,
+            mcp_ms or 0,
+            mcp_calls,
             retrieval_invoked,
             retrieval_ms or 0,
             tool_calls,
@@ -1558,18 +2082,50 @@ class BaseAudioSession:
                 return
 
             output_path = self._session_output_dir / f"response_{sentence_index:03d}.wav"
+            # The session directory is otherwise only created by _emit_opener
+            # and the speculative pre-synth path, both of which are disabled by
+            # default. Without this, the opener-cache branch below (a plain
+            # copyfile, which does not create parents) raises FileNotFoundError
+            # on sentence 1 — the first segment of the turn — silently losing
+            # the opening phrase and leaving _t_first_audio unset.
+            self._session_output_dir.mkdir(parents=True, exist_ok=True)
             try:
+                opener_key = _opener_cache_key(sentence, self.request)
+                opener_path = None
+                if opener_key is not None:
+                    with _OPENER_TTS_CACHE_LOCK:
+                        opener_path = _OPENER_TTS_CACHE.get(opener_key)
+                    if opener_path and not Path(opener_path).exists():
+                        # Cache dir wiped underneath us — drop the stale entry
+                        # and fall through to a normal synthesis.
+                        with _OPENER_TTS_CACHE_LOCK:
+                            _OPENER_TTS_CACHE.pop(opener_key, None)
+                        opener_path = None
                 cached_path = (
-                    self._tts_cache.get(sentence.strip())
+                    self._tts_cache.get(_normalize_sentence_for_cache_key(sentence))
                     if config.DEFAULT_SPECULATIVE_TTS_PRESYNTH_ENABLED
                     else None
                 )
-                if cached_path and Path(cached_path).exists():
-                    # A speculative draft already synthesised this EXACT
-                    # sentence text ahead of time — the real, fully-guarded
-                    # reply just happened to match it. Reuse the audio
-                    # instead of paying for TTS again; nothing new is ever
-                    # spoken here that the real pipeline didn't itself decide.
+                if opener_path:
+                    # A previous turn (possibly in a different session) already
+                    # synthesised this exact short opener in this exact voice.
+                    # The cached file is the real pipeline's own output, already
+                    # trimmed and gain-adjusted, so it is byte-for-byte what we
+                    # would produce now — just without the ~280 ms wait.
+                    shutil.copyfile(opener_path, output_path)
+                    logger.info(
+                        "[TTS] session=%s | opener cache HIT for sentence %d (%r) — "
+                        "skipped synthesis",
+                        self.session_id, sentence_index, sentence,
+                    )
+                elif cached_path and Path(cached_path).exists():
+                    # A speculative draft already synthesised a sentence
+                    # matching this one's normalized wording (whitespace/
+                    # case/punctuation differences ignored) — the real,
+                    # fully-guarded reply just happened to say the same
+                    # thing. Reuse the audio instead of paying for TTS again;
+                    # nothing new is ever spoken here that the real pipeline
+                    # didn't itself decide.
                     shutil.copyfile(cached_path, output_path)
                     logger.info(
                         "[TTS] session=%s | cache HIT for sentence %d (%d chars) — "
@@ -1589,6 +2145,8 @@ class BaseAudioSession:
                         self._trim_tts_segment(output_path, sentence)
                     if config.DEFAULT_TTS_GAIN_ENABLED:
                         self._apply_tts_gain(output_path)
+                    if opener_key is not None:
+                        self._admit_to_opener_cache(opener_key, output_path, sentence)
                 with self._lock:
                     self._t_last_tts = time.monotonic()
                     # First segment that carries the ANSWER (the opener is
@@ -1846,7 +2404,7 @@ class BaseAudioSession:
         samples = frame.astype(np.float32)
         return float(np.sqrt(np.mean(samples * samples)))
 
-    def _endpoint_transcript_stable(self, transcript: str) -> bool:
+    def _endpoint_transcript_stable(self, transcript: str, silence_run_seconds: float) -> bool:
         """True once ``transcript`` has read unchanged for the stability window.
 
         Mirrors kiosk-voice-lab-main's ``assess_complete(text, stable)``,
@@ -1856,19 +2414,55 @@ class BaseAudioSession:
         _looks_complete can read "complete" on a transcript that a moment
         later turns out to have been truncated mid-utterance.
 
+        Clocked on ``silence_run_seconds`` (audio-domain: frames-of-silence
+        seen so far), NOT wall-clock time.monotonic(). Audio frequently
+        arrives in network bursts (chunked HTTP pushes from the benchmark or
+        the browser UI alike) — the frame loop can drain a whole burst of
+        already-buffered silent frames in a few milliseconds of real time,
+        advancing silence_run_seconds by hundreds of ms almost instantly.
+        A wall-clock stability window could then never accumulate its 0.2s
+        before the audio-domain silence_timeout_seconds cutoff arrived first,
+        so the shortcut would silently never fire. silence_run_seconds
+        already IS the correct clock the rest of this endpoint logic uses.
+
         State (the last-seen text and when it started reading that way)
         persists on the instance across calls, since this is evaluated once
         per frame (every DEFAULT_BLOCK_DURATION_SECONDS) while the endpoint's
-        other gates are open.
+        other gates are open. The stored/compared value is the normalized
+        word-key from _endpoint_stability_key(), not the raw transcript, so a
+        punctuation-only ASR hallucination on the trailing silence tail
+        (e.g. "...please." -> "...please. .") cannot restart the window --
+        only an actual change in the recognized words can.
 
         Only ever WITHHOLDS an early commit relative to the old behaviour —
         if the transcript is still changing, the caller falls through to the
         existing full silence_timeout_seconds wait, exactly as it would if
         _looks_complete itself had failed.
+
+        DEFAULT_ENDPOINT_STABLE_SECONDS == 0 is a distinct, intentionally
+        looser mode: trust the FIRST snapshot that reads complete, instead of
+        requiring it to read the same way again on a second call. The
+        two-confirmation design normally needs two ASR round trips (each
+        measured 90-220ms) to land inside the ~0.15-0.40s shortcut window —
+        on real hardware that is frequently too tight (measured: shortcut
+        firing rate swings 0%-80% run to run purely on round-trip luck, see
+        docs/performance-improvements-2026-09.md), so most turns fall back to
+        the full silence_timeout_seconds wait even though the first
+        transcript was already correct. Single-confirmation trades away the
+        guard against a transcript that "reads complete" for one tick and
+        then turns out to have been truncated mid-utterance a tick later —
+        re-validate against the fixture/scripted benchmarks if this is
+        lowered further or re-enabled after being disabled.
         """
-        now = time.monotonic()
-        if transcript != self._endpoint_stable_transcript:
-            self._endpoint_stable_transcript = transcript
+        now = silence_run_seconds
+        if config.DEFAULT_ENDPOINT_STABLE_SECONDS <= 0:
+            return True
+        # Compared on the normalized word-key, not the raw string, so a
+        # punctuation-only hallucination (see _endpoint_stability_key) can't
+        # masquerade as new speech and restart this window.
+        key = _endpoint_stability_key(transcript)
+        if key != self._endpoint_stable_transcript:
+            self._endpoint_stable_transcript = key
             self._endpoint_stable_since = now
             return False
         if self._endpoint_stable_since is None:
@@ -1951,6 +2545,56 @@ class BaseAudioSession:
         total_samples = sum(len(frame) for frame in frames)
         return total_samples / self.request.sample_rate
 
+    def _trim_trailing_silence(
+        self, frames: list[np.ndarray], silence_run_seconds: float
+    ) -> list[np.ndarray]:
+        """Drop trailing silence beyond a short decay tail before ASR sees it.
+
+        Whisper hallucinates a sentence-completing word/phrase when fed audio
+        that dangles into silence (measured case: a spurious trailing
+        "Good." after a real order line). kiosk-voice-lab-main avoids this by
+        trimming the audio actually sent to ASR down to
+        "last speech sample + ~0.15s decay tail" rather than sending
+        everything accumulated since speech stopped.
+
+        This only shrinks what gets WRITTEN TO THE WAV FILE for this flush —
+        it does not touch ``silence_run_seconds``/endpoint timing, which the
+        caller keeps counting exactly as before.
+
+        Args:
+            frames: the chunk's frame buffer, oldest first. The trailing
+                ``silence_run_seconds`` worth of it (at the tail) is silence;
+                everything before that is presumed real speech.
+            silence_run_seconds: how much trailing silence is currently
+                sitting at the end of ``frames``.
+
+        Returns:
+            ``frames`` unchanged if there is nothing to trim (feature
+            disabled, no trailing silence, or the decay tail already covers
+            all of it); otherwise a shorter list with the excess trailing
+            silence frames dropped.
+        """
+        if not config.DEFAULT_ASR_TRIM_TRAILING_SILENCE_ENABLED:
+            return frames
+        if silence_run_seconds <= config.DEFAULT_ASR_TRIM_DECAY_SECONDS:
+            return frames  # already within the decay tail — nothing to cut
+        if self._frame_duration_seconds <= 0:
+            return frames
+        silence_frame_count = int(round(silence_run_seconds / self._frame_duration_seconds))
+        keep_frame_count = int(round(config.DEFAULT_ASR_TRIM_DECAY_SECONDS / self._frame_duration_seconds))
+        frames_to_drop = silence_frame_count - keep_frame_count
+        if frames_to_drop <= 0 or frames_to_drop >= len(frames):
+            return frames
+        logger.debug(
+            "[ASR-TRIM] session=%s | trimming %.2fs of trailing silence "
+            "(%d frames) to a %.2fs decay tail before ASR",
+            self.session_id,
+            frames_to_drop * self._frame_duration_seconds,
+            frames_to_drop,
+            config.DEFAULT_ASR_TRIM_DECAY_SECONDS,
+        )
+        return frames[:-frames_to_drop]
+
     def _scope_is_enrolled(self) -> bool:
         """Whether the analyzer already holds an enrolled voice for this conversation.
 
@@ -1983,7 +2627,9 @@ class BaseAudioSession:
 
     def _flush_chunk(self, frames: list[np.ndarray], is_final: bool = True) -> None:
         audio = np.concatenate(frames, axis=0)
-        temp_path = self._write_temp_wav(audio)
+        temp_path: str | None = None
+        if not self._streaming_active:
+            temp_path = self._write_temp_wav(audio)
         try:
             duration = len(audio) / self.request.sample_rate
             # Full diarization always runs on the final tail chunk. On
@@ -2009,19 +2655,33 @@ class BaseAudioSession:
                 self.session_id, duration, is_final, diarization_requested,
             )
             _t_asr = time.monotonic()
-            payload = self.client.transcribe_file(
-                temp_path,
-                language=self.request.language,
-                temperature=self.request.temperature,
-                diarization=diarization_requested,
-                session_id=self._analyzer_session_id,
-                speaker_scope_id=self.agent_session_id,
-                # Bias Whisper towards the real menu vocabulary. Without it the
-                # decoder spells product names phonetically ("aloo tiki",
-                # "Kin Burger"), which the catalogue's fuzzy resolver then
-                # fails to match, so the item silently never reaches the cart.
-                prompt=config.DEFAULT_ASR_PROMPT,
-            )
+            if self._streaming_active:
+                # Audio for this chunk was already streamed continuously as
+                # it was captured (see send_frame() in _process_frame_stream).
+                # commit() only draws the utterance boundary here -- for
+                # preview (non-final) chunks it's fire-and-forget so this
+                # never blocks the flush worker; for the final chunk it
+                # blocks up to a bounded timeout for a fresh snapshot, then
+                # falls back to whatever is already available regardless.
+                self.realtime_client.commit(
+                    wait=is_final,
+                    timeout=config.DEFAULT_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS if is_final else 0.0,
+                )
+                payload = self.realtime_client.latest_snapshot()
+            else:
+                payload = self.client.transcribe_file(
+                    temp_path,
+                    language=self.request.language,
+                    temperature=self.request.temperature,
+                    diarization=diarization_requested,
+                    session_id=self._analyzer_session_id,
+                    speaker_scope_id=self.agent_session_id,
+                    # Bias Whisper towards the real menu vocabulary. Without it the
+                    # decoder spells product names phonetically ("aloo tiki",
+                    # "Kin Burger"), which the catalogue's fuzzy resolver then
+                    # fails to match, so the item silently never reaches the cart.
+                    prompt=config.DEFAULT_ASR_PROMPT,
+                )
             # Accumulate genuine ASR time. Chunks are transcribed as they are
             # flushed during capture, long before _finalize_run runs, so this
             # is the only place the cost can be observed.
@@ -2056,6 +2716,19 @@ class BaseAudioSession:
             # segments dedup below must filter against what was already
             # committed prior to this flush, not after.
             _committed_before = self._last_analyzer_segment_end
+
+            # Did the analyzer report ANY content at all for this chunk
+            # (before the dedup filtering below mutates segments/raw_text)?
+            # Pipeline.transcribe() only advances its own persisted
+            # `duration` when chunk_by_silence actually yields speech --
+            # audio that is pure silence leaves the analyzer's internal
+            # cumulative offset untouched. If we always advanced our cursor
+            # by this chunk's raw (client-measured) audio length regardless,
+            # a silent commit would push the cursor PAST where the analyzer
+            # itself is, and the next chunk's genuine new segments would be
+            # wrongly compared against a cursor that is now ahead of them --
+            # falsely deduping real speech away as "already seen".
+            _response_had_content = bool(segments) or bool(raw_text)
 
             logger.info(
                 "[CHUNK] session=%s | audio-analyzer response: %d segment(s), flat_text=%r",
@@ -2128,11 +2801,17 @@ class BaseAudioSession:
                     self._last_cumulative_flat_text = cumulative
 
             # Advance the shared cursor by THIS chunk's own measured
-            # duration — unconditionally, regardless of which dedup path was
-            # taken above — so a later chunk's segment-based dedup (which
-            # may request diarization even when this one didn't) has an
-            # accurate "already committed" boundary to filter against.
-            self._last_analyzer_segment_end = _committed_before + duration
+            # duration — so a later chunk's segment-based dedup (which may
+            # request diarization even when this one didn't) has an accurate
+            # "already committed" boundary to filter against.
+            #
+            # Only advance when the analyzer actually reported content: a
+            # chunk with no segments/text means the analyzer's own
+            # cumulative offset didn't move either (see
+            # _response_had_content above) — advancing ours anyway would
+            # desync the two and falsely dedup the next real chunk's speech.
+            if _response_had_content:
+                self._last_analyzer_segment_end = _committed_before + duration
 
             if segments and diarization_requested:
                 text = self._filter_target_speaker(segments)
@@ -2191,6 +2870,14 @@ class BaseAudioSession:
                 with self._lock:
                     self.transcript_parts.append(text)
                     transcript_snapshot = " ".join(self.transcript_parts)
+                # This chunk's speech is now durably confirmed transcribed —
+                # any speech captured strictly before it is accounted for, so
+                # the final-flush skip (KIOSK_CORE_SKIP_EMPTY_FINAL_FLUSH_ENABLED)
+                # is safe again until the next is_speech frame. Do NOT clear
+                # this on an empty/no-usable-text result (the `else` branch
+                # below) -- that confirms nothing, so any pending speech from
+                # this or an earlier chunk must still be treated as unconfirmed.
+                self._unconfirmed_speech_pending = False
                 # Fire a speculative draft off the growing preview transcript
                 # while the customer is still talking — never on the final
                 # (is_final=True) tail chunk, since by then the real,
@@ -2203,7 +2890,8 @@ class BaseAudioSession:
                     self.session_id,
                 )
         finally:
-            Path(temp_path).unlink(missing_ok=True)
+            if temp_path is not None:
+                Path(temp_path).unlink(missing_ok=True)
 
     def _log_speculative_draft_match(self, final_transcript: str) -> None:
         """Log (diagnostic only) whether the last speculative draft's input
@@ -2284,23 +2972,76 @@ class BaseAudioSession:
         if config.DEFAULT_SPECULATIVE_TTS_PRESYNTH_ENABLED:
             self._prewarm_tts_from_draft(result.get("reply", ""), generation)
 
+    def _admit_to_opener_cache(self, cache_key: tuple, output_path: Path, sentence: str) -> None:
+        """Retain a finished short opener segment for reuse by later turns.
+
+        Called only after a REAL synthesis has completed and been trimmed and
+        gain-adjusted, so the retained file is exactly what this pipeline
+        produces for that sentence — replaying it later is indistinguishable
+        from synthesising it again, minus the ~280 ms Kokoro/CPU cost.
+
+        This never triggers a TTS request of its own; it is a pure copy of
+        work already done. Failures are swallowed, since losing a cache entry
+        only costs a future turn its normal synthesis time.
+
+        Args:
+            cache_key: Key from _opener_cache_key (sentence + voice tuple).
+            output_path: Finished, post-processed segment to retain.
+            sentence: Source text, for logging only.
+        """
+        try:
+            with _OPENER_TTS_CACHE_LOCK:
+                if cache_key in _OPENER_TTS_CACHE:
+                    return
+                if len(_OPENER_TTS_CACHE) >= config.DEFAULT_TTS_OPENER_CACHE_MAX_ENTRIES:
+                    return
+                # Reserve the slot inside the lock so two workers racing on the
+                # same opener cannot both copy into the same destination.
+                slot = len(_OPENER_TTS_CACHE)
+                _OPENER_TTS_CACHE[cache_key] = ""
+            _OPENER_TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cached_path = _OPENER_TTS_CACHE_DIR / f"opener_{slot:03d}.wav"
+            shutil.copyfile(output_path, cached_path)
+            with _OPENER_TTS_CACHE_LOCK:
+                _OPENER_TTS_CACHE[cache_key] = str(cached_path)
+            logger.info(
+                "[TTS] session=%s | opener cached %r — future turns skip synthesis",
+                self.session_id, sentence,
+            )
+        except Exception:
+            with _OPENER_TTS_CACHE_LOCK:
+                # Drop the reservation so a later turn can retry.
+                if _OPENER_TTS_CACHE.get(cache_key) == "":
+                    _OPENER_TTS_CACHE.pop(cache_key, None)
+            logger.warning(
+                "[TTS] session=%s | could not cache opener %r — harmless, "
+                "future turns will synthesise normally",
+                self.session_id, sentence, exc_info=True,
+            )
+
     def _prewarm_tts_from_draft(self, reply_text: str, generation: int) -> None:
         """Pre-synthesise a speculative draft's predicted reply, sentence by sentence.
 
-        Populates self._tts_cache keyed by exact sentence text. Never served
-        directly — the real turn's _tts_worker only uses a cached file when
-        the real, fully-guarded reply happens to produce an identical
-        sentence (see _tts_cache docstring in __init__).
+        Populates self._tts_cache keyed by a whitespace/case/punctuation-
+        normalized form of the sentence (see _normalize_sentence_for_cache_key)
+        rather than the exact raw string — tolerant of trivial formatting
+        drift, but still requires the real turn's sentence to be the SAME
+        wording. Never served directly — the real turn's _tts_worker only
+        uses a cached file when the real, fully-guarded reply happens to
+        produce a matching sentence (see _tts_cache docstring in __init__).
         """
         reply_text = reply_text.strip()
         if not reply_text:
             return
         sentences = [s.strip() for s in _SPEC_SENTENCE_SPLIT_RE.split(reply_text) if s.strip()]
         for sentence in sentences:
+            cache_key = _normalize_sentence_for_cache_key(sentence)
+            if not cache_key:
+                continue
             with self._speculative_lock:
                 if generation != self._speculative_generation:
                     return  # superseded mid-loop — stop synthesising stale sentences
-                if sentence in self._tts_cache:
+                if cache_key in self._tts_cache:
                     continue  # already warm from an earlier draft
                 self._spec_tts_index += 1
                 idx = self._spec_tts_index
@@ -2326,7 +3067,7 @@ class BaseAudioSession:
                     if generation != self._speculative_generation:
                         output_path.unlink(missing_ok=True)
                         return
-                    self._tts_cache[sentence] = str(output_path)
+                    self._tts_cache[cache_key] = str(output_path)
                 logger.info(
                     "[SPEC-TTS] session=%s | pre-synthesised sentence (%d chars) gen=%d",
                     self.session_id, len(sentence), generation,
@@ -2432,9 +3173,30 @@ class BaseAudioSession:
         # rejected it — the chunk must be dropped, never fall through to the
         # first-speaker rule below (which would lock on to the interloper,
         # because _primary_speaker_id resets on every new audio session).
+        #
+        # Exception: that authority only holds once a reference voice has
+        # actually been enrolled for this scope (_scope_is_enrolled()). If
+        # enrollment never happened — e.g. an earlier preview chunk that
+        # should have primed it came back empty (ASR/hallucination-filter
+        # miss on that chunk) — the analyzer's is_primary=False here reflects
+        # "no reference to compare against", not a genuine identity mismatch.
+        # Treating that as authoritative silently discards the customer's
+        # only utterance for the whole turn. In that case fall through to the
+        # same semantic-domain fallback used before any primary is known,
+        # instead of hard-dropping.
         if any("is_primary" in s for s in segments):
             primary_segments = [s for s in segments if s.get("is_primary")]
-            if not primary_segments:
+            if not primary_segments and not self._scope_is_enrolled():
+                logger.warning(
+                    "[SPEAKER-FILTER] session=%s | analyzer rejected all %d segment(s) as "
+                    "non-primary but scope was never enrolled — treating as low-confidence, "
+                    "falling back to semantic heuristics instead of hard drop | text=%r",
+                    self.session_id, len(segments),
+                    " ".join(s.get("text", "") for s in segments).strip()[:120],
+                )
+                # Fall through to the first-speaker/semantic-fallback logic
+                # below by treating this like a plain (non-is_primary) batch.
+            elif not primary_segments:
                 if not config.DEFAULT_SPEAKER_STRICT_DROP:
                     logger.warning(
                         "[SPEAKER-FILTER] session=%s | analyzer rejected all %d segment(s) but "
@@ -2597,6 +3359,16 @@ class BrowserStreamSession(BaseAudioSession):
 
     def push_audio(self, wav_bytes: bytes) -> None:
         """Called from the HTTP handler for each incoming audio chunk."""
+        # Ground-truth playback anchor (see FileAudioSession._t_playback_start):
+        # stamped on the FIRST chunk this session ever receives, so
+        # playback_to_first_audio_ms is also populated for browser/streamed
+        # turns, not just file-replay ones. A benchmark client (or the real
+        # browser UI) that streams chunks as they are captured makes this a
+        # reasonable proxy for "when the customer started talking", with only
+        # network/client-buffering jitter as error — same caveat file-replay
+        # already carries from thread-scheduling jitter.
+        if self._t_playback_start is None:
+            self._t_playback_start = time.monotonic()
         # Browser chunks arrive as WAV containers. Decode them first so we only
         # enqueue actual PCM frames (not RIFF/WAV headers), which keeps RMS/VAD
         # and ASR input stable across chunk boundaries.
@@ -2648,12 +3420,28 @@ class BrowserStreamSession(BaseAudioSession):
         where the metric matters most.
         """
         if self._t_last_word is None:
-            self._t_last_word = time.monotonic()
+            # Prefer the actual last-speech-frame-send instant over "now" —
+            # the mic-release signal can arrive a little after the last real
+            # word (button-release reaction time, any trailing buffered
+            # frames still being sent), so it is a slightly late proxy at
+            # best. See _t_last_speech_frame_sent's docstring in __init__.
+            self._t_last_word = self._t_last_speech_frame_sent or time.monotonic()
+            # Convert the monotonic anchor to an approximate wall-clock instant
+            # purely for human-readable logging -- previously this logged a
+            # fresh datetime.now(UTC) instead, which silently disagreed with
+            # the actual anchor by however long ago the last speech frame was
+            # (the customer's post-speech pause before releasing the mic).
+            # That made the log line look like voice_to_voice_ms didn't add
+            # up; it always did, the log was just showing the wrong instant.
+            _gap_s = time.monotonic() - self._t_last_word
+            anchor_wall_ts = datetime.now(UTC) - timedelta(seconds=_gap_s)
             logger.info(
                 "[VOICE2VOICE] session=%s conversation=%s event=last_word_spoken "
-                "ts=%s (browser signalled end of capture)",
+                "ts=%s (signal_end received %.0fms later; source=%s)",
                 self.session_id, self.agent_session_id,
-                datetime.now(UTC).isoformat(),
+                anchor_wall_ts.isoformat(),
+                _gap_s * 1000,
+                "observed" if self._t_last_speech_frame_sent is not None else "signal_end",
             )
         self._push_queue.put(None)
 
@@ -2796,6 +3584,10 @@ class FileAudioSession(BaseAudioSession):
         self._source_kind = "file"
 
     def _run(self) -> None:
+        # Ground-truth playback anchor: stamped before a single frame is read,
+        # so it corresponds to file offset 0 with only thread-scheduling jitter
+        # (sub-millisecond in practice) — not an approximation from any VAD.
+        self._t_playback_start = time.monotonic()
         final_status = "completed"
         end_reason = self.end_reason or "completed"
         try:

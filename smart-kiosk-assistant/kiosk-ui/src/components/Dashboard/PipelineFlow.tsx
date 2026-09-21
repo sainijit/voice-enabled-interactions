@@ -118,6 +118,16 @@ function latencyLabel(ms: number | null, invoked = true): string {
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+// p95 (not just the single latest turn) is the customer-facing target: a
+// single bad tail turn is what a real customer notices, and a "last turn"
+// or median-style view hides it. See docs/performance-improvements-2026-09.md.
+function percentile(values: number[], p: number): number | null {
+  const vals = values.filter((v) => typeof v === 'number' && Number.isFinite(v)).sort((a, b) => a - b);
+  if (vals.length === 0) return null;
+  const idx = Math.min(vals.length - 1, Math.max(0, Math.ceil(p * vals.length) - 1));
+  return vals[idx];
+}
+
 function deviceBadge(device: unknown): { label: string; cls: string } | null {
   const d = String(device ?? '').toUpperCase();
   if (d.includes('GPU'))  return { label: 'GPU', cls: 'bg-gpu-light text-gpu-dark border-gpu-muted' };
@@ -167,7 +177,16 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
 
   // Use measured wall E2E from turn trace; never sum stages (avoids TTS overlap error)
   const e2eMs = trace?.wall?.turn_total_ms ?? null;
-  const ttfaMs = trace?.wall?.time_to_first_audio_ms ?? null;
+  // Shared-vocabulary "Processing latency" (turn-end decision -> first sound
+  // out of the speaker). Deliberately NOT time_to_first_audio_ms: the two
+  // differ whenever work starts speculatively during the endpoint's
+  // trailing-silence wait (e.g. shortcut turns: ttfa ~195ms vs processing
+  // latency ~3ms, because audio was already rendered before the turn-end
+  // decision fired) -- see kiosk_core/pipeline_latency.py WallTimes docstring
+  // and benchmark-vocabolary.txt. "Time to first audio" is retired as a
+  // headline KPI name; it's still available in the per-turn table below for
+  // diagnostics, just not surfaced here as a top-level chip.
+  const processingMs = trace?.wall?.voice_to_voice_post_endpoint_ms ?? null;
   // Voice-to-voice is the customer-felt clock: last word spoken -> first sound
   // out of the speaker. It is NOT derivable from e2eMs, because e2eMs starts at
   // the endpoint decision and so excludes the trailing-silence wait.
@@ -179,6 +198,15 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
     .filter((t) => t?.wall?.voice_to_voice_ms != null)
     .slice()
     .reverse();
+
+  // Rolling p95 over the recent-turns window -- the customer-facing target
+  // metric (a single bad tail turn is what damages a real interaction;
+  // showing only the latest turn's V2V, or a mean/median across the window,
+  // would hide it).
+  const v2vP95Ms = percentile(
+    recentTurns.map((t) => t?.wall?.voice_to_voice_ms as number).filter((v) => v != null),
+    0.95,
+  );
 
   return (
     <div className="space-y-3">
@@ -199,10 +227,16 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
               V2V {latencyLabel(v2vMs)}
             </span>
           )}
-          {ttfaMs !== null && (
+          {v2vP95Ms !== null && (
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-800 border border-purple-300"
+              title={`V2V p95 over the last ${recentTurns.length} turns — the customer-facing target metric (median hides the bad tail)`}>
+              V2V p95 {latencyLabel(v2vP95Ms)}
+            </span>
+          )}
+          {processingMs !== null && (
             <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700 border border-green-200"
-              title="Time to first audio — perceived response latency">
-              TTFA {latencyLabel(ttfaMs)}
+              title="Processing latency — turn-end decision to first sound out of the speaker (shared cross-team vocabulary term; voice_to_voice = endpointing delay + processing latency)">
+              Processing {latencyLabel(processingMs)}
             </span>
           )}
           {e2eMs !== null && (

@@ -8,26 +8,27 @@ models:
   asr:
     provider: openvino # openai | openvino | whispercpp
     name: whisper-small  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
-                        # whisper-small OpenVINO IR (INT8) converted to models/openvino/whisper-small-int8/
-                        # REVERTED from distil-whisper/distil-small.en (2026-09-07 evaluation): distil-small.en
-                        # measured ~2-3x faster in isolated single-shot benchmarks (215-277ms vs 533-584ms,
-                        # GPU/NPU, full ~8.4s clip), BUT on THIS hardware's NPU + openvino_genai stack it has
-                        # a confirmed state-corruption bug: after the shared WhisperPipeline singleton
-                        # processes one clip length then a DIFFERENT clip length (e.g. the 1s silent warmup
-                        # then a real 2.78s utterance — exactly our production request pattern), every
-                        # subsequent .generate() call on that pipeline instance returns garbled/wrong text
-                        # (e.g. "you" instead of the real order) and NEVER recovers, even reverting to a
-                        # clip length that worked before. Reproduced directly against openvino_genai
-                        # WhisperPipeline, isolated from our diarization/pipeline code. whisper-small does
-                        # NOT exhibit this bug (verified with the same repro script) — it handles variable-
-                        # length calls on the same pipeline instance correctly, matching real usage.
-                        # distil-small.en on GPU (not NPU) does NOT show this corruption either — so it
-                        # remains a candidate IF re-adopted on GPU, but that reintroduces GPU contention
-                        # with ovms-llm/text-to-speech, the original reason NPU was chosen. Revisit only
-                        # after this NPU-specific openvino_genai bug is understood/fixed upstream, or if
-                        # GPU headroom is confirmed acceptable.
-                        # Use whisper-base on CPU/NPU; whisper-small on GPU for better accuracy.
-                        # OpenVINO GPU target: <300ms for typical 1-2s kiosk commands.
+                        # or a full HF repo id, e.g. distil-whisper/distil-small.en
+                        # REVERTED (2026-09-10) from distil-whisper/distil-small.en back to
+                        # whisper-small. Re-adopted distil-small.en+NPU this session to match
+                        # kiosk-voice-lab's ~115ms/call, but reproduced the documented
+                        # state-corruption bug twice more (once via shared singleton, once via a
+                        # dedicated preview/final instance-pool refactor mirroring the lab's
+                        # architecture — neither fixed it). A final isolated, controlled repro
+                        # (one shared og.WhisperPipeline instance, NPU, sequential 1s/4.46s/2s/
+                        # 1s/4.46s calls, no HTTP layer) confirmed: distil-small.en's output goes
+                        # stale/frozen (repeats the first call's text regardless of new input,
+                        # then decays further), while whisper-small on the identical
+                        # instance/device/sequence produces correct, input-appropriate output
+                        # every time. og.WhisperPipeline exposes no reset/reinit API
+                        # (generate/get_generation_config/set_generation_config/get_tokenizer
+                        # only), so there is no supported fix short of recreating the pipeline
+                        # per call. Root-caused to be model-specific to distil-small.en's
+                        # openvino_genai NPU execution path, not our code. whisper-small is the
+                        # only config confirmed bug-free on NPU; distil-small.en on GPU was the
+                        # one combination the original 2026-09-07 evaluation found bug-free, and
+                        # remains a possible future option at the cost of iGPU contention with
+                        # LLM/TTS.
     device: NPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
                 # Enabled after fixing ACCEL_MOUNT_PATH (was /dev/null, silently
                 # disabling NPU passthrough — see .env). NPU is now enumerated
@@ -45,8 +46,38 @@ models:
                 # for putting ASR on NPU even though it uses a smaller distilled
                 # model (distil-whisper distil-small.en) that we don't have
                 # exported offline.
-    weight_format: int8 # OpenVINO: int8 | fp16 | null; int8 for whisper-small-int8 OV model
+    weight_format: int8 # OpenVINO: int8 | fp16 | null; int8 for distil-small.en-int8 OV model
     temperature: 0.0
+    # Preview-pool override (2026-09-10, endpoint-latency work): the preview
+    # pool (append_to_session=False, non-destructive scratch calls that feed
+    # the adaptive-flush / completeness-shortcut endpoint check) is on the
+    # critical path for how EARLY the endpoint can commit a turn -- see
+    # docs/performance-improvements-2026-09.md and
+    # BaseAudioSession._endpoint_transcript_stable. whisper-small/NPU's
+    # ~500-1,100ms round-trip was measured gating the shortcut to firing at
+    # ~0.9-1.0s of silence instead of its ~0.35s theoretical best case.
+    #
+    # distil-whisper/distil-small.en corrupts on THIS NPU + openvino_genai
+    # stack (see the main models.asr.name comment above -- do not move it back
+    # to NPU). On GPU it does not: an isolated controlled test (one shared
+    # og.WhisperPipeline(device="GPU") instance, sequential 1s/4.46s/2s/1s/
+    # 4.46s/2s calls) produced correct, input-length-appropriate transcripts
+    # every call (no staleness/corruption), at ~40-60ms/call after a one-time
+    # ~4.5s cold construct -- matching kiosk-voice-lab's reported figures for
+    # this model. This override runs ONLY the preview pool on
+    # distil-small.en/GPU; the final, persisted commit stays on
+    # whisper-small/NPU above (proven zero-corruption, and not as
+    # latency-sensitive since it overlaps the silence wait either way).
+    #
+    # Known risk carried forward: GPU is shared with rag-service's LLM and
+    # text-to-speech -- this override has only been validated in isolation so
+    # far, not yet benchmarked under concurrent LLM/TTS GPU load. Revert by
+    # deleting this `preview:` block (falls back to using the main asr
+    # config for both pools) if contention regresses agent_ttft_ms/tts_ms.
+    preview:
+      name: distil-whisper/distil-small.en
+      device: GPU
+      weight_format: int8
     diarization: True        # set True to enable pyannote speaker diarization
                               # REQUIRES: accept ALL THREE gated model licences
                               # at HF before enabling:
