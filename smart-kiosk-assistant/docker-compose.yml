@@ -547,9 +547,30 @@ services:
   # stream=true, comparing with and without --draft_source_model. Do not
   # re-add this flag without first confirming OVMS has fixed streamed
   # tool-call + speculative-decoding interaction upstream.
+  # OVMS's named cache volume (ovms_ov_cache below) is created by Docker on
+  # first use, owned by root:root 0755 — but ovms-llm's image runs as a
+  # non-root "ovms" user (uid 5000), which then cannot write into it.
+  # Confirmed live: "Cache directory /tmp/ov_cache is not writable; access()
+  # result: -1" on every ovms-llm startup, silently defeating OV_CACHE_DIR /
+  # --cache_dir and forcing a full model-IR recompile on every restart
+  # instead of a cache hit. This one-shot init chowns the volume to the
+  # container's uid before ovms-llm starts; it runs once per `up` (fast,
+  # no-op on a volume that is already owned correctly) and exits, gating
+  # ovms-llm via depends_on/service_completed_successfully below.
+  ovms-cache-init:
+    image: busybox
+    container_name: ovms-cache-init
+    user: root
+    volumes:
+      - ovms_ov_cache:/tmp/ov_cache
+    command: chown -R 5000:5000 /tmp/ov_cache
+
   ovms-llm:
     image: openvino/model_server:latest-gpu
     container_name: ovms-llm
+    depends_on:
+      ovms-cache-init:
+        condition: service_completed_successfully
     ports:
       - "9001:9000"  # gRPC (host 9001 avoids conflict with metrics-collector:9000)
       - "8000:8000"  # REST / OpenAI-compatible /v3
@@ -783,6 +804,18 @@ services:
       # below, so files are inspectable without entering the container).
       KIOSK_CORE_CONVERSATION_LOGGING_ENABLED: "${KIOSK_CORE_CONVERSATION_LOGGING_ENABLED:-false}"
       KIOSK_CORE_CONVERSATION_LOG_DIR:          /app/conversations
+      # VLM metrics logging (kiosk_core.vlm_metrics_logger, vendored from
+      # performance-tools). On by default -- pure side-channel append-only
+      # log write, guarded by its own try/except (see
+      # audio_session._emit_vlm_metrics), so it can never break a live turn.
+      # CONTAINER_RESULTS_PATH and USECASE_V2V are upstream-fixed env var
+      # names the vendored logger itself reads (see config.py's
+      # VLM_METRICS_RESULTS_DIR/VLM_METRICS_USECASE_ENV_VAR comments) -- kept
+      # as-is so files land in the same ./results the benchmark flow's
+      # consolidate-metrics/plot-metrics targets already scan.
+      KIOSK_CORE_VLM_METRICS_ENABLED: "${KIOSK_CORE_VLM_METRICS_ENABLED:-true}"
+      CONTAINER_RESULTS_PATH: /app/results
+      USECASE_V2V: smart-kiosk-v2v
       # Bypass corporate proxy for intra-cluster traffic
       NO_PROXY: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,queue-service,172.16.0.0/12,10.0.0.0/8"
       no_proxy: "localhost,127.0.0.1,ovms-llm,kiosk-core,audio-analyzer,text-to-speech,metrics-collector,rag-service,queue-service,172.16.0.0/12,10.0.0.0/8"
@@ -791,6 +824,7 @@ services:
       - kiosk_db:/app/data
       - ./configs/ordering:/app/configs/ordering:ro
       - ./conversations:/app/conversations
+      - ./results:/app/results
     depends_on:
       audio-analyzer:
         condition: service_healthy
