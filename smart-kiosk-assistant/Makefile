@@ -212,7 +212,11 @@ init-env: ## Create .env from .env.example (backs up existing .env)
 
 setup-dirs: ## Create required runtime directories
 	@echo "$(BLUE)Creating required directories...$(NC)"
-	@mkdir -p models storage conversations metrics
+	@# results/ is bind-mounted into kiosk-core (CONTAINER_RESULTS_PATH, see
+	@# docker-compose.yml) for kiosk_core.vlm_metrics_logger's output -- must
+	@# exist with the host user's ownership before `up`, otherwise Docker
+	@# auto-creates it as root and kiosk-core's user:"1000:1000" can't write.
+	@mkdir -p models storage conversations metrics results
 	@echo "$(GREEN)✓ Directories ready$(NC)"
 
 setup-models: ## Download the OVMS LLM model (Qwen3-4B) via setup_models.sh
@@ -672,6 +676,15 @@ benchmark: check-env ## Run the voice-to-voice latency benchmark via performance
 		--runs $(V2V_RUNS) \
 		--label $(V2V_LABEL) \
 		$(V2V_ARGS)
+	@# The orchestrator's `make down` (called internally, in a `finally:`
+	@# block) leaves the OS-level hardware counters sitting in ./metrics/
+	@# (bind-mounted from the now-stopped metrics-collector container) --
+	@# they are never copied into ./results/ on their own. Without this,
+	@# `make benchmark` looks like it "doesn't generate" the qmassa/cpu/
+	@# memory/npu files: they exist, just in the wrong directory. Chain the
+	@# consolidation here so a single `make benchmark` always leaves
+	@# ./results/ with the hardware counters *and* consolidated_metrics.csv.
+	@$(MAKE) --no-print-directory consolidate-metrics
 
 # =============================================================================
 # Metrics processing (performance-tools orchestrated)

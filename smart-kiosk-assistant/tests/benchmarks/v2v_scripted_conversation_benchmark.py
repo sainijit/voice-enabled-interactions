@@ -123,80 +123,25 @@ def load_conversation_file(path: Path) -> list[str]:
     return lines
 
 # ---------------------------------------------------------------------------
-# performance-tools vlm_metrics_logger integration (opt-in, --emit-vlm-metrics)
+# performance-tools vlm_metrics_logger integration
 # ---------------------------------------------------------------------------
-# Emits one start/end pair per benchmarked turn in the same
-# vlm_application_metrics_*.txt format the order-accuracy application's
-# ovms_client.py produces, so the shared performance-tools collectors
-# (benchmark_order_accuracy.py's _collect_vlm_logger_metrics and friends) can
-# parse a voice-pipeline run exactly like a vision-pipeline one.
+# Previously this harness emitted a SYNTHESIZED start/end pair per turn itself
+# (end=now, start=end-voice_to_voice_ms), because kiosk-core only exposed
+# voice_to_voice_ms after the fact over HTTP and the harness had no access to
+# the real last-word/first-audio instants.
 #
-# Emitted from the HARNESS, not from kiosk_core: the benchmark already holds
-# the server-computed voice_to_voice_ms (read out of /api/v1/pipeline/latest),
-# so no kiosk-core runtime code -- and therefore nothing on the measured path
-# -- has to change to produce these files. It also means the files are written
-# directly to the host results dir, with no /results container mount needed.
-PERF_TOOLS_SCRIPTS_DIR = REPO_ROOT.parent / "performance-tools" / "benchmark-scripts"
-
-# The logger records `application=os.getenv(<usecase_name>)` -- the argument is
-# an ENV VAR NAME to look up, not a literal label (see VLMMetricsLogger.
-# user_log_start_time). Without this the field is logged as `None`.
-VLM_USECASE_ENV_VAR = "USECASE_V2V"
-VLM_USECASE_DEFAULT = "smart-kiosk-v2v"
-
-
-def init_vlm_metrics(results_dir: Path) -> bool:
-    """Import and configure performance-tools' vlm_metrics_logger.
-
-    Returns True when the logger is importable and configured. Failure is
-    never fatal: the performance-tools submodule may not be checked out, and
-    the benchmark's own JSON report remains the authoritative result either
-    way.
-    """
-    if str(PERF_TOOLS_SCRIPTS_DIR) not in sys.path:
-        sys.path.insert(0, str(PERF_TOOLS_SCRIPTS_DIR))
-
-    # VLMMetricsLogger resolves its output directory from CONTAINER_RESULTS_PATH
-    # at FIRST use and caches it on a module-level singleton (get_logger()), so
-    # this must be set before the first emit. Unset, it would os.makedirs(None).
-    os.environ.setdefault("CONTAINER_RESULTS_PATH", str(results_dir))
-    os.environ.setdefault(VLM_USECASE_ENV_VAR, VLM_USECASE_DEFAULT)
-
-    try:
-        import vlm_metrics_logger  # noqa: F401  (imported for availability check)
-    except Exception as exc:  # noqa: BLE001
-        print(
-            f"[v2v-scripted] --emit-vlm-metrics requested but vlm_metrics_logger "
-            f"is unavailable at {PERF_TOOLS_SCRIPTS_DIR} ({exc}).\n"
-            f"[v2v-scripted] Run 'make update-submodules' to fetch performance-tools. "
-            f"Continuing without VLM metrics."
-        )
-        return False
-    return True
-
-
-def emit_vlm_metrics(unique_id: str, voice_to_voice_ms: float) -> None:
-    """Emit one start/end pair whose delta IS the server-measured v2v latency.
-
-    The pair is synthesised (``end = now``, ``start = end - v2v``) rather than
-    stamped around the turn as it runs. kiosk-core measures the pipeline with
-    ``time.monotonic()`` -- a different, non-epoch clock from the
-    ``time.time()`` epoch milliseconds this log format carries -- so the two
-    cannot be mixed. Bracketing the turn with real wall-clock calls here would
-    instead measure the HARNESS (HTTP pushes, 0.25s session polling, ffmpeg
-    ground-truth analysis), inflating the figure by seconds.
-
-    Synthesising from the authoritative duration keeps ``end - start`` exactly
-    equal to kiosk-core's own voice_to_voice_ms, which is what the collectors
-    average. Only the absolute placement on the timeline is approximate, and
-    no collector uses it.
-    """
-    from vlm_metrics_logger import user_log_end_time, user_log_start_time
-
-    end_ms = int(time.time() * 1000)
-    start_ms = end_ms - int(round(voice_to_voice_ms))
-    user_log_start_time(start_ms, VLM_USECASE_ENV_VAR, unique_id=unique_id)
-    user_log_end_time(end_ms, VLM_USECASE_ENV_VAR, unique_id=unique_id)
+# kiosk-core now emits these natively and unconditionally -- see
+# kiosk_core.audio_session._emit_vlm_metrics(), called right after every
+# completed turn's TurnTrace is recorded, using the REAL monotonic marks
+# (converted to epoch ms via a same-instant anchor pair), not a
+# post-hoc-synthesized duration. This harness deliberately no longer emits at
+# all: doing so as well would double-count every turn (two start/end pairs
+# under two different unique_ids landing in the same
+# vlm_application_metrics_*.txt) when collect_vlm_logger_metrics() sums
+# transactions across all files in --results-dir. kiosk-core is configured to
+# write to the same host ./results directory this harness already uses (see
+# docker-compose.yml's CONTAINER_RESULTS_PATH/./results:/app/results mount),
+# so no code here has to do anything for those files to appear.
 
 # ---------------------------------------------------------------------------
 # Scripted conversations -- QSR ordering domain, real product names from
@@ -407,11 +352,11 @@ def main(argv: list[str] | None = None) -> int:
         "--emit-vlm-metrics",
         action="store_true",
         help=(
-            "Also emit each turn's voice-to-voice latency as a start/end pair in "
-            "performance-tools' vlm_application_metrics_*.txt format (the same "
-            "format the order-accuracy application's ovms_client.py produces), so "
-            "shared performance-tools collectors can parse this run. Written to "
-            "--results-dir. Off by default so normal runs stay byte-identical."
+            "Deprecated, now a no-op: kiosk-core itself emits every turn's "
+            "vlm_application_metrics_*.txt start/end pair natively (see "
+            "kiosk_core.audio_session._emit_vlm_metrics). Accepted and ignored "
+            "so existing callers (benchmark_smart_kiosk_v2v.py) keep working "
+            "unchanged; emitting here too would double-count every turn."
         ),
     )
     args = parser.parse_args(argv)
@@ -437,8 +382,6 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     label = args.label or f"v2v-scripted-{script_name}"
-
-    emit_vlm = args.emit_vlm_metrics and init_vlm_metrics(args.results_dir)
 
     print(f"[v2v-scripted] waiting for kiosk-core at {v2v.CORE_BASE_URL} ...")
     v2v.wait_for_core()
@@ -486,16 +429,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 turn.fixture = f"{script_name}:line{i}"
                 report.turns.append(turn)
-
-                # Only turns that produced a real server-side measurement are
-                # emitted: a failed/errored turn has voice_to_voice_ms=None and
-                # would otherwise become a 0ms "transaction" that silently
-                # drags the collector's average down.
-                if emit_vlm and turn.voice_to_voice_ms is not None:
-                    emit_vlm_metrics(
-                        unique_id=f"{script_name}-line{i}-run{run}",
-                        voice_to_voice_ms=turn.voice_to_voice_ms,
-                    )
 
                 if turn.error:
                     print(f"[v2v-scripted]   FAILED: {turn.error}")

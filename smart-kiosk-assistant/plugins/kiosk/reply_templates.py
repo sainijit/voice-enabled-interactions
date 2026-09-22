@@ -412,6 +412,35 @@ def is_browse_intent(utterance: str) -> bool:
     return not _MUTATION_INTENT_RE.search(utterance or "")
 
 
+# Single-item price/cost questions only — deliberately narrow. General
+# catalogue browsing ("what desserts do you have") still needs the
+# authoritative list_products tool-calling path (see _CATALOGUE_QUERY_RE in
+# ordering_agent.py); only a "how much does X cost" style lookup is safe to
+# answer from directive mode's cached catalogue, because that lookup is a
+# single exact-name match against the same static menu already trusted for
+# <act> item names (see directive_mode._execute_price).
+_PRICE_QUERY_RE = re.compile(
+    r"\bhow\s+much\s+(?:does|is|for|would|are)\b|"
+    r"\bwhat(?:'s|s| is| does)\b.{0,40}\b(?:cost|costs|price)\b|"
+    r"\b(?:price|cost)\s+of\b",
+    re.IGNORECASE,
+)
+
+
+def is_price_query_intent(utterance: str) -> bool:
+    """Return True when the utterance is a single-item price/cost question.
+
+    Args:
+        utterance: The customer's raw message for this turn.
+
+    Returns:
+        ``True`` for "how much does the brownie cost?" style questions, which
+        directive mode may answer via a fast cached-catalogue lookup instead
+        of falling through to the slower tool-calling path.
+    """
+    return bool(_PRICE_QUERY_RE.search(utterance or ""))
+
+
 def speak(tool_name: str, raw_result: Any, utterance: str = "") -> str | None:
     """Return a spoken reply for ``tool_name``'s result, or None to defer to the LLM.
 

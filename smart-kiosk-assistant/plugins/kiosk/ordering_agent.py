@@ -2446,14 +2446,20 @@ class OrderingAgent:
 
         # Directive mode: one tool-free completion that carries both the cart
         # mutation and the speech, so TTS can start while the model is still
-        # generating. Restricted to turns with explicit mutation intent —
-        # a fallback costs a wasted generation, and questions/browse turns
-        # have nothing to gain here. Never used for speculative drafts, which
-        # rely on dry_run plumbing this path does not implement.
+        # generating. Restricted to turns with explicit mutation intent, plus
+        # single-item price questions (<check_price> — answered from the same
+        # cached catalogue already trusted for <act> item names, so no LLM
+        # tool-calling round-trip is needed) — a fallback costs a wasted
+        # generation, and other questions/browse turns have nothing to gain
+        # here. Never used for speculative drafts, which rely on dry_run
+        # plumbing this path does not implement.
         if (
             directive_mode.DIRECTIVE_MODE
             and not speculative
-            and not reply_templates.is_browse_intent(message)
+            and (
+                not reply_templates.is_browse_intent(message)
+                or reply_templates.is_price_query_intent(message)
+            )
         ):
             try:
                 menu_block = await directive_mode.get_menu_block()

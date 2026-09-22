@@ -112,14 +112,41 @@ async def close_http_client() -> None:
 # whitespace-or-end after the terminator so "₹169." or "No. 2" do not split.
 _SENTENCE_RE = re.compile(r"(?<=[.!?])(?:\s+|$)")
 
+# The two terminal directives a directive-mode generation may end with: a cart
+# mutation (<act>) or a price lookup (<check_price>). Both are parsed the same
+# way structurally (freeze prose the instant the tag opens, dispatch on close)
+# even though what runs afterward differs — see run_turn's on_delta.
+_ACT_TAG = "act"
+_CHECK_PRICE_TAG = "check_price"
+_DIRECTIVE_TAGS = (_ACT_TAG, _CHECK_PRICE_TAG)
+
+
+def _partial_tag_pattern(tag: str) -> str:
+    """Regex matching any partial prefix of ``<tag>`` anchored at end of string.
+
+    Used to strip a directive tag that is still mid-stream (e.g. "<", "<ac",
+    "<check_pr") from text about to be spoken — see _STRAY_DIRECTIVE_RE.
+
+    Args:
+        tag: The bare tag name, e.g. "act" or "check_price".
+
+    Returns:
+        A regex alternation of every non-empty prefix of ``<tag>``, longest
+        first, anchored at end of string.
+    """
+    full = f"<{tag}>"
+    return "(?:" + "|".join(re.escape(full[:i]) for i in range(len(full), 0, -1)) + ")$"
+
+
 # Any further directive block after the first one, plus a trailing partial tag
-# still being streamed ("<", "<act", "<act>add|Fries"). Directive markup is an
-# internal wire format — it must never reach TTS or the screen.
-_STRAY_ACT_RE = re.compile(
-    r"<act>.*?</act>"      # a complete stray directive block
-    r"|<act>.*$"           # an unclosed directive running to the end
-    r"|<a?c?t?/?>?$"       # a partial opening tag still streaming
-    r"|<(?:a(?:c(?:t)?)?)?$",
+# still being streamed ("<", "<act", "<act>add|Fries", "<check_pr"). Directive
+# markup is an internal wire format — it must never reach TTS or the screen.
+_STRAY_DIRECTIVE_RE = re.compile(
+    "|".join(
+        [rf"<(?:{'|'.join(_DIRECTIVE_TAGS)})>.*?</(?:{'|'.join(_DIRECTIVE_TAGS)})>",
+         rf"<(?:{'|'.join(_DIRECTIVE_TAGS)})>.*$"]
+        + [_partial_tag_pattern(t) for t in _DIRECTIVE_TAGS]
+    ),
     re.DOTALL,
 )
 
@@ -148,7 +175,7 @@ def scrub_directives(text: str) -> str:
     Returns:
         ``text`` with directive blocks and partial tags removed.
     """
-    return _STRAY_ACT_RE.sub("", text).strip()
+    return _STRAY_DIRECTIVE_RE.sub("", text).strip()
 
 
 # Verbs the parser accepts. Anything else is treated as unparseable and falls
@@ -207,6 +234,80 @@ def parse_directive(raw: str) -> list[dict[str, Any]] | None:
                 return None
         actions.append({"verb": verb, "name": fields[1], "quantity": quantity})
     return actions or None
+
+
+def parse_price_directive(raw: str) -> str | None:
+    """Parse the ``<check_price>…</check_price>`` block into an item name.
+
+    Args:
+        raw: The directive body, e.g. ``Chocolate Brownie``.
+
+    Returns:
+        The trimmed item name, or ``None`` when empty.
+    """
+    name = (raw or "").strip()
+    return name or None
+
+
+_MENU_PRICE_INDEX: dict[str, tuple[str, float]] | None = None
+_MENU_LINE_RE = re.compile(r"^(.*)\s\([^\d]*([\d.]+)\)$")
+
+
+def _menu_price_index() -> dict[str, tuple[str, float]]:
+    """Parse the cached menu block (see get_menu_block) into a price lookup.
+
+    Built once per process, lazily, from the same ``_MENU_CACHE`` already
+    trusted to teach the model exact item names for ``<act>`` — reusing it
+    here means a price lookup costs zero extra MCP round-trips.
+
+    Returns:
+        ``{name.lower(): (canonical_name, price)}``, or ``{}`` if the menu
+        cache has not been populated yet (caller then falls back).
+    """
+    global _MENU_PRICE_INDEX
+    if _MENU_PRICE_INDEX is not None:
+        return _MENU_PRICE_INDEX
+    index: dict[str, tuple[str, float]] = {}
+    for line in (_MENU_CACHE or "").splitlines():
+        match = _MENU_LINE_RE.match(line.strip())
+        if not match:
+            continue
+        name = match.group(1).strip()
+        try:
+            price = float(match.group(2))
+        except ValueError:
+            continue
+        index[name.lower()] = (name, price)
+    if index:
+        _MENU_PRICE_INDEX = index
+    return index
+
+
+async def _execute_price(item_name: str) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+    """Resolve a customer's price question against the cached catalogue.
+
+    Args:
+        item_name: The item name the model echoed back, expected to be the
+            exact catalogue name per the prompt's "Use item names EXACTLY as
+            they appear in the menu" instruction (see build_directive_spec).
+
+    Returns:
+        ``(payload, tools_called, committed)``, matching ``_execute()``'s
+        contract so ``run_turn`` can treat both directives identically.
+        ``payload`` is ``{"name", "price"}`` on a resolved match, or ``None``
+        when the name cannot be matched exactly — deliberately no
+        fuzzy/partial matching, since a wrong guess here would speak an
+        incorrect price with total confidence; the caller then falls back to
+        the authoritative list_products tool-calling path. ``committed`` is
+        always empty: a price lookup never mutates the cart, so unlike a
+        failed ``<act>`` there is no double-apply hazard blocking that
+        fallback.
+    """
+    match = _menu_price_index().get((item_name or "").strip().lower())
+    if match is None:
+        return None, [], []
+    name, price = match
+    return {"name": name, "price": price}, [], []
 
 
 _MENU_CACHE: str | None = None
@@ -297,6 +398,18 @@ THEN the directive.
 Example:
 Customer: two classic chicken burgers
 You: Got it. Two chicken burgers.<act>add|Classic Chicken Burger|2</act>
+
+PRICE QUESTIONS — follow this exactly.
+When the customer asks how much a single menu item costs, say NOTHING yourself. Reply with ONLY
+this directive and nothing else, no words before or after it:
+<check_price>EXACT ITEM NAME</check_price>
+Use the item name EXACTLY as it appears in the menu below. Never state the price yourself — it is
+spoken for you afterward. If the question names more than one item, or is not about a single
+item's price, do not use this directive.
+
+Example:
+Customer: how much does the chocolate brownie cost?
+You: <check_price>Chocolate Brownie</check_price>
 
 MENU:
 {menu_block}
@@ -502,6 +615,26 @@ def _facts_tail(payload: dict[str, Any]) -> str:
     return out
 
 
+def _price_tail(payload: dict[str, Any]) -> str:
+    """Build the spoken reply for a resolved ``<check_price>`` directive.
+
+    Mirrors ``_facts_tail``: the model is told never to speak a price, so this
+    is the only place a price answer is composed — straight from the cached
+    catalogue lookup (see ``_execute_price``), never from the model's own text.
+
+    Args:
+        payload: ``{"name", "price"}`` from ``_execute_price``.
+
+    Returns:
+        A one-sentence spoken price answer.
+    """
+    from agentic import domain_config
+    from plugins.kiosk.reply_templates import _money
+
+    currency = domain_config.get_currency_symbol()
+    return f"The {payload['name']} costs {currency}{_money(payload['price'])}."
+
+
 async def run_turn(
     message: str,
     user_id: str,
@@ -547,16 +680,16 @@ async def run_turn(
 
     state: dict[str, Any] = {
         "buf": "", "task": None, "spoken": [], "rest": "",
-        # True once "<act>" has appeared anywhere in the stream. From that
-        # point on, prose is FROZEN at buf.split("<act>", 1)[0] — nothing
-        # after the tag is prose, so this can only go from False to True once.
-        "act_started": False,
-        # True once the directive has been fully parsed (both "<act>" and
-        # "</act>" seen) and dispatch attempted. Distinct from act_started so
-        # a directive left unclosed by a truncated/aborted generation is
-        # still correctly treated as "no usable directive" by the fallback
-        # check below.
-        "act_dispatched": False,
+        # Which directive tag (see _DIRECTIVE_TAGS) first opened in the
+        # stream, or None until one does. From that point on, prose is FROZEN
+        # at buf.split(f"<{tag}>", 1)[0] — nothing after the tag is prose, so
+        # this can only be set once.
+        "tag": None,
+        # True once the open tag's matching close tag has been seen and
+        # dispatch attempted. Distinct from "tag" being set so a directive
+        # left unclosed by a truncated/aborted generation is still correctly
+        # treated as "no usable directive" by the fallback check below.
+        "tag_dispatched": False,
         # Sentences pulled off the stream so far (>= len(spoken), because
         # facts-bearing sentences are consumed but never spoken).
         "consumed": 0,
@@ -603,21 +736,29 @@ async def run_turn(
         state["buf"] += _text
         buf: str = state["buf"]
 
-        if not state["act_started"] and "<act>" in buf:
-            state["act_started"] = True
+        if state["tag"] is None:
+            # Whichever directive tag (see _DIRECTIVE_TAGS) opens first in the
+            # stream — at most one can ever apply per turn, per the prompt.
+            opened = min(
+                (idx, tag) for tag in _DIRECTIVE_TAGS
+                if (idx := buf.find(f"<{tag}>")) != -1
+            ) if any(f"<{tag}>" in buf for tag in _DIRECTIVE_TAGS) else None
+            if opened:
+                state["tag"] = opened[1]
 
-        # Prose is everything before the first "<act>" tag — frozen the
-        # instant that tag appears, since the directive is now expected to be
-        # the last thing in the reply. Everything from here on speaks only
-        # what was already buffered before the tag showed up.
-        prose = buf.split("<act>", 1)[0] if state["act_started"] else buf
+        # Prose is everything before the first open tag — frozen the instant
+        # that tag appears, since the directive is now expected to be the
+        # last thing in the reply. Everything from here on speaks only what
+        # was already buffered before the tag showed up.
+        prose = buf.split(f"<{state['tag']}>", 1)[0] if state["tag"] else buf
         _emit_prose(prose)
 
         if state["prose_closed"]:
             raise _StopGeneration
 
-        if state["act_started"] and not state["act_dispatched"] and "</act>" in buf:
-            state["act_dispatched"] = True
+        close_tag = f"</{state['tag']}>" if state["tag"] else None
+        if state["tag"] and not state["tag_dispatched"] and close_tag in buf:
+            state["tag_dispatched"] = True
             # Prose is frozen now (no further growth possible), so flush
             # whatever incomplete sentence is still sitting in the remainder
             # rather than silently dropping it — the model may not always
@@ -632,14 +773,21 @@ async def run_turn(
                         on_safe_sentence(leftover)
             state["rest"] = ""
 
-            after_open = buf.split("<act>", 1)[1]
-            directive_body, closed, _ = after_open.partition("</act>")
+            after_open = buf.split(f"<{state['tag']}>", 1)[1]
+            directive_body, closed, _ = after_open.partition(close_tag)
             if closed:
-                actions = parse_directive(directive_body)
-                if actions:
-                    state["task"] = asyncio.create_task(_execute(actions, user_id))
-                else:
-                    state["task"] = "unparseable"
+                if state["tag"] == _ACT_TAG:
+                    actions = parse_directive(directive_body)
+                    if actions:
+                        state["task"] = asyncio.create_task(_execute(actions, user_id))
+                    else:
+                        state["task"] = "unparseable"
+                else:  # _CHECK_PRICE_TAG
+                    item_name = parse_price_directive(directive_body)
+                    if item_name:
+                        state["task"] = asyncio.create_task(_execute_price(item_name))
+                    else:
+                        state["task"] = "unparseable"
             # Nothing usable follows the directive in this layout — it is
             # the last thing in the reply — so stop reading the stream
             # instead of paying for tail tokens that will only be discarded.
@@ -676,10 +824,10 @@ async def run_turn(
     # for every code path is what makes the two comparable turn-to-turn).
     llm_metrics.record(gen_ms, ttft_ms=state["first_delta_ms"])
 
-    if not state["act_dispatched"] or state["task"] == "unparseable" or state["task"] is None:
+    if not state["tag_dispatched"] or state["task"] == "unparseable" or state["task"] is None:
         logger.info(
-            "[DIRECTIVE] no usable directive (act_dispatched=%s) — falling back | gen=%.0fms raw=%r",
-            state["act_dispatched"], gen_ms, raw[:120],
+            "[DIRECTIVE] no usable directive (tag_dispatched=%s) — falling back | gen=%.0fms raw=%r",
+            state["tag_dispatched"], gen_ms, raw[:120],
         )
         return None
 
@@ -716,15 +864,17 @@ async def run_turn(
         return None
     payload = executed
 
-    # The model spoke a price-free confirmation; every number the customer
-    # hears is appended here, verbatim from the tool result. (state["rest"]
+    # The model spoke a price-free confirmation (or, for <check_price>,
+    # nothing at all); every number the customer hears is appended here,
+    # verbatim from the tool result / cached catalogue lookup. (state["rest"]
     # is always empty here — any trailing incomplete sentence was already
     # flushed and spoken the moment the directive tag appeared, since prose
     # is frozen at that point and cannot grow further.)
     spoken = " ".join(state["spoken"]).strip()
+    tail = _price_tail(payload) if state["tag"] == _CHECK_PRICE_TAG else _facts_tail(payload)
     # Last line of defence: whatever happens above, directive markup never
     # reaches TTS or the screen.
-    reply = scrub_directives(f"{spoken} {_facts_tail(payload)}".strip())
+    reply = scrub_directives(f"{spoken} {tail}".strip())
 
     logger.info(
         "[DIRECTIVE] turn complete | gen=%.0fms sentences_streamed=%d reply=%r",

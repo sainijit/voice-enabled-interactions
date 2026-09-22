@@ -262,11 +262,20 @@ class SmartKioskV2VBenchmark:
     # ------------------------------------------------------------------
     # Collection
     # ------------------------------------------------------------------
-    def collect_vlm_logger_metrics(self) -> Dict:
+    def collect_vlm_logger_metrics(self, since_ms: Optional[int] = None) -> Dict:
         """Parse vlm_application_metrics_*.txt into latency stats.
 
         Mirrors benchmark_order_accuracy.py's _collect_vlm_logger_metrics so a
         voice run and a vision run produce the same shape.
+
+        ``since_ms``: ignore any start/end event stamped before this epoch-ms
+        instant. kiosk-core's own vlm_metrics_logger hook
+        (kiosk_core.audio_session._emit_vlm_metrics) emits for every
+        completed turn unconditionally -- including this script's own
+        discarded warmup run, which shares the same long-lived kiosk-core
+        process and log file as the measured run that follows it. Passing the
+        wall-clock instant the measured run started isolates its turns
+        without needing to touch (or be able to rotate) that file.
         """
         metrics: Dict = {
             "total_transactions": 0,
@@ -295,6 +304,8 @@ class SmartKioskV2VBenchmark:
                         unique_id = id_match.group(1)
                         event = event_match.group(1)
                         timestamp = int(ts_match.group(1))
+                        if since_ms is not None and timestamp < since_ms:
+                            continue
                         if event == "start":
                             start_times[unique_id] = timestamp
                         elif event == "end":
@@ -434,8 +445,6 @@ class SmartKioskV2VBenchmark:
 
             if warmup_runs > 0:
                 print(f"\n--- Warmup ({warmup_runs} run(s), discarded) ---")
-                # Warmup writes to a throwaway label and emits no metrics, so
-                # its turns never reach the collector.
                 self.run_benchmark_script(
                     script=script,
                     runs=warmup_runs,
@@ -443,10 +452,26 @@ class SmartKioskV2VBenchmark:
                     emit_vlm_metrics=False,
                 )
 
+            # kiosk-core's own vlm_metrics_logger hook (kiosk_core.
+            # audio_session._emit_vlm_metrics) emits for EVERY completed turn
+            # unconditionally, including the warmup run above -- production
+            # instrumentation has no concept of "warmup". Deleting
+            # vlm_application_metrics_*.txt here (as an earlier version of
+            # this fix tried) does NOT work: kiosk-core is one long-lived
+            # process across both runs, and Python's RotatingFileHandler keeps
+            # writing to the now-unlinked inode once its underlying file is
+            # removed from under it -- every subsequent write silently
+            # vanishes (nothing in --results-dir, no error). So instead:
+            # remember the wall-clock instant the measured run starts and
+            # have collect_vlm_logger_metrics() below ignore any entry
+            # stamped before it, which isolates the measured turns without
+            # ever touching the file kiosk-core has open.
+            measured_run_started_ms = int(time.time() * 1000)
+
             print(f"\n--- Measured run ({runs} run(s)) ---")
             rc = self.run_benchmark_script(script=script, runs=runs, label=label)
 
-            vlm = self.collect_vlm_logger_metrics()
+            vlm = self.collect_vlm_logger_metrics(since_ms=measured_run_started_ms)
             report = self.collect_benchmark_report(label)
 
             results = {
