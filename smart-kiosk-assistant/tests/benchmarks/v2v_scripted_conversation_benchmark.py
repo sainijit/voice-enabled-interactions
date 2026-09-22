@@ -3,10 +3,12 @@
 
 Why this exists
 ----------------
-``v2v_fixture_benchmark.py`` replays real HUMAN recordings (``rec1_16k.wav``
-etc.) -- the most faithful source of "what does a real customer's trailing
-silence look like", but it is limited to whatever handful of recordings
-exist in ``tests/``: one line each, no multi-turn conversations.
+``v2v_fixture_benchmark.py`` replays real HUMAN recordings -- the most
+faithful source of "what does a real customer's trailing silence look
+like", but no recordings are bundled in this repo (kept free of binary
+audio) and it requires the caller to supply fixtures via ``--fixture``,
+limited to whatever handful of recordings the caller has: one line each,
+no multi-turn conversations.
 
 ``kiosk-voice-lab-main`` (the reference lab implementation) instead
 synthesises its own scripted customer conversations with its TTS engine

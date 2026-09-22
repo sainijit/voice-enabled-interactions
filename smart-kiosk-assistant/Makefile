@@ -603,19 +603,7 @@ update-submodule update-submodules: ## Initialize and update the performance-too
 		exit 1; \
 	fi
 	@git -C .. submodule update --init --recursive --remote performance-tools
-	@$(MAKE) --no-print-directory install-benchmark-orchestrator
 	@echo "$(GREEN)Submodules updated successfully.$(NC)"
-
-install-benchmark-orchestrator: ## Reinstall benchmark_smart_kiosk_v2v.py into the performance-tools submodule
-	@# `submodule update` above resets performance-tools' working tree to the
-	@# pinned upstream commit, which wipes this untracked orchestrator file
-	@# (see its docstring / tests/benchmarks/perf-tools-orchestrator/README.md
-	@# for why it lives there instead of being upstreamed). Restore it from
-	@# the tracked backup so `make benchmark` keeps working after every
-	@# `make update-submodules`.
-	@cp tests/benchmarks/perf-tools-orchestrator/benchmark_smart_kiosk_v2v.py \
-		../performance-tools/benchmark-scripts/benchmark_smart_kiosk_v2v.py
-	@echo "$(GREEN)✓ benchmark_smart_kiosk_v2v.py installed into performance-tools/benchmark-scripts$(NC)"
 
 fetch-benchmark:
 	@echo "$(BLUE)Fetching benchmark image from registry...$(NC)"
@@ -656,17 +644,16 @@ V2V_ARGS        ?=
 # Lives inside the performance-tools submodule (benchmark-scripts/), next to
 # benchmark_order_accuracy.py, so it can bring the stack up the same way that
 # script does and chain straight into consolidate-metrics/plot-metrics below
-# without crossing repos. It is untracked there (not upstreamed) -- see
-# tests/benchmarks/perf-tools-orchestrator/README.md and the
-# install-benchmark-orchestrator target above for how it survives
+# without crossing repos. Now committed there (see performance-tools'
+# benchmark_smart_kiosk_v2v.py history) and kept in sync via
 # `make update-submodules`.
 _PERF_TOOLS_DIR  = ../performance-tools/benchmark-scripts
 _V2V_PERF_TOOLS  = $(_PERF_TOOLS_DIR)
 
 benchmark: check-env ## Run the voice-to-voice latency benchmark via performance-tools
 	@if [ ! -f "$(_V2V_PERF_TOOLS)/benchmark_smart_kiosk_v2v.py" ]; then \
-		echo "$(YELLOW)benchmark orchestrator not found at $(_V2V_PERF_TOOLS) -- reinstalling from backup...$(NC)"; \
-		$(MAKE) --no-print-directory install-benchmark-orchestrator; \
+		echo "$(RED)benchmark orchestrator not found at $(_V2V_PERF_TOOLS) -- run 'make update-submodules'.$(NC)"; \
+		exit 1; \
 	fi
 	@echo "$(BLUE)Running voice-to-voice benchmark (script=$(if $(V2V_SCRIPT),$(V2V_SCRIPT),Sample_data/conversation.jsonl), runs=$(V2V_RUNS))...$(NC)"
 	cd $(_V2V_PERF_TOOLS) && python3 benchmark_smart_kiosk_v2v.py \

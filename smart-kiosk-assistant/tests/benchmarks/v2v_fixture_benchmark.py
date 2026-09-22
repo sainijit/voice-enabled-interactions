@@ -13,11 +13,9 @@ through its real wait, and neither script even reads ``voice_to_voice_ms`` or
 
 This script instead:
 
-* Uses the real recorded human-speech fixtures already in ``tests/`` —
-  ``rec1_16k.wav``, ``tests/fixtures/sample_speech_16k.wav`` — not
-  synthesised audio. ``rec2_16k.wav`` (contains two orders in one recording)
-  is excluded from the defaults; pass it explicitly via ``--fixture`` if
-  needed.
+* Replays real recorded human-speech WAV fixtures — not synthesised audio.
+  No fixtures ship in this repo (to keep it free of binary recordings);
+  supply your own via one or more ``--fixture`` flags.
 * Drives kiosk-core through the same **continuous streaming** session API the
   browser UI itself uses — ``POST /api/v1/sessions/start-stream`` followed by
   repeated ``POST /api/v1/sessions/{id}/audio`` chunk pushes and a final
@@ -47,9 +45,9 @@ Usage::
 
     python tests/benchmarks/v2v_fixture_benchmark.py --runs 5 --label baseline
 
-    # Only specific fixtures, against an already-running stack
+    # Point at your own recorded WAV fixtures (repeatable flag)
     python tests/benchmarks/v2v_fixture_benchmark.py \
-        --fixture tests/rec1_16k.wav --fixture tests/rec2_16k.wav --runs 3
+        --fixture /path/to/order1.wav --fixture /path/to/order2.wav --runs 3
 
 Stdlib only, consistent with the sibling benchmarks.
 """
@@ -88,14 +86,10 @@ CONTAINER_TTS_URL = "http://text-to-speech:8011/v1/audio/speech"
 # realtime_factor=1.0 lets the endpoint detector discover that the same way
 # it would for a live customer.
 #
-# rec2_16k.wav is excluded from the defaults: it contains two separate orders
-# in one recording, which conflates two turns' worth of latency into a single
-# benchmarked "turn" and skews the per-turn voice_to_voice_ms numbers. Pass
-# `--fixture tests/rec2_16k.wav` explicitly if you need to benchmark it.
-DEFAULT_FIXTURES = [
-    REPO_ROOT / "tests" / "rec1_16k.wav",
-    REPO_ROOT / "tests" / "fixtures" / "sample_speech_16k.wav",
-]
+# No fixtures are bundled in this repo (kept free of binary audio); you must
+# pass at least one via --fixture, e.g.:
+#   --fixture /path/to/your_recording.wav
+DEFAULT_FIXTURES: list[Path] = []
 
 # Bypass any corporate proxy for localhost calls, consistent with the sibling
 # benchmarks (see agent_latency_benchmark.py).
@@ -1030,7 +1024,8 @@ def main(argv: list[str] | None = None) -> int:
         "--fixture",
         action="append",
         dest="fixtures",
-        help="Path to a WAV fixture (repeatable). Defaults to the three real recordings in tests/.",
+        required=True,
+        help="Path to a WAV fixture (repeatable, required -- no fixtures are bundled in this repo).",
     )
     parser.add_argument("--realtime-factor", type=float, default=1.0, help="Playback speed (1.0 = real time)")
     parser.add_argument(
