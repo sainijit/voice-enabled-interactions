@@ -1028,19 +1028,21 @@ CONVERSATION_LOG_DIR = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
-# VLM metrics logging (performance-tools' vlm_metrics_logger, vendored)
+# VLM metrics logging (performance-tools' vlm_metrics_logger, pip-installed)
 # ---------------------------------------------------------------------------
 # Emits one real start/end pair per completed voice turn -- last customer word
-# to first reply audio -- via kiosk_core.vlm_metrics_logger, the same plain-
-# text log format performance-tools' consolidate_multiple_run_of_metrics.py
-# already parses. On by default: this is a pure side-channel append-only log
-# write guarded by its own try/except (see audio_session._emit_vlm_metrics),
-# so a failure here can never affect a live customer turn.
+# to first reply audio -- via vlm_metrics_logger (installed straight from
+# performance-tools' git repo -- see requirements.txt -- rather than vendored
+# under kiosk_core), the same plain-text log format performance-tools'
+# consolidate_multiple_run_of_metrics.py already parses. On by default: this
+# is a pure side-channel append-only log write guarded by its own try/except
+# (see audio_session._emit_vlm_metrics), so a failure here can never affect a
+# live customer turn.
 VLM_METRICS_ENABLED = os.getenv(
     "KIOSK_CORE_VLM_METRICS_ENABLED", "true"
 ).lower() not in ("false", "0", "no")
 
-# Directory the vendored logger writes vlm_application_metrics_*.txt into.
+# Directory the logger writes vlm_application_metrics_*.txt into.
 # Vlm_metrics_logger itself reads this from CONTAINER_RESULTS_PATH (an
 # upstream-fixed env var name, not KIOSK_CORE_-prefixed -- it is the same
 # contract performance-tools' own scripts and order-accuracy/take-away use),

@@ -2091,7 +2091,10 @@ class BaseAudioSession:
         if t_start_mono is None or t_end_mono is None:
             return
         try:
-            from kiosk_core.vlm_metrics_logger import user_log_end_time, user_log_start_time
+            # Installed from performance-tools' own repo (see
+            # requirements.txt) as the top-level module "vlm_metrics_logger",
+            # not vendored under kiosk_core -- see config.py's comment.
+            from vlm_metrics_logger import user_log_end_time, user_log_start_time
 
             anchor_mono = time.monotonic()
             anchor_epoch_ms = time.time() * 1000
