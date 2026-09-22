@@ -885,15 +885,33 @@ def replay_fixture(
         # realtime_factor=1.0 (default) reproduces true real-time pacing;
         # >1.0 speeds pushes up (useful for fast smoke-testing, at the cost
         # of no longer matching a live customer's cadence).
+        #
+        # The sleep is deliberately NOT applied after the last chunk. A real
+        # browser session (see kiosk-ui's useVoiceSession.stop()) force-
+        # flushes whatever audio is buffered and calls /audio/end the
+        # instant the customer releases the push-to-talk button -- it never
+        # waits out the remainder of a chunkSeconds interval first. Sleeping
+        # after the final chunk here would instead charge up to a full
+        # push_chunk_seconds (0.5s default) of pure harness dead time to
+        # every turn that reaches this loop's end (i.e. every turn where the
+        # explicit end mark -- not the server's own silence-timeout shortcut
+        # -- is what closes the turn), inflating post_speech_gap_ms with
+        # nothing a live customer would ever experience. Requires
+        # look-ahead (buffering one chunk) since iter_wav_chunks is a plain
+        # generator with no "is this the last one" signal of its own.
         still_active = True
-        for wav_chunk, chunk_duration_s in iter_wav_chunks(fixture, push_chunk_seconds):
+        chunk_iter = iter_wav_chunks(fixture, push_chunk_seconds)
+        pending = next(chunk_iter, None)
+        while pending is not None:
+            wav_chunk, chunk_duration_s = pending
+            pending = next(chunk_iter, None)
             still_active = http_post_wav_chunk(f"{CORE_BASE_URL}/api/v1/sessions/{session_id}/audio", wav_chunk, timeout=30.0)
             if not still_active:
                 # Endpoint already fired and closed the session -- the rest
                 # of this fixture is just trailing silence padding anyway,
                 # so there is nothing left worth pushing.
                 break
-            if realtime_factor > 0:
+            if pending is not None and realtime_factor > 0:
                 time.sleep(chunk_duration_s / realtime_factor)
 
         # explicit_end_mark: tell kiosk-core the turn is over the instant

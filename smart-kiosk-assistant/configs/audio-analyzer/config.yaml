@@ -7,85 +7,72 @@ app:
 models:
   asr:
     provider: openvino # openai | openvino | whispercpp
-    name: whisper-small  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
+    name: distil-whisper/distil-small.en  # whisper-tiny | whisper-base | whisper-small | whisper-medium | whisper-large
                         # or a full HF repo id, e.g. distil-whisper/distil-small.en
-                        # REVERTED (2026-09-10) from distil-whisper/distil-small.en back to
-                        # whisper-small. Re-adopted distil-small.en+NPU this session to match
-                        # kiosk-voice-lab's ~115ms/call, but reproduced the documented
-                        # state-corruption bug twice more (once via shared singleton, once via a
-                        # dedicated preview/final instance-pool refactor mirroring the lab's
-                        # architecture — neither fixed it). A final isolated, controlled repro
-                        # (one shared og.WhisperPipeline instance, NPU, sequential 1s/4.46s/2s/
-                        # 1s/4.46s calls, no HTTP layer) confirmed: distil-small.en's output goes
-                        # stale/frozen (repeats the first call's text regardless of new input,
-                        # then decays further), while whisper-small on the identical
-                        # instance/device/sequence produces correct, input-appropriate output
-                        # every time. og.WhisperPipeline exposes no reset/reinit API
-                        # (generate/get_generation_config/set_generation_config/get_tokenizer
-                        # only), so there is no supported fix short of recreating the pipeline
-                        # per call. Root-caused to be model-specific to distil-small.en's
-                        # openvino_genai NPU execution path, not our code. whisper-small is the
-                        # only config confirmed bug-free on NPU; distil-small.en on GPU was the
-                        # one combination the original 2026-09-07 evaluation found bug-free, and
-                        # remains a possible future option at the cost of iGPU contention with
-                        # LLM/TTS.
-    device: CPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
-                # Default kept CPU on purpose: NPU requires ACCEL_MOUNT_PATH to
-                # be pointed at the host's real NPU device node, and
-                # .env.example's safe/portable default for that is /dev/null
-                # (NPU disabled) since not every deployment host has one. A
-                # mounted-config default of NPU here, paired with a /dev/null
-                # host mount, made ASR fail to start on any CPU/GPU-only host
-                # following the documented default .env. NPU is fully
-                # supported and measured competitive (see below) — opt in by
-                # setting ASR_DEVICE=NPU and ACCEL_MOUNT_PATH=/dev/accel/accel0
-                # together in .env; docker-compose.yml's
-                # AUDIO_ANALYZER__MODELS__ASR__DEVICE override matches this
-                # same CPU default so the two never disagree.
+                        # CHANGED (2026-09-22, v2v latency work): final/persisted-commit pool
+                        # switched from whisper-small back to distil-small.en, on GPU (not NPU
+                        # -- see the device comment below for why NPU remains off-limits for this
+                        # model). Root cause: final_flush_wait_ms (the ASR round-trip on the
+                        # LAST chunk, which _finalize_run blocks on before a turn is considered
+                        # started) was assumed "not latency-sensitive since it overlaps the
+                        # silence wait either way" -- true on the natural silence-timeout path,
+                        # but FALSE on the explicit end-of-turn path (push-to-talk: customer
+                        # releases the mic button, kiosk-ui's useVoiceSession.stop() force-flushes
+                        # and calls /audio/end immediately, with no silence wait to hide behind).
+                        # Measured: whisper-small/CPU final commits were adding ~500-570ms of pure
+                        # unhidden customer-facing latency on that path, right when the v2v
+                        # benchmark's turns most resembled push-to-talk. distil-small.en/GPU (the
+                        # exact model+device combination already validated corruption-free below,
+                        # previously used for the preview pool only) measures ~40-60ms/call once
+                        # warm, matching kiosk-voice-lab's reported figures for this model.
+                        #
+                        # Trade-offs accepted deliberately, not silently:
+                        #   - English-only checkpoint. Fine for this deployment
+                        #     (KIOSK_CORE_ASR_LANGUAGE defaults to "en" already -- see .env).
+                        #     Revert to whisper-small immediately if multilingual support is ever
+                        #     needed.
+                        #   - Slightly lower raw transcription accuracy than whisper-small
+                        #     (typical of a distilled model) -- not unproven, though: this exact
+                        #     checkpoint was already trusted to judge sentence-completeness for
+                        #     the endpoint shortcut before this change.
+                        #   - GPU is shared with ovms-llm/text-to-speech. The preview pool has run
+                        #     on this GPU config in production without contention regressions
+                        #     surfacing in agent_ttft_ms/tts_ms; the final pool now adds one more
+                        #     GPU consumer per turn (previously CPU-only) -- watch those metrics.
+                        #
+                        # Revert: set both name back to whisper-small and device back to CPU (or
+                        # NPU) below, and delete this comment block. See the (now redundant)
+                        # preview: override history further down for the model's full
+                        # NPU-corruption/GPU-validation backstory.
+    device: GPU # openai: CPU only; openvino: CPU | GPU | NPU; whispercpp: CPU only
+                # CHANGED (2026-09-22) from CPU to GPU alongside the name change above -- see
+                # that comment. distil-small.en corrupts on THIS NPU + openvino_genai stack
+                # (confirmed twice independently -- output goes stale/frozen, repeating the
+                # first call's text regardless of new input); GPU is the only device this
+                # checkpoint is confirmed bug-free on (isolated controlled test: one shared
+                # og.WhisperPipeline(device="GPU") instance, sequential varied-length calls,
+                # zero staleness across every call). Do not move this to NPU.
                 #
-                # Measurements from when NPU was the default here: an initial
-                # A/B (NPU ~950-1,300ms vs an earlier GPU baseline of 660ms)
-                # looked like a regression, but that comparison was confounded:
-                # diarization was silently still enabled
-                # (AUDIO_ANALYZER__MODELS__ASR__DIARIZATION env override defaults
-                # to true regardless of this file) and the GPU baseline used a
-                # different benchmark clip. A controlled re-test — same clip,
-                # same warm container, diarization forced off for the isolation
-                # test only — showed NPU (542-557ms) and GPU (533-584ms)
-                # effectively tied for whisper-small on this hardware. NPU
-                # remains attractive because it frees the iGPU for
-                # ovms-llm/text-to-speech, matching the reference prototype's
-                # (kiosk-voice-handoff.pdf) rationale for putting ASR on NPU
-                # even though it uses a smaller distilled model (distil-whisper
-                # distil-small.en) that we don't have exported offline.
+                # whisper-small (the PREVIOUS final-pool model) was measured competitive across
+                # CPU/NPU/GPU (~530-580ms all three) -- device alone was never the lever here,
+                # only switching to the distilled checkpoint was. If reverting to whisper-small,
+                # CPU is still the safe default device (see the historical NPU-availability
+                # rationale that used to live in this comment, preserved below for context):
+                # NPU requires ACCEL_MOUNT_PATH pointed at a real host NPU device node, and
+                # .env.example's safe/portable default for that is /dev/null (NPU disabled).
     weight_format: int8 # OpenVINO: int8 | fp16 | null; int8 for distil-small.en-int8 OV model
     temperature: 0.0
-    # Preview-pool override (2026-09-10, endpoint-latency work): the preview
-    # pool (append_to_session=False, non-destructive scratch calls that feed
-    # the adaptive-flush / completeness-shortcut endpoint check) is on the
-    # critical path for how EARLY the endpoint can commit a turn -- see
-    # docs/performance-improvements-2026-09.md and
-    # BaseAudioSession._endpoint_transcript_stable. whisper-small/NPU's
-    # ~500-1,100ms round-trip was measured gating the shortcut to firing at
-    # ~0.9-1.0s of silence instead of its ~0.35s theoretical best case.
-    #
-    # distil-whisper/distil-small.en corrupts on THIS NPU + openvino_genai
-    # stack (see the main models.asr.name comment above -- do not move it back
-    # to NPU). On GPU it does not: an isolated controlled test (one shared
-    # og.WhisperPipeline(device="GPU") instance, sequential 1s/4.46s/2s/1s/
-    # 4.46s/2s calls) produced correct, input-length-appropriate transcripts
-    # every call (no staleness/corruption), at ~40-60ms/call after a one-time
-    # ~4.5s cold construct -- matching kiosk-voice-lab's reported figures for
-    # this model. This override runs ONLY the preview pool on
-    # distil-small.en/GPU; the final, persisted commit stays on
-    # whisper-small/NPU above (proven zero-corruption, and not as
-    # latency-sensitive since it overlaps the silence wait either way).
-    #
-    # Known risk carried forward: GPU is shared with rag-service's LLM and
-    # text-to-speech -- this override has only been validated in isolation so
-    # far, not yet benchmarked under concurrent LLM/TTS GPU load. Revert by
-    # deleting this `preview:` block (falls back to using the main asr
-    # config for both pools) if contention regresses agent_ttft_ms/tts_ms.
+    # Preview-pool override (2026-09-10, endpoint-latency work) -- NOW REDUNDANT
+    # (2026-09-22): the main models.asr config above was switched to the exact
+    # same distil-small.en/GPU combination this preview override already used,
+    # for the final/persisted-commit pool too (see the name/device comments
+    # above for why). Kept here, unchanged, so pipeline.py's preview-vs-final
+    # branch continues to resolve to identical config either way -- removing
+    # it entirely would be equivalent, just a larger diff. If the two pools
+    # ever need to diverge again (e.g. reverting only the final pool back to
+    # whisper-small while keeping the preview pool fast), un-redundant this by
+    # changing ONLY the main config above and leaving this block as the
+    # preview-specific override again.
     preview:
       name: distil-whisper/distil-small.en
       device: GPU

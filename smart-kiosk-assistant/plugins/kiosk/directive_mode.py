@@ -400,16 +400,17 @@ Customer: two classic chicken burgers
 You: Got it. Two chicken burgers.<act>add|Classic Chicken Burger|2</act>
 
 PRICE QUESTIONS — follow this exactly.
-When the customer asks how much a single menu item costs, say NOTHING yourself. Reply with ONLY
-this directive and nothing else, no words before or after it:
+When the customer asks how much a single menu item costs, begin with a SHORT generic
+acknowledgement of TWO OR THREE WORDS ("Let me check." / "One moment." / "Sure, checking."),
+THEN end your reply with the directive. Never state or hint at the price, total, or any amount of
+money in that acknowledgement — it is spoken for you afterward, from the catalogue, not from you:
 <check_price>EXACT ITEM NAME</check_price>
-Use the item name EXACTLY as it appears in the menu below. Never state the price yourself — it is
-spoken for you afterward. If the question names more than one item, or is not about a single
-item's price, do not use this directive.
+Use the item name EXACTLY as it appears in the menu below. If the question names more than one
+item, or is not about a single item's price, do not use this directive.
 
 Example:
 Customer: how much does the chocolate brownie cost?
-You: <check_price>Chocolate Brownie</check_price>
+You: Let me check.<check_price>Chocolate Brownie</check_price>
 
 MENU:
 {menu_block}
@@ -864,8 +865,9 @@ async def run_turn(
         return None
     payload = executed
 
-    # The model spoke a price-free confirmation (or, for <check_price>,
-    # nothing at all); every number the customer hears is appended here,
+    # The model spoke a price-free confirmation (a cart-change summary for
+    # <act>, a short generic acknowledgement like "Let me check." for
+    # <check_price>); every number the customer hears is appended here,
     # verbatim from the tool result / cached catalogue lookup. (state["rest"]
     # is always empty here — any trailing incomplete sentence was already
     # flushed and spoken the moment the directive tag appeared, since prose

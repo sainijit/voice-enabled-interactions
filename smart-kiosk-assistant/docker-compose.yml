@@ -287,11 +287,12 @@ services:
       # where no HF_TOKEN/model-licence acceptance is available) also skip that
       # preload, instead of crashing with an unauthenticated 403 download.
       AUDIO_ANALYZER__MODELS__ASR__DIARIZATION: ${KIOSK_CORE_DIARIZATION_ENABLED:-true}
-      # ASR inference device override — config.yaml pins "CPU" by default
-      # (see its models.asr.device comment for why NPU is opt-in only). Set
-      # ASR_DEVICE=NPU (and ACCEL_MOUNT_PATH to the real device node) in
-      # .env to compare against CPU/GPU without editing the mounted config
-      # file.
+      # ASR inference device override — config.yaml now pins "GPU" by default
+      # (see its models.asr.device comment: 2026-09-22 switch to
+      # distil-small.en/GPU for the final-commit pool too). Set ASR_DEVICE=CPU
+      # here to compare against GPU without editing the mounted config file.
+      # Do NOT set ASR_DEVICE=NPU while models.asr.name is distil-small.en —
+      # that combination is confirmed to corrupt output on this stack.
       AUDIO_ANALYZER__MODELS__ASR__DEVICE: ${ASR_DEVICE:-CPU}
     volumes:
       # Kiosk-pinned config (see ./configs/README.md) — mounted as the
