@@ -1366,10 +1366,50 @@ class BaseAudioSession:
             and not self._chunk_has_speech
             and not self._unconfirmed_speech_pending
         )
-        if chunk_frames and self._speech_started and not skip_final_flush:
+        if (
+            chunk_frames
+            and self._speech_started
+            and self._chunk_has_speech
+            and not skip_final_flush
+        ):
+            # Genuine new speech was captured since the last flush (not just
+            # trailing silence) — this chunk must actually be sent.
             self._flush_queue.put(
                 (self._trim_trailing_silence(chunk_frames, silence_run_seconds), True)
             )
+        elif (
+            self._streaming_active
+            and self._speech_started
+            and self._unconfirmed_speech_pending
+            and not skip_final_flush
+        ):
+            # Nothing NEW to send — chunk_frames (if any) is pure trailing
+            # silence, not real speech (see the _chunk_has_speech gate on the
+            # branch above). This covers two cases: chunk_frames is empty
+            # because every captured frame was already swept into an earlier
+            # non-final flush (typically the adaptive-pause flush firing on
+            # a short utterance that finishes well inside one pause window),
+            # or chunk_frames holds only the trailing silence the endpoint
+            # wait accumulated afterward. Either way, that earlier flush's
+            # own commit() was fire-and-forget (wait=False), so the
+            # analyzer's real transcript for this utterance is still
+            # in-flight and must be retrieved somehow.
+            #
+            # Pass EMPTY frames rather than the leftover silence bytes: see
+            # _flush_chunk's streaming branch, which peeks the analyzer's
+            # already-cached snapshot before committing anything. A
+            # content-free commit can never produce a NEW completion event,
+            # so if we instead queued the real (silent) chunk_frames here,
+            # the resulting commit(wait=True) would race the earlier
+            # commit's async completion arriving RIGHT before this one's own
+            # baseline is captured — and lose that race just as often as it
+            # wins, burning the full
+            # DEFAULT_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS window for
+            # nothing when it does. Measured live: a turn's real transcript
+            # landed <25ms before this exact wait began, and the turn still
+            # paid the full 2.5s. Empty frames make _flush_chunk skip
+            # straight to the already-cached result instead.
+            self._flush_queue.put(([], True))
         elif chunk_frames and self._speech_started:
             self._final_flush_skipped = True
             logger.info(
@@ -2007,6 +2047,7 @@ class BaseAudioSession:
             ),
         )
         pipeline_store.record(trace)
+        self._emit_vlm_metrics(t_last_word, self._t_first_audio or t_first)
         logger.info(
             "[PIPELINE] turn=%s wall=%.0fms asr=%.0fms(%d) ttft=%.0fms tts=%.0fms "
             "llm=%.0fms(%d) agent_stream=%.0fms mcp=%.0fms(%d) retrieval=%s/%.0fms tools=%s",
@@ -2025,6 +2066,45 @@ class BaseAudioSession:
             retrieval_ms or 0,
             tool_calls,
         )
+
+    def _emit_vlm_metrics(self, t_start_mono: float | None, t_end_mono: float | None) -> None:
+        """Emit a real start/end pair for this turn to vlm_metrics_logger.
+
+        ``t_start_mono``/``t_end_mono`` are ``time.monotonic()`` marks (the
+        same customer's-last-word -> first-audio anchors used for
+        ``WallTimes.voice_to_voice_ms``), NOT epoch time -- vlm_metrics_logger
+        writes epoch milliseconds (``time.time()``), a different clock. An
+        anchor pair (one ``time.monotonic()`` + one ``time.time()`` reading,
+        taken back-to-back right here) converts each mark to real epoch ms
+        with sub-millisecond error, so this stamps the ACTUAL instants the
+        turn happened at -- unlike tests/benchmarks/
+        v2v_scripted_conversation_benchmark.py's emit_vlm_metrics(), which
+        only had voice_to_voice_ms after the fact over HTTP and had to
+        synthesize a (end=now, start=end-duration) pair instead.
+
+        Best-effort and silent on failure: this is a side-channel metrics
+        write, and must never be able to break a live customer turn (missing
+        results dir, submodule not vendored correctly, disk full, etc.).
+        """
+        if not config.VLM_METRICS_ENABLED:
+            return
+        if t_start_mono is None or t_end_mono is None:
+            return
+        try:
+            from kiosk_core.vlm_metrics_logger import user_log_end_time, user_log_start_time
+
+            anchor_mono = time.monotonic()
+            anchor_epoch_ms = time.time() * 1000
+            start_epoch_ms = anchor_epoch_ms - (anchor_mono - t_start_mono) * 1000
+            end_epoch_ms = anchor_epoch_ms - (anchor_mono - t_end_mono) * 1000
+            user_log_start_time(
+                start_epoch_ms, config.VLM_METRICS_USECASE_ENV_VAR, unique_id=self.session_id
+            )
+            user_log_end_time(
+                end_epoch_ms, config.VLM_METRICS_USECASE_ENV_VAR, unique_id=self.session_id
+            )
+        except Exception:  # noqa: BLE001 - metrics logging must never break a live turn
+            logger.debug("[PIPELINE] vlm_metrics_logger emit failed", exc_info=True)
 
     @staticmethod
     def _split_first_phrase(sentence: str) -> list[str]:
@@ -2650,7 +2730,14 @@ class BaseAudioSession:
                 )
 
     def _flush_chunk(self, frames: list[np.ndarray], is_final: bool = True) -> None:
-        audio = np.concatenate(frames, axis=0)
+        # Streaming mode's final commit may legitimately carry NO new frames:
+        # every real audio byte was already sent via send_frame() as it was
+        # captured, and an earlier non-final flush can have already swept the
+        # whole utterance into one fire-and-forget commit (see the empty-
+        # chunk_frames final-commit call site in _process_frame_stream). This
+        # call's only job then is to block for that already-in-flight
+        # analyzer result — there is nothing left to concatenate.
+        audio = np.concatenate(frames, axis=0) if frames else np.zeros(0, dtype=np.int16)
         temp_path: str | None = None
         if not self._streaming_active:
             temp_path = self._write_temp_wav(audio)
@@ -2687,11 +2774,28 @@ class BaseAudioSession:
                 # never blocks the flush worker; for the final chunk it
                 # blocks up to a bounded timeout for a fresh snapshot, then
                 # falls back to whatever is already available regardless.
-                self.realtime_client.commit(
-                    wait=is_final,
-                    timeout=config.DEFAULT_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS if is_final else 0.0,
-                )
-                payload = self.realtime_client.latest_snapshot()
+                #
+                # Peek the cache BEFORE committing when this call carries no
+                # new frames (see the commit-only final-flush call site in
+                # _process_frame_stream): if an earlier flush's fire-and-
+                # forget commit already landed its real completion, sending
+                # yet another commit here would only race that arrival
+                # against a FRESH DEFAULT_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS
+                # window -- a content-free commit produces no NEW completion
+                # event, so a lost race can only time out, not resolve early.
+                # Measured live: the real transcript landed <25ms before this
+                # exact wait began and the turn still paid the full 2.5s.
+                # A chunk WITH new frames must still always commit and wait
+                # -- only a content-free commit is safe to skip this way.
+                _cached = self.realtime_client.latest_snapshot()
+                if not frames and (_cached.get("text") or _cached.get("segments")):
+                    payload = _cached
+                else:
+                    self.realtime_client.commit(
+                        wait=is_final,
+                        timeout=config.DEFAULT_REALTIME_FINAL_COMMIT_TIMEOUT_SECONDS if is_final else 0.0,
+                    )
+                    payload = self.realtime_client.latest_snapshot()
             else:
                 payload = self.client.transcribe_file(
                     temp_path,

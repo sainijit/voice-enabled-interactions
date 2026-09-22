@@ -614,7 +614,37 @@ DEFAULT_ENDPOINT_MIN_WORDS = int(os.getenv("KIOSK_CORE_ENDPOINT_MIN_WORDS", "3")
 # wouldn't have — if the transcript is still changing, the full
 # silence_timeout_seconds wait is the fallback, same fail-closed posture as
 # _looks_complete's own empty-transcript case.
-DEFAULT_ENDPOINT_STABLE_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_STABLE_SECONDS", "0.2"))
+#
+# Lowered from 0.2 to 0 (2026-09) after measuring the shortcut's actual firing
+# rate in streaming mode: the two-confirmation design needs TWO preview round
+# trips (each ~90-220ms, see RealtimeAnalyzerClient) to land inside the
+# ~0.15-1.1s shortcut window, which the quiet-mode preview cadence
+# (DEFAULT_REALTIME_PREVIEW_COMMIT_QUIET_SECONDS=0.15s) only barely allows —
+# measured firing rate 1/4 turns (25%) in a live 4-turn conversation. 0
+# (trust the FIRST snapshot that reads complete, per this constant's own
+# single-confirmation mode above) raised that to a consistent 3-4/4 turns
+# (75-100%) across repeated full-conversation runs (real endpoint detection)
+# AND 7/10 turns across 5 repeats of tests/benchmarks/v2v_fixture_benchmark.py
+# (real recorded speech, not synthesised) — every transcript in all of these
+# runs stayed accurate/untruncated, so the truncated-mid-utterance risk this
+# constant guards against was not observed in practice for this pipeline's
+# ASR latency profile. Re-validate with the same fixture benchmark (checking
+# transcripts for truncation/hallucination, not just the firing rate) before
+# raising this back above 0.
+#
+# Trade-off observed at 0, NOT eliminated: firing this early sometimes beats
+# DEFAULT_ADAPTIVE_FLUSH_PAUSE_SECONDS's own real (destructive) commit to the
+# punch, so that commit hasn't cleared the buffer yet and the final flush has
+# to transcribe the whole utterance instead of a short tail — measured
+# final_flush_wait_ms ~420-560ms on turns where endpoint_wait_ms landed at the
+# ~200ms floor, vs. ~10-70ms on turns where it landed >=600ms (adaptive commit
+# already won). Net effect across 3 full-conversation runs was still a clear
+# win end to end (endpoint_wait_ms + final_flush_wait_ms combined dropped
+# from ~1200-1700ms/turn to ~600-750ms/turn on the turns that fire), but this
+# is why total v2v didn't fall as far as the raw firing-rate jump alone would
+# suggest — see docs/performance-improvements-2026-09.md before tuning either
+# constant further.
+DEFAULT_ENDPOINT_STABLE_SECONDS = float(os.getenv("KIOSK_CORE_ENDPOINT_STABLE_SECONDS", "0"))
 DEFAULT_MAX_SESSION_SECONDS = float(os.getenv("KIOSK_CORE_MAX_SESSION_SECONDS", "20.0"))
 DEFAULT_SILENCE_THRESHOLD = int(os.getenv("KIOSK_CORE_SILENCE_THRESHOLD", "900"))
 
@@ -996,3 +1026,32 @@ CONVERSATION_LOG_DIR = os.getenv(
     "KIOSK_CORE_CONVERSATION_LOG_DIR",
     "./conversations",
 )
+
+# ---------------------------------------------------------------------------
+# VLM metrics logging (performance-tools' vlm_metrics_logger, vendored)
+# ---------------------------------------------------------------------------
+# Emits one real start/end pair per completed voice turn -- last customer word
+# to first reply audio -- via kiosk_core.vlm_metrics_logger, the same plain-
+# text log format performance-tools' consolidate_multiple_run_of_metrics.py
+# already parses. On by default: this is a pure side-channel append-only log
+# write guarded by its own try/except (see audio_session._emit_vlm_metrics),
+# so a failure here can never affect a live customer turn.
+VLM_METRICS_ENABLED = os.getenv(
+    "KIOSK_CORE_VLM_METRICS_ENABLED", "true"
+).lower() not in ("false", "0", "no")
+
+# Directory the vendored logger writes vlm_application_metrics_*.txt into.
+# Vlm_metrics_logger itself reads this from CONTAINER_RESULTS_PATH (an
+# upstream-fixed env var name, not KIOSK_CORE_-prefixed -- it is the same
+# contract performance-tools' own scripts and order-accuracy/take-away use),
+# so this is set at process env level (docker-compose/.env), not read here.
+# Documented alongside the other flag purely so both live in one place.
+VLM_METRICS_RESULTS_DIR = os.getenv("CONTAINER_RESULTS_PATH", "./results")
+
+# Env var NAME (not value) vlm_metrics_logger looks up via os.getenv() to
+# populate the logged "application" field -- matches the label the benchmark
+# harness already used (tests/benchmarks/v2v_scripted_conversation_benchmark.py
+# VLM_USECASE_ENV_VAR), so turns emitted live by kiosk-core and turns
+# previously synthesized by the harness land under the same "application"
+# value and consolidate identically.
+VLM_METRICS_USECASE_ENV_VAR = "USECASE_V2V"
