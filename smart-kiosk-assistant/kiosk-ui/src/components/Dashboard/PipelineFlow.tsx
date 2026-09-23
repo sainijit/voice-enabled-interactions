@@ -8,6 +8,15 @@
  * Wall-clock E2E is measured (not summed), so TTS overlap is handled correctly.
  * Retrieval stage shows "—" when not invoked this turn (ordering turns skip it).
  *
+ * Per-stage chip values reflect the v2v-latency-optimisation work's own
+ * vocabulary (see benchmark-vocabolary.txt / v2v_scripted_conversation_benchmark.py):
+ *   ASR = real compute latency, last spoken word → transcript ready
+ *         (asr.last_word_to_transcript_ms), NOT the "all chunks summed" total.
+ *   LLM = time to first token (TTFT), agent-start → first reply token/sentence
+ *         (agent.ttft_ms), NOT cumulative model time across every round-trip.
+ *   TTS = time to first audio, i.e. the TTS-only slice of
+ *         wall.time_to_first_audio_ms remaining after the LLM TTFT above.
+ *
  * Color coding  CPU=Blue  GPU=Green  NPU=Purple
  * Stage colors: ASR=Orange  Retrieval=Yellow  LLM=Cyan  TTS=Pink
  */
@@ -65,12 +74,12 @@ const STAGES: StageConfig[] = [
 ];
 
 interface LatencyMap {
-  asr: number | null;
+  asr: number | null;                // genuine ASR compute latency (last word -> transcript ready)
   retrieval: number | null;         // null when not invoked this turn
-  llm: number | null;               // genuine cumulative LLM time this turn
+  llm: number | null;               // LLM time to first token (TTFT) — on the v2v critical path
   llmCalls: number;                 // number of LLM round-trips this turn
   agentOverhead: number | null;     // agent round-trip minus LLM time (tools + framework)
-  tts: number | null;
+  tts: number | null;               // TTS time to first audio (portion of ttfa after LLM TTFT)
   retrievalInvoked: boolean;
 }
 
@@ -78,17 +87,30 @@ function extractLatencies(kpis: KpiBundle): LatencyMap {
   const trace = kpis.pipeline as PipelineTurnTrace | null | undefined;
 
   if (trace) {
+    const ttft = trace.agent?.ttft_ms ?? null;
+    const ttfa = trace.wall?.time_to_first_audio_ms ?? null;
     return {
-      asr:              trace.asr?.ms ?? null,
+      // Real ASR compute latency on the critical path (last spoken word ->
+      // transcript ready), NOT the "all chunks summed" total -- matches the
+      // ~180-220ms target tracked during the v2v-latency work. Falls back to
+      // the cumulative figure only when the analyzer didn't report it.
+      asr:              trace.asr?.last_word_to_transcript_ms ?? trace.asr?.ms ?? null,
       retrieval:        trace.agent?.retrieval?.invoked ? (trace.agent.retrieval.ms ?? null) : null,
-      // Prefer genuine LLM time. Fall back to the agent round-trip only when
-      // the service did not report it (older rag-service builds).
-      llm:              trace.agent?.llm?.ms ?? trace.agent?.ttft_ms ?? null,
+      // LLM time to first token (agent-start -> first reply token/sentence):
+      // the actual customer-felt LLM latency on the v2v path, not the
+      // cumulative model time across every round-trip in the turn.
+      llm:              ttft,
       llmCalls:         trace.agent?.llm?.calls ?? 0,
-      agentOverhead:    (trace.agent?.llm?.ms != null && trace.agent?.ttft_ms != null)
-                          ? Math.max(0, trace.agent.ttft_ms - trace.agent.llm.ms)
+      agentOverhead:    (trace.agent?.llm?.ms != null && ttft != null)
+                          ? Math.max(0, ttft - trace.agent.llm.ms)
                           : null,
-      tts:              trace.tts?.ms ?? null,
+      // TTS time to first audio: the TTS-only slice of time_to_first_audio_ms,
+      // i.e. ttfa minus the LLM TTFT already counted above -- NOT the
+      // cumulative synth time for every segment in the reply (that overlaps
+      // playback and isn't on the critical path to the first sound out).
+      tts:              (ttfa != null && ttft != null)
+                          ? Math.max(0, ttfa - ttft)
+                          : trace.tts?.ms ?? null,
       retrievalInvoked: trace.agent?.retrieval?.invoked ?? false,
     };
   }
@@ -299,13 +321,18 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
                 `}
                 style={isActive ? { boxShadow: `0 0 16px 2px ${stage.glowColor}` } : undefined}
                 title={stage.id === 'retrieval' && !invoked ? 'Not invoked this turn (ordering path)' :
-                       stage.id === 'llm'
-                         ? (lats.llmCalls > 0
-                             ? `Cumulative LLM time across ${lats.llmCalls} round-trip(s)`
-                               + (lats.agentOverhead != null
-                                   ? ` · +${Math.round(lats.agentOverhead)} ms agent/tool overhead`
-                                   : '')
-                             : 'Agent round-trip (LLM time not reported)')
+                       stage.id === 'asr'
+                         ? 'ASR latency — last spoken word to transcript ready (excludes the endpoint silence wait)'
+                       : stage.id === 'llm'
+                         ? 'LLM time to first token (TTFT) — agent-start to first reply token/sentence'
+                           + (lats.llmCalls > 0
+                               ? ` · cumulative model time across ${lats.llmCalls} round-trip(s)`
+                                 + (lats.agentOverhead != null
+                                     ? ` · +${Math.round(lats.agentOverhead)} ms agent/tool overhead`
+                                     : '')
+                               : '')
+                       : stage.id === 'tts'
+                         ? 'TTS time to first audio — first segment synth + WAV write, after the LLM TTFT'
                          : undefined}
               >
                 {/* Device badge top-right */}
@@ -368,55 +395,18 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
         </div>
       </div>
 
-      {/* LLM label clarification when turn trace is available */}
+      {/* Stage-metric clarification when turn trace is available */}
       {trace && (
         <p className="text-[9px] text-gray-400 text-right">
+          ASR = last word → transcript ready · LLM = time to first token (TTFT)
           {lats.llmCalls > 0
-            ? `LLM = cumulative model time (${lats.llmCalls} call${lats.llmCalls > 1 ? 's' : ''})`
-            : 'LLM = agent round-trip'}
-          {lats.agentOverhead != null
-            ? ` · agent/tool overhead ${Math.round(lats.agentOverhead)} ms`
+            ? ` (${lats.llmCalls} model call${lats.llmCalls > 1 ? 's' : ''}`
+              + (lats.agentOverhead != null ? `, +${Math.round(lats.agentOverhead)} ms agent/tool overhead)` : ')')
             : ''}
-          {' · E2E = measured wall-clock, capture → last audio (TTS overlaps LLM)'}
+          {' · TTS = time to first audio · E2E = measured wall-clock, capture → last audio (TTS overlaps LLM)'}
         </p>
       )}
 
-      {/* Per-request voice-to-voice history */}
-      {recentTurns.length > 0 && (
-        <div className="pt-2 border-t border-kiosk-border">
-          <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            Voice-to-Voice per Turn
-          </h3>
-          <table className="w-full text-[10px] tabular-nums">
-            <thead>
-              <tr className="text-gray-400">
-                <th className="text-left font-medium">#</th>
-                <th className="text-right font-medium" title="Last word → first sound out">V2V</th>
-                <th className="text-right font-medium" title="Last word → first audio carrying the answer">
-                  V2V info
-                </th>
-                <th className="text-right font-medium" title="Trailing silence before the turn committed">
-                  Wait
-                </th>
-                <th className="text-right font-medium" title="Measured wall-clock, capture → last audio">
-                  E2E
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentTurns.map((t, idx) => (
-                <tr key={t.turn_id ?? idx} className={idx === 0 ? 'font-semibold text-intel-dark' : 'text-gray-500'}>
-                  <td className="text-left">{recentTurns.length - idx}</td>
-                  <td className="text-right">{latencyLabel(t.wall?.voice_to_voice_ms ?? null)}</td>
-                  <td className="text-right">{latencyLabel(t.wall?.voice_to_voice_informative_ms ?? null)}</td>
-                  <td className="text-right">{latencyLabel(t.wall?.endpoint_wait_ms ?? null)}</td>
-                  <td className="text-right">{latencyLabel(t.wall?.turn_total_ms ?? null)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }

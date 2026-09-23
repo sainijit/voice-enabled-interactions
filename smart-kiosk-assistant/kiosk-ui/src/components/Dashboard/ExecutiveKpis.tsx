@@ -1,11 +1,12 @@
 /**
- * ExecutiveKpis — four large KPI cards visible at all times on the dashboard.
+ * ExecutiveKpis — large KPI cards visible at all times on the dashboard.
  *
  * Cards:
- *   1. E2E Latency      (measured wall-clock round-trip for the last turn)
- *   2. ASR Speed        (speech recognition)
- *   3. LLM Latency      (cumulative model time for the turn)
- *   4. TTS Speed        (speech synthesis)
+ *   1. V2V Latency      (customer's last word → first sound out of the speaker)
+ *   2. E2E Latency      (measured wall-clock round-trip for the last turn)
+ *   3. ASR Speed        (speech recognition)
+ *   4. LLM Latency      (cumulative model time for the turn)
+ *   5. TTS Speed        (speech synthesis)
  *
  * Source of truth is the per-turn trace at kiosk-core /api/v1/pipeline/latest —
  * the SAME source as PipelineFlow, so the two panels always agree. Previously
@@ -15,7 +16,8 @@
  *
  * The global registers are still used, but only as a fallback before the first
  * turn has been recorded; that state is labelled so it is never mistaken for
- * a measured turn.
+ * a measured turn. V2V has no legacy register to fall back to (it only exists
+ * on the per-turn trace), so it simply reads "—" pre-first-turn.
  *
  * Designed for executive demos and trade-show large displays.
  * Cards glow subtly on update (animation: kpi-glow).
@@ -96,6 +98,9 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
   const trace = kpis.pipeline ?? null;
   const live = trace !== null;
 
+  // Customer's last word -> first sound out of the speaker. Has no legacy
+  // global-register fallback (only exists on the per-turn trace).
+  const v2vMs = live ? trace.wall.voice_to_voice_ms : null;
   const e2eMs = live ? trace.wall.turn_total_ms : null;
   const asrMs = live ? trace.asr.ms : num(ap.last_ms);
   const llmMs = live ? trace.agent.llm.ms : num(llm.last_ms);
@@ -119,7 +124,7 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
   const llmModel = tail((kpis.rag as Record<string, unknown>)?.llm_model);
   const ttsModel = tail(kpis.tts?.model);
 
-  const hasData = e2eMs !== null || asrMs !== null || llmMs !== null || ttsMs !== null;
+  const hasData = v2vMs !== null || e2eMs !== null || asrMs !== null || llmMs !== null || ttsMs !== null;
 
   return (
     <div className="space-y-2">
@@ -128,8 +133,20 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
         Performance KPIs
       </h2>
 
-      {/* 2 × 2 card grid */}
+      {/* Card grid — V2V leads as the customer-facing headline number */}
       <div className="grid grid-cols-2 gap-3">
+        {/* V2V Latency */}
+        <KpiCard
+          icon="🗣️"
+          title="V2V Latency"
+          value={ms(v2vMs)}
+          unit={msUnit(v2vMs)}
+          sub={`Last word → first sound out · ${sourceNote}`}
+          accentCls="border-purple-400/40"
+          valueCls="text-purple-700"
+          updated={v2vMs !== null}
+        />
+
         {/* E2E Latency */}
         <KpiCard
           icon="⚡"
