@@ -1410,7 +1410,7 @@ class BaseAudioSession:
             # paid the full 2.5s. Empty frames make _flush_chunk skip
             # straight to the already-cached result instead.
             self._flush_queue.put(([], True))
-        elif chunk_frames and self._speech_started:
+        elif chunk_frames and self._speech_started and skip_final_flush:
             self._final_flush_skipped = True
             logger.info(
                 "[CHUNK] session=%s | skipped empty final tail-chunk flush "
@@ -1418,6 +1418,21 @@ class BaseAudioSession:
                 "successful flush)",
                 self.session_id,
                 self._chunk_duration_seconds(chunk_frames),
+            )
+        elif chunk_frames and self._speech_started:
+            # Neither branch above matched (typically: non-realtime session,
+            # e.g. browser push-to-talk over POST or file-replay, so
+            # _streaming_active is False) and skip_final_flush is False —
+            # either DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED is off, or this
+            # chunk still carries unconfirmed speech. Restore the original,
+            # unconditional pre-skip-flag behavior: always send the final
+            # tail chunk, even if it turns out to be pure trailing silence.
+            # A prior refactor (see git history around
+            # config.DEFAULT_SKIP_EMPTY_FINAL_FLUSH_ENABLED) collapsed this
+            # into the "skip" branch above regardless of skip_final_flush,
+            # silently dropping every non-realtime session's final chunk.
+            self._flush_queue.put(
+                (self._trim_trailing_silence(chunk_frames, silence_run_seconds), True)
             )
 
         # Signal the worker to stop after draining everything queued so far,
