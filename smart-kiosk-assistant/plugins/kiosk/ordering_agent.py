@@ -3181,6 +3181,19 @@ class OrderingAgent:
                     if fn_call is not None and getattr(fn_call, "name", None):
                         tool_calls.append(fn_call.name)
                         logger.info("[AGENT] Tool invoked: %s", fn_call.name)
+                        # Any text accumulated so far in this turn was
+                        # necessarily generated BEFORE this tool call — the
+                        # model "thinking out loud" or asking a clarifying
+                        # question it is about to answer itself once the tool
+                        # result comes back (observed on compound/two-item
+                        # requests, e.g. "Would you like one Peri Peri Fries
+                        # and one Onion Rings?" immediately followed by "Got
+                        # it. ... total is now ₹357."). Speaking both glued
+                        # together with no separator produces a
+                        # self-contradicting reply. Only text generated after
+                        # the LAST tool call in the turn is the grounded final
+                        # answer, so discard everything collected up to now.
+                        reply_parts.clear()
                     if hasattr(part, "text") and part.text:
                         if is_partial:
                             if gate is not None:
