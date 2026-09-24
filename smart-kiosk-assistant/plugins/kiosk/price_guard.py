@@ -49,12 +49,15 @@ logger = logging.getLogger(__name__)
 # are included: a stale total restated from an earlier turn is exactly the
 # failure mode this guard exists to catch. ``remove_from_order`` is included
 # too — the MCP server returns an authoritative total for it just like the
-# other mutation tools (kiosk_core/ordering/mcp_server.py).
+# other mutation tools (kiosk_core/ordering/mcp_server.py). ``confirm_order``
+# (order-id variant of ``confirm_active_order``) also returns the order's
+# authoritative total and must be covered the same way.
 _TOTAL_TOOLS = frozenset(
     {
         "place_order",
         "update_order",
         "confirm_active_order",
+        "confirm_order",
         "get_current_order",
         "get_order",
         "remove_from_order",

@@ -250,6 +250,24 @@ if BENCHMARK_ENDPOINTS_ENABLED:
             request.transcription[:100],
         )
 
+        # OrderingAgentWithoutADK never implements the dry_run contract (see
+        # its chat() docstring): its order-mutation path calls
+        # directive_mode.run_turn(), which invokes place_order/
+        # remove_from_order/confirm_active_order with no dry_run flag at
+        # all. Letting speculative=true reach this agent would silently
+        # persist a real, unconfirmed order mutation instead of the no-op
+        # preview the AgentChatRequest contract promises. Reject rather than
+        # execute it for real.
+        if request.speculative:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "speculative=true is not supported on /chat-no-adk — "
+                    "OrderingAgentWithoutADK does not implement dry-run "
+                    "ordering tool calls. Use /chat for speculative turns."
+                ),
+            )
+
         try:
             from plugins.kiosk.ordering_agent_without_adk import get_ordering_agent_without_adk
 
