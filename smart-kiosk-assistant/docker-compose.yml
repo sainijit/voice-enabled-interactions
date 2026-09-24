@@ -105,6 +105,25 @@ services:
       # QUEUE_DEVICE=GPU|NPU in .env once the target platform supports it —
       # no rebuild required.
       QUEUE_SERVICE__MODEL__DEVICE: ${QUEUE_DEVICE:-CPU}
+      # Keep decoded frames in GPU (VA) memory through inference/tracking/
+      # watermark instead of downloading every frame to system RAM (see
+      # queue-config.yaml `model.va_memory` for the measured CPU cost).
+      # "auto" enables it whenever a /dev/dri render node exists and the
+      # device above isn't CPU — this INCLUDES NPU, which gains nothing
+      # from it (NPU has no VA integration; see that file's comment) but
+      # isn't actively harmed either. If reverting QUEUE_DEVICE back to
+      # NPU, also set QUEUE_VA_MEMORY=false to restore the original,
+      # measured-safe NPU behaviour.
+      QUEUE_SERVICE__MODEL__VA_MEMORY: ${QUEUE_VA_MEMORY:-auto}
+      # Run YOLO26 inference every Nth frame instead of every frame, to shed
+      # GPU cycles when the device above is GPU (shared with ovms-llm).
+      # Queue counting doesn't need per-frame granularity -- BYTE tracking
+      # (tracker: below) sustains identities across skipped frames. Default
+      # 1 (every frame) matches historical CPU/NPU behaviour; raise via
+      # QUEUE_INFERENCE_INTERVAL in .env if GPU contention regresses
+      # ovms-llm/audio-analyzer latency (see queue-config.yaml `model.
+      # inference_interval`).
+      QUEUE_SERVICE__MODEL__INFERENCE_INTERVAL: ${QUEUE_INFERENCE_INTERVAL:-1}
       NO_PROXY: "localhost,127.0.0.1,rtsp-streamer,queue-service"
       no_proxy: "localhost,127.0.0.1,rtsp-streamer,queue-service"
       ZE_ENABLE_ALT_DRIVERS: libze_intel_npu.so
