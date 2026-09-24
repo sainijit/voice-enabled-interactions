@@ -19,12 +19,15 @@ export async function startStreamSession(
   conversationId?: string,
   singleChunk = false,
 ): Promise<StartStreamResponse> {
-  // Push-to-talk sends the whole recording as one chunk on Stop, so the
-  // backend must not re-split it. Its chunk cap and silence endpoint are
-  // pushed beyond any realistic utterance, leaving the explicit end-of-stream
-  // signal as the only thing that ends the turn — which is exactly what the
-  // Stop button is. Hands-free conversation mode keeps the tuned values: it
-  // has no Stop button and relies on silence endpointing to end a turn.
+  // Push-to-talk uploads audio to the backend continuously in small slices
+  // (see flushChunk in useVoiceSession.ts) so the server's VAD/frame pipeline
+  // never backlogs, but it must still be transcribed as ONE uncut Whisper
+  // call over the whole utterance, not re-split at upload boundaries. So the
+  // backend's own chunk cap and silence endpoint are pushed beyond any
+  // realistic utterance, leaving the explicit end-of-stream signal (Stop) as
+  // the only thing that triggers ASR and ends the turn. Hands-free
+  // conversation mode keeps the tuned values: it has no Stop button and
+  // relies on silence endpointing to end a turn.
   const chunkSeconds = singleChunk
     ? tuning.singleChunkMaxSeconds
     : tuning.asrChunkSeconds;

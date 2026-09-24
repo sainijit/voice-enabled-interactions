@@ -393,17 +393,23 @@ export function useVoiceSession({ deviceId, enabled, onTurnComplete }: UseVoiceS
       worklet.port.onmessage = (ev: MessageEvent<Float32Array>) => {
         if (!recordingRef.current) return;
         framesRef.current.push(ev.data);
-        // Push-to-talk uploads nothing mid-utterance: the whole recording is
-        // sent as ONE chunk when Stop is pressed (see flushChunk(true) in
-        // stop()). Streaming it in 2.5s slices meant the backend re-split the
-        // audio at fixed boundaries and words straddling a cut were lost
-        // ("Aloo Tikki Burger" decoded as "and 2,000"). One uncut chunk gives
-        // Whisper the entire utterance and its full context.
+        // Both modes upload continuously in small tuning.chunkSeconds (0.5s)
+        // slices so the backend's per-frame VAD never falls behind while the
+        // customer is still talking — withholding audio until Stop meant the
+        // whole utterance's VAD/frame-processing had to run in one CPU burst
+        // right after Stop, inflating post_speech_gap_ms by hundreds of ms to
+        // over a second for longer utterances.
         //
-        // Hands-free conversation mode keeps streaming: it has no Stop button
-        // and depends on the backend's silence endpointing to end a turn, so
-        // withholding audio until "stop" would mean the turn never ends.
-        if (conversationModeRef.current) void flushChunk(false);
+        // This is safe for push-to-talk's Whisper-accuracy fix ("Aloo Tikki
+        // Burger" -> "and 2,000" from 2.5s re-split chunks): startStreamSession
+        // sets chunk_seconds/silence_timeout_seconds far beyond any realistic
+        // utterance and disables the adaptive pre-warm flush for single-chunk
+        // mode (see kioskApi.ts), so the backend only ever buffers these
+        // uploads — it does not call the analyzer until the explicit
+        // end-of-stream signal (Stop) is received, at which point the FULL,
+        // uncut utterance is transcribed in one Whisper call exactly as
+        // before. Only the upload cadence changed, not when ASR fires.
+        void flushChunk(false);
       };
 
       source.connect(worklet);
