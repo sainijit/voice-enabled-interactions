@@ -5,8 +5,9 @@
  *  🎤 → [ASR] → [Agent/LLM] → [TTS] → 🔊
  *
  * Latency data comes from the turn trace at kiosk-core /api/v1/pipeline/latest.
- * Wall-clock E2E is measured (not summed), so TTS overlap is handled correctly.
  * Retrieval stage shows "—" when not invoked this turn (ordering turns skip it).
+ * The E2E (wall-clock, capture → last audio) chip is retired as a headline
+ * metric — V2V / V2V p95 / Processing are the surfaced customer-facing clocks.
  *
  * Per-stage chip values reflect the v2v-latency-optimisation work's own
  * vocabulary (see benchmark-vocabolary.txt / v2v_scripted_conversation_benchmark.py):
@@ -197,8 +198,6 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
 
   const activeStage = activeStageFromPhase(phase);
 
-  // Use measured wall E2E from turn trace; never sum stages (avoids TTS overlap error)
-  const e2eMs = trace?.wall?.turn_total_ms ?? null;
   // Shared-vocabulary "Processing latency" (turn-end decision -> first sound
   // out of the speaker). Deliberately NOT time_to_first_audio_ms: the two
   // differ whenever work starts speculatively during the endpoint's
@@ -210,8 +209,9 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
   // diagnostics, just not surfaced here as a top-level chip.
   const processingMs = trace?.wall?.voice_to_voice_post_endpoint_ms ?? null;
   // Voice-to-voice is the customer-felt clock: last word spoken -> first sound
-  // out of the speaker. It is NOT derivable from e2eMs, because e2eMs starts at
-  // the endpoint decision and so excludes the trailing-silence wait.
+  // out of the speaker. It is NOT derivable from turn_total_ms (E2E, retired
+  // as a headline chip), because turn_total_ms starts at the endpoint
+  // decision and so excludes the trailing-silence wait.
   const v2vMs = trace?.wall?.voice_to_voice_ms ?? null;
   const v2vInformativeMs = trace?.wall?.voice_to_voice_informative_ms ?? null;
 
@@ -259,12 +259,6 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
             <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700 border border-green-200"
               title="Processing latency — turn-end decision to first sound out of the speaker (shared cross-team vocabulary term; voice_to_voice = endpointing delay + processing latency)">
               Processing {latencyLabel(processingMs)}
-            </span>
-          )}
-          {e2eMs !== null && (
-            <span className="rounded-full bg-intel-blue/10 px-2.5 py-0.5 text-[11px] font-semibold text-intel-blue"
-              title="Measured wall-clock E2E (not summed)">
-              E2E {latencyLabel(e2eMs)}
             </span>
           )}
         </div>
@@ -403,7 +397,7 @@ export function PipelineFlow({ kpis, phase }: PipelineFlowProps) {
             ? ` (${lats.llmCalls} model call${lats.llmCalls > 1 ? 's' : ''}`
               + (lats.agentOverhead != null ? `, +${Math.round(lats.agentOverhead)} ms agent/tool overhead)` : ')')
             : ''}
-          {' · TTS = time to first audio · E2E = measured wall-clock, capture → last audio (TTS overlaps LLM)'}
+          {' · TTS = time to first audio (TTS overlaps LLM)'}
         </p>
       )}
 

@@ -3,16 +3,16 @@
  *
  * Cards:
  *   1. V2V Latency      (customer's last word → first sound out of the speaker)
- *   2. E2E Latency      (measured wall-clock round-trip for the last turn)
- *   3. ASR Speed        (speech recognition)
- *   4. LLM Latency      (cumulative model time for the turn)
- *   5. TTS Speed        (speech synthesis)
+ *   2. ASR Speed        (speech recognition)
+ *   3. LLM Latency      (cumulative model time for the turn)
+ *   4. TTS Speed        (speech synthesis)
  *
  * Source of truth is the per-turn trace at kiosk-core /api/v1/pipeline/latest —
  * the SAME source as PipelineFlow, so the two panels always agree. Previously
  * this panel summed each service's global `last_ms` register, which is
- * last-call-wins, spans different turns, omitted agent/tool overhead, and
- * therefore produced a third, lower "E2E" number than the pipeline panel.
+ * last-call-wins, spans different turns, and omitted agent/tool overhead.
+ * The E2E card (measured wall-clock round-trip) is retired as a headline
+ * metric here and in PipelineFlow — V2V is the surfaced customer-facing clock.
  *
  * The global registers are still used, but only as a fallback before the first
  * turn has been recorded; that state is labelled so it is never mistaken for
@@ -101,7 +101,6 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
   // Customer's last word -> first sound out of the speaker. Has no legacy
   // global-register fallback (only exists on the per-turn trace).
   const v2vMs = live ? trace.wall.voice_to_voice_ms : null;
-  const e2eMs = live ? trace.wall.turn_total_ms : null;
   const asrMs = live ? trace.asr.ms : num(ap.last_ms);
   const llmMs = live ? trace.agent.llm.ms : num(llm.last_ms);
   const ttsMs = live ? trace.tts.ms : num(tp.last_ms);
@@ -111,8 +110,7 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
       : null
     : num(retr.last_ms);
 
-  const llmCalls = live ? trace.agent.llm.calls : 0;
-  const ttsSegments = live ? trace.tts.segments : 0;
+  const llmCalls = live ? trace.agent.llm.calls : 0;  const ttsSegments = live ? trace.tts.segments : 0;
   const sourceNote = live ? 'measured wall-clock, last turn' : 'awaiting first turn';
 
   // Build device sub-labels
@@ -123,8 +121,6 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
   const asrModel = tail(kpis.asr?.model);
   const llmModel = tail((kpis.rag as Record<string, unknown>)?.llm_model);
   const ttsModel = tail(kpis.tts?.model);
-
-  const hasData = v2vMs !== null || e2eMs !== null || asrMs !== null || llmMs !== null || ttsMs !== null;
 
   return (
     <div className="space-y-2">
@@ -145,18 +141,6 @@ export function ExecutiveKpis({ kpis }: ExecutiveKpisProps) {
           accentCls="border-purple-400/40"
           valueCls="text-purple-700"
           updated={v2vMs !== null}
-        />
-
-        {/* E2E Latency */}
-        <KpiCard
-          icon="⚡"
-          title="E2E Latency"
-          value={ms(e2eMs)}
-          unit={msUnit(e2eMs)}
-          sub={`Capture → last audio · ${sourceNote}`}
-          accentCls="border-intel-blue/40"
-          valueCls="text-intel-blue"
-          updated={hasData}
         />
 
         {/* ASR Speed */}
