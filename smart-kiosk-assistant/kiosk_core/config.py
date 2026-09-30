@@ -1009,6 +1009,45 @@ QUEUE_SERVICE_URL = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
+# QSR MCP integration (Central QSR Agent — retail-use-cases#100/#103)
+# ---------------------------------------------------------------------------
+# Exposes kiosk-core as an mcp_service_sdk service (describe + read tools +
+# gated act tool) on its own port, distinct from the ordering-agent's
+# internal /mcp mount (kiosk_core/ordering/mcp_server.py). This is the
+# surface the separate-machine Central QSR Agent talks to. Same enable-flag
+# convention as ORDERING_ENABLED/IDENTITY_ENABLED above.
+QSR_MCP_ENABLED = os.getenv("KIOSK_CORE_QSR_MCP_ENABLED", "true").lower() not in ("false", "0", "no")
+
+QSR_MCP_STORE_ID = os.getenv("KIOSK_CORE_QSR_MCP_STORE_ID", "store-001")
+
+QSR_MCP_TRANSPORT = os.getenv("KIOSK_CORE_QSR_MCP_TRANSPORT", "streamable-http")
+QSR_MCP_HOST = os.getenv("KIOSK_CORE_QSR_MCP_HOST", "0.0.0.0")
+# Distinct from the ordering feature's FastAPI-mounted /mcp path and from
+# Order Accuracy's dine-in (8011) / take-away (8010) MCP ports.
+QSR_MCP_PORT = int(os.getenv("KIOSK_CORE_QSR_MCP_PORT", "8014"))
+
+QSR_MCP_LOG_BACKEND = os.getenv("KIOSK_CORE_QSR_MCP_LOG_BACKEND", "sqlite")  # sqlite | jsonl | memory
+QSR_MCP_LOG_PATH = os.getenv(
+    "KIOSK_CORE_QSR_MCP_LOG_PATH",
+    "./qsr_mcp_events.db",
+)
+
+# Optional webhook push (agent inbox); off by default, matching Order
+# Accuracy's default-safe/benchmark-clean convention.
+QSR_MCP_WEBHOOK_URL = os.getenv("KIOSK_CORE_QSR_MCP_WEBHOOK_URL")
+
+# Durable file backing the kiosk menu-board mode toggled by the
+# set_board_mode act tool (kiosk_core/qsr_mcp/board_state.py).
+QSR_MCP_BOARD_STATE_PATH = os.getenv(
+    "KIOSK_CORE_QSR_MCP_BOARD_STATE_PATH",
+    "./qsr_board_state.json",
+)
+
+# How often (seconds) the background poller samples queue-service and
+# durably logs a queue_depth_sample event (kiosk_core/qsr_mcp/mcp_server.py).
+QSR_MCP_QUEUE_POLL_SECONDS = float(os.getenv("KIOSK_CORE_QSR_MCP_QUEUE_POLL_SECONDS", "30.0"))
+
+# ---------------------------------------------------------------------------
 # Conversation recording (offline analysis)
 # ---------------------------------------------------------------------------
 # Single master switch: when false (default), kiosk_core.conversation_recorder

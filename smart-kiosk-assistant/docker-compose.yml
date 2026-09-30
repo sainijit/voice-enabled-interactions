@@ -708,6 +708,7 @@ services:
     user: "1000:1000"
     ports:
       - "8012:8012"
+      - "8014:8014"  # QSR MCP surface for the Central QSR Agent (separate machine)
     environment:
       KIOSK_CORE_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
       KIOSK_CORE_RAG_URL:      http://rag-service:8020/api/v1/query
@@ -869,6 +870,15 @@ services:
       # Queue-service integration (dynamic peak-hour menu)
       KIOSK_CORE_QUEUE_SERVICE_ENABLED: "${KIOSK_CORE_QUEUE_SERVICE_ENABLED:-true}"
       KIOSK_CORE_QUEUE_SERVICE_URL:     http://queue-service:8090
+      # QSR MCP integration (Central QSR Agent surface — retail-use-cases#100/#103).
+      # Runs on its own port (distinct from the ordering-agent's /mcp mount)
+      # so a separate-machine QSR agent can reach kiosk-core's describe/read/
+      # act tools. Container-internal data paths under /app/data so both the
+      # durable event log and board-mode state persist across restarts.
+      KIOSK_CORE_QSR_MCP_ENABLED:    "${KIOSK_CORE_QSR_MCP_ENABLED:-true}"
+      KIOSK_CORE_QSR_MCP_PORT:       "8014"
+      KIOSK_CORE_QSR_MCP_LOG_PATH:   /app/data/qsr_mcp_events.db
+      KIOSK_CORE_QSR_MCP_BOARD_STATE_PATH: /app/data/qsr_board_state.json
       # Conversation recording (offline analysis). Off by default; set to
       # "true" to append every completed voice turn to
       # ./conversations/<conversation_id>.jsonl on the host (bind-mounted

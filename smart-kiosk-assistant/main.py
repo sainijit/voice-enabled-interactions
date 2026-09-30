@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager, AsyncExitStack
 from pathlib import Path
 
@@ -62,6 +63,24 @@ async def lifespan(app: FastAPI):
             logger.info("[STARTUP] Ordering feature enabled ✓")
         else:
             logger.info("[STARTUP] Ordering feature disabled (KIOSK_CORE_ORDERING_ENABLED=false)")
+
+        # ── QSR MCP feature startup (Central QSR Agent surface) ──────────────
+        if cfg.QSR_MCP_ENABLED:
+            from kiosk_core.qsr_mcp.mcp_server import run_mcp_server, start_queue_poller
+
+            def _run_qsr_mcp() -> None:
+                try:
+                    run_mcp_server()
+                except Exception:
+                    logger.exception("[QSR-MCP] MCP server thread crashed")
+
+            threading.Thread(target=_run_qsr_mcp, daemon=True, name="QSRMCPServer").start()
+            start_queue_poller()
+            logger.info(
+                "[STARTUP] QSR MCP server starting on port %s ✓", cfg.QSR_MCP_PORT
+            )
+        else:
+            logger.info("[STARTUP] QSR MCP feature disabled (KIOSK_CORE_QSR_MCP_ENABLED=false)")
 
         # ── Identity feature startup ─────────────────────────────────────────
         if cfg.IDENTITY_ENABLED:
