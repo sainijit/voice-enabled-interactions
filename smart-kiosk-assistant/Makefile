@@ -274,6 +274,19 @@ setup-dirs: ## Create required runtime directories
 	@# exist with the host user's ownership before `up`, otherwise Docker
 	@# auto-creates it as root and kiosk-core's user:"1000:1000" can't write.
 	@mkdir -p models storage conversations $(METRICS_DIR) $(RESULTS_DIR)
+	@# ...but ownership alone is not enough. The containers run as a fixed
+	@# uid 1000, while the host user who cloned the repo may be any uid. When
+	@# they differ the metrics writes fail silently and the benchmark reports
+	@# zero transactions even though every turn succeeded. Widen the mode so
+	@# uid 1000 can write regardless of who owns the directory.
+	@for d in $(RESULTS_DIR) $(METRICS_DIR); do \
+		owner=$$(stat -c '%u' "$$d" 2>/dev/null || echo 1000); \
+		if [ "$$owner" != "1000" ]; then \
+			chmod a+rwX "$$d" 2>/dev/null \
+				&& echo "  $(YELLOW)$$d is owned by uid $$owner, containers run as 1000 — widened permissions$(NC)" \
+				|| echo "  $(RED)✗ $$d is owned by uid $$owner and could not be made writable for uid 1000; benchmark metrics will be lost$(NC)"; \
+		fi; \
+	done
 	@echo "$(GREEN)✓ Directories ready$(NC)"
 
 setup-models: ## Download the OVMS LLM model (Qwen3-4B) via setup_models.sh
@@ -462,7 +475,13 @@ show-config: ## Print resolved configuration
 
 build: check-env ## Pull images (default with .env); REGISTRY=false builds locally
 	@echo "$(BLUE)Preparing Docker images...$(NC)"
-	@if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
+	@# set -e: without it this whole recipe is one `cmd; cmd; cmd` shell line
+	@# whose exit status is that of the LAST command -- the tolerant
+	@# `pull metrics-collector || echo ...` below, which always succeeds. A
+	@# failed audio-analyzer or text-to-speech build was therefore swallowed
+	@# and the recipe still printed "✓ Images ready" and exited 0.
+	@set -e; \
+	if [ "$(REGISTRY)" = "false" ] || [ "$(REGISTRY)" = "FALSE" ]; then \
 		echo "$(YELLOW)  REGISTRY=false → Building local services from source$(NC)"; \
 		REGISTRY=$(_DOCKER_REGISTRY) $(COMPOSE_BASE) $(_IDENTITY_PROFILE) $(_QUEUE_PROFILE) build $(LOCAL_ONLY_SERVICES) $(_IDENTITY_SVC); \
 		echo "$(YELLOW)  Building audio-analyzer locally from ../edge-ai-libraries/microservices/audio-analyzer...$(NC)"; \
@@ -664,15 +683,26 @@ clean-metrics: ## Delete collected OS metrics dumps (metrics/)
 	@mkdir -p $(METRICS_DIR)
 
 
-update-submodule update-submodules: ## Initialize and update the performance-tools submodule
+update-submodule update-submodules: ## Check out the pinned performance-tools submodule commit
 	@echo "$(BLUE)Cloning/updating performance tool repositories...$(NC)"
 	@if ! git -C .. ls-files --error-unmatch performance-tools >/dev/null 2>&1; then \
 		echo "$(RED)performance-tools is not registered as a submodule in the Git root.$(NC)"; \
 		echo "  Register it once with: git -C .. submodule add --branch main https://github.com/intel-retail/performance-tools.git performance-tools"; \
 		exit 1; \
 	fi
-	@git -C .. submodule update --init --recursive --remote performance-tools
-	@echo "$(GREEN)Submodules updated successfully.$(NC)"
+	@# Deliberately NOT --remote. --remote ignores the gitlink recorded in
+	@# this repository and fast-forwards the submodule to the tip of its
+	@# configured branch (main), which does NOT contain
+	@# benchmark_smart_kiosk_v2v.py -- so running this target used to be the
+	@# very thing that made `make benchmark` fail with "orchestrator not
+	@# found", which then told the user to run this target again. Without
+	@# --remote the pinned commit recorded here is checked out, which is the
+	@# only commit this stack is known to work against.
+	@git -C .. submodule update --init --recursive performance-tools
+	@echo "$(GREEN)Submodules updated to the pinned commit.$(NC)"
+	@echo "  performance-tools @ $$(git -C ../performance-tools rev-parse --short HEAD)"
+	@echo "  To intentionally move the pin, check out the new commit inside"
+	@echo "  ../performance-tools and commit the updated gitlink here."
 
 fetch-benchmark:
 	@echo "$(BLUE)Fetching benchmark image from registry...$(NC)"
@@ -700,14 +730,20 @@ build-benchmark:
 # itself), so do NOT run this against an already-running stack unless you also
 # pass V2V_ARGS="--skip_stack".
 #
-# V2V_SCRIPT is empty by default: with no --script, the orchestrator's child
-# script (tests/benchmarks/v2v_scripted_conversation_benchmark.py) reads its
-# own Sample_data/conversation.jsonl -- edit that one file to change the
-# scripted conversation without touching this Makefile or the submodule. Set
-# V2V_SCRIPT=order-simple (or order-multi/order-drift/order-upsell) to opt
-# back into one of the legacy hardcoded named conversations instead.
-V2V_SCRIPT      ?=
-V2V_RUNS        ?= 1
+# V2V_SCRIPT defaults to "all": one pass over every scenario in
+# tests/benchmarks/v2v_scripted_conversation_benchmark.py's SCRIPTS -- single
+# item, multi-item with an addition, a hesitant self-correcting customer, and
+# a price-question + upsell + confirm journey (11 turns). At V2V_RUNS=8 that
+# is 88 measured turns, which is what makes the reported p95 mean something:
+# the previous default (one 4-line conversation, V2V_RUNS=1) gave four turns,
+# so "p95" was just the slowest of the four.
+#
+# Set V2V_SCRIPT= (empty) to fall back to Sample_data/conversation.jsonl --
+# edit that one file to script a custom conversation without touching this
+# Makefile or the submodule. Set V2V_SCRIPT=order-simple (or order-multi/
+# order-drift/order-upsell) to run a single named scenario.
+V2V_SCRIPT      ?= all
+V2V_RUNS        ?= 8
 V2V_WARMUP_RUNS ?= 1
 V2V_LABEL       ?= v2v-perf-tools
 V2V_ARGS        ?=
@@ -722,7 +758,16 @@ _V2V_PERF_TOOLS  = $(_PERF_TOOLS_DIR)
 
 benchmark: check-env validate-profile ## Run the voice-to-voice latency benchmark via performance-tools
 	@if [ ! -f "$(_V2V_PERF_TOOLS)/benchmark_smart_kiosk_v2v.py" ]; then \
-		echo "$(RED)benchmark orchestrator not found at $(_V2V_PERF_TOOLS) -- run 'make update-submodules'.$(NC)"; \
+		echo "$(RED)benchmark orchestrator not found at $(_V2V_PERF_TOOLS)$(NC)"; \
+		if [ ! -d "../performance-tools/.git" ] && [ ! -f "../performance-tools/.git" ]; then \
+			echo "  The performance-tools submodule is not checked out."; \
+			echo "  Clone with submodules:  git clone --recurse-submodules <repo>"; \
+			echo "  Or, in an existing clone: make update-submodules"; \
+		else \
+			echo "  The submodule is checked out at $$(git -C ../performance-tools rev-parse --short HEAD),"; \
+			echo "  which does not contain benchmark_smart_kiosk_v2v.py."; \
+			echo "  Restore the commit pinned by this repository with: make update-submodules"; \
+		fi; \
 		exit 1; \
 	fi
 	@$(MAKE) --no-print-directory _write-provenance
@@ -731,23 +776,27 @@ benchmark: check-env validate-profile ## Run the voice-to-voice latency benchmar
 	@# OpenVINO recompile/export on first use -- TTS on GPU measured 281s for
 	@# the very first call -- so folding that cold start into the measured
 	@# runs would swamp the steady-state number the profile exists to compare.
-	@if [ "$(V2V_WARMUP_RUNS)" != "0" ]; then \
-		echo "$(BLUE)  Warm-up ($(V2V_WARMUP_RUNS) discarded run(s))...$(NC)"; \
-		cd $(_V2V_PERF_TOOLS) && python3 benchmark_smart_kiosk_v2v.py \
-			--app_dir $(CURDIR) \
-			--results_dir $(CURDIR)/$(RESULTS_DIR)/warmup \
-			$(if $(V2V_SCRIPT),--script $(V2V_SCRIPT),) \
-			--runs $(V2V_WARMUP_RUNS) \
-			--label warmup \
-			$(V2V_ARGS) >/dev/null 2>&1 || true; \
-	fi
+	@#
+	@# The warm-up is delegated to the orchestrator's own --warmup_runs rather
+	@# than run here. This Makefile used to do a separate warm-up pass first,
+	@# which was wrong three ways: it brought the stack up and down a second
+	@# time (so it warmed a process that was then discarded), `V2V_WARMUP_RUNS=0`
+	@# did not disable the orchestrator's warm-up underneath it, and its output
+	@# was sent to /dev/null with `|| true`, so a warm-up that failed outright
+	@# looked identical to one that succeeded. Passing the value through means
+	@# the run manifest's "warmup_runs" now records what actually ran.
 	cd $(_V2V_PERF_TOOLS) && python3 benchmark_smart_kiosk_v2v.py \
 		--app_dir $(CURDIR) \
 		--results_dir $(CURDIR)/$(RESULTS_DIR) \
 		$(if $(V2V_SCRIPT),--script $(V2V_SCRIPT),) \
 		--runs $(V2V_RUNS) \
+		--warmup_runs $(V2V_WARMUP_RUNS) \
 		--label $(V2V_LABEL) \
 		$(V2V_ARGS)
+	@# Only reached when the orchestrator exited 0. A manifest left reading
+	@# "started" therefore means the run died partway and the result files
+	@# beside it belong to an earlier run.
+	@python3 scripts/finish_run_manifest.py --results-dir $(RESULTS_DIR)
 	@# The orchestrator's `make down` (called internally, in a `finally:`
 	@# block) leaves the OS-level hardware counters sitting in ./metrics/
 	@# (bind-mounted from the now-stopped metrics-collector container) --
@@ -784,9 +833,20 @@ benchmark: check-env validate-profile ## Run the voice-to-voice latency benchmar
 _PERF_TOOLS_VENV = . venv/bin/activate
 
 sync-metrics-into-results: setup-dirs ## Copy OS-level hardware counters from ./metrics into ./results
-	@cp -f $(METRICS_DIR)/cpu_usage.log $(METRICS_DIR)/memory_usage.log $(METRICS_DIR)/npu_usage.csv \
+	@# -p preserves modification times, which trim_metrics_to_window.py below
+	@# uses to anchor each counter file onto the epoch clock -- none of these
+	@# formats records an epoch timestamp, and two of them are written in the
+	@# container's timezone. A plain `cp` would reset the mtimes to now and
+	@# silently destroy that anchor.
+	@cp -pf $(METRICS_DIR)/cpu_usage.log $(METRICS_DIR)/memory_usage.log $(METRICS_DIR)/npu_usage.csv \
 		$(RESULTS_DIR)/ 2>/dev/null || true
-	@cp -f $(METRICS_DIR)/qmassa*-tool-generated.json $(RESULTS_DIR)/ 2>/dev/null || true
+	@cp -pf $(METRICS_DIR)/qmassa*-tool-generated.json $(RESULTS_DIR)/ 2>/dev/null || true
+	@# The collector samples for the whole time the stack is up -- image
+	@# pulls, the health wait, the discarded warmup, teardown -- so averaging
+	@# the raw files describes a mostly-idle stack rather than the measured
+	@# turns. Narrow them to the window the benchmark recorded. A no-op when
+	@# results/measured_window.json is absent, i.e. outside a benchmark run.
+	@python3 scripts/trim_metrics_to_window.py --results-dir $(RESULTS_DIR)
 	@# qmassa rewrites its whole JSON document from scratch on every sample
 	@# rather than appending; a container killed mid-write (or -- observed in
 	@# practice -- CPU/IO contention while `docker compose down` tears down
