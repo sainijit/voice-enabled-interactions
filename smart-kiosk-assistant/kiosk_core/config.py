@@ -1011,7 +1011,7 @@ QUEUE_SERVICE_URL = os.getenv(
 # ---------------------------------------------------------------------------
 # QSR MCP integration (Central QSR Agent — retail-use-cases#100/#103)
 # ---------------------------------------------------------------------------
-# Exposes kiosk-core as an mcp_service_sdk service (describe + read tools +
+# Exposes kiosk-core as a fastmcp-based service (describe + read tools +
 # gated act tool) on its own port, distinct from the ordering-agent's
 # internal /mcp mount (kiosk_core/ordering/mcp_server.py). This is the
 # surface the separate-machine Central QSR Agent talks to. Same enable-flag

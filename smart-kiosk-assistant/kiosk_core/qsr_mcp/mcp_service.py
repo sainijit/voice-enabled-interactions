@@ -1,10 +1,12 @@
 """MCP integration for kiosk-core — the Central QSR Agent's Kiosk service
 (qsr-design §4/§7; retail-use-cases#100/#103).
 
-Same architecture as Order Accuracy's ``mcp_service.py``
-(``order-accuracy/dine-in/src/mcp_service.py``): this is the *only* place
-that talks to ``mcp_service_sdk``. Kiosk is a **sensor + actuator** (unlike
-Order Accuracy, which is sensor-only):
+Built directly on ``fastmcp`` (same library already used by
+``kiosk_core/ordering/mcp_server.py``), not ``mcp_service_sdk``: this module
+owns its own durable event log (``event_log.py``), delivery fan-out
+(``delivery.py``), and action policy gate (``policy.py``) instead of
+depending on the external SDK package for that scaffolding. Kiosk is a
+**sensor + actuator**:
 
   * Sensor: queue depth (via the standalone queue-service) and order
     activity (via the existing ``kiosk_core.ordering`` DB).
@@ -16,8 +18,12 @@ Read tools answer the qsr-design §7-A queries: "How deep is kiosk 4's
 queue?", "Is kiosk 4 always slower?", "What's on the board now?". Queue
 samples are recorded to the durable log by a background poller
 (``start_queue_poller`` in ``mcp_server.py``) so trend/history queries work
-across restarts, mirroring how Order Accuracy durably logs every
-validation outcome instead of relying on in-memory state.
+across restarts.
+
+The durable event log's on-disk format (SQLite table/columns, JSONL record
+shape) is unchanged from the previous ``mcp_service_sdk``-backed
+implementation — see ``event_log.py`` — so an existing, populated
+``qsr_mcp_events.db`` keeps working without any migration step.
 """
 from __future__ import annotations
 
@@ -28,12 +34,14 @@ import sqlite3
 import time
 from typing import Any, Optional
 
-from mcp_service_sdk import ServiceConfig, ServiceServer
-from mcp_service_sdk.policy import GateLevel
+from fastmcp import FastMCP
 
 from kiosk_core import config as cfg
 from kiosk_core.queue_client import QueueClient
 from kiosk_core.qsr_mcp import board_state
+from kiosk_core.qsr_mcp.delivery import Delivery
+from kiosk_core.qsr_mcp.event_log import build_log, new_event
+from kiosk_core.qsr_mcp.policy import GateLevel, PolicyGate
 
 logger = logging.getLogger(__name__)
 
@@ -42,43 +50,45 @@ STORE_ID = cfg.QSR_MCP_STORE_ID
 MCP_TRANSPORT = cfg.QSR_MCP_TRANSPORT
 MCP_HOST = cfg.QSR_MCP_HOST
 MCP_PORT = cfg.QSR_MCP_PORT
+SERVICE_NAME = "smart_kiosk"
 
-_EVENT_TYPES = ("queue_depth_sample", "board_mode_changed")
+_EVENT_TYPES: dict[str, dict[str, str]] = {
+    "queue_depth_sample": {"count": "int", "nearby": "int", "status": "str"},
+    "board_mode_changed": {"mode": "str", "reason": "str|None"},
+}
 
+# -- plumbing: durable log, delivery, policy gate (self-contained, no SDK) --
 
-def _build_service() -> ServiceServer:
-    cfg_obj = ServiceConfig(
-        service="smart_kiosk",
-        store_id=STORE_ID,
-        log_backend=cfg.QSR_MCP_LOG_BACKEND if MCP_SERVICE_ENABLED else "memory",
-        log_path=cfg.QSR_MCP_LOG_PATH,
-        delivery="webhook" if cfg.QSR_MCP_WEBHOOK_URL else "off",
-        webhook_url=cfg.QSR_MCP_WEBHOOK_URL,
-    )
-    return ServiceServer.from_config(cfg_obj)
+_log = build_log(
+    backend=cfg.QSR_MCP_LOG_BACKEND if MCP_SERVICE_ENABLED else "memory",
+    path=cfg.QSR_MCP_LOG_PATH,
+    service=SERVICE_NAME,
+)
+_delivery = Delivery(webhook_url=cfg.QSR_MCP_WEBHOOK_URL)
+_policy = PolicyGate()
+_subscriptions: list[dict[str, str]] = []
 
-
-svc = _build_service()
 board_state.configure(cfg.QSR_MCP_BOARD_STATE_PATH)
 _queue_client = QueueClient() if cfg.QUEUE_SERVICE_ENABLED else None
 
-# -- 1. declare event types (feeds `describe`) -------------------------------
+mcp = FastMCP(SERVICE_NAME)
 
-svc.register_event_type(
-    "queue_depth_sample",
-    schema={"count": "int", "nearby": "int", "status": "str"},
-)
-
-svc.register_event_type(
-    "board_mode_changed",
-    schema={"mode": "str", "reason": "str|None"},
-)
+# Bookkeeping for `describe` — independent of fastmcp's own type-hint-based
+# schema introspection (which still drives the real MCP `tools/list`
+# inputSchema for every tool below, unchanged from before this migration).
+_READ_TOOLS: dict[str, dict[str, Any]] = {}
+_ACT_TOOLS: dict[str, dict[str, Any]] = {}
 
 
-# ---------------------------------------------------------------------------
-# Emission — queue samples (called from the background poller) and board
-# mode changes (called from the set_board_mode act tool below)
-# ---------------------------------------------------------------------------
+def emit(event_type: str, payload: dict[str, Any], ref_id: str | None = None) -> None:
+    """Durably log one event, then fan out to the configured sink (if any).
+
+    Emit-to-log-first, then dispatch — same ordering as the old SDK's
+    ``ServiceServer.emit``.
+    """
+    event = new_event(event_type, SERVICE_NAME, STORE_ID, payload, ref_id)
+    _log.append(event)
+    _delivery.dispatch(event)
 
 
 def emit_queue_sample(snapshot: dict[str, Any]) -> None:
@@ -86,7 +96,7 @@ def emit_queue_sample(snapshot: dict[str, Any]) -> None:
     if not MCP_SERVICE_ENABLED:
         return
     try:
-        svc.emit(
+        emit(
             "queue_depth_sample",
             {
                 "count": snapshot.get("count"),
@@ -99,6 +109,42 @@ def emit_queue_sample(snapshot: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# describe / subscribe — same contract shape as the previous SDK-provided
+# tools, now implemented directly.
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(name="describe", description="Describe this service's contract.")
+def describe() -> dict[str, Any]:
+    """Self-description rich enough for a coding agent to use unassisted."""
+    return {
+        "service": SERVICE_NAME,
+        "store_id": STORE_ID,
+        "event_types": _EVENT_TYPES,
+        "read_tools": {
+            name: {"description": meta["description"], "schema": meta["schema"]}
+            for name, meta in _READ_TOOLS.items()
+        },
+        "act_tools": {
+            name: {
+                "description": meta["description"],
+                "schema": meta["schema"],
+                "gate": meta["gate"],
+            }
+            for name, meta in _ACT_TOOLS.items()
+        },
+    }
+
+
+@mcp.tool(name="subscribe", description="Subscribe to an event type.")
+def subscribe(event_type: str, condition: str, callback_url: str) -> dict[str, Any]:
+    _subscriptions.append(
+        {"event_type": event_type, "condition": condition, "callback_url": callback_url}
+    )
+    return {"subscribed": event_type, "condition": condition}
+
+
+# ---------------------------------------------------------------------------
 # Read tools
 # ---------------------------------------------------------------------------
 
@@ -106,14 +152,13 @@ _LOG_READ_PAGE = 5000
 
 
 def _read_entire_log() -> list:
-    """Read the full durable log, oldest -> newest (see Order Accuracy's
-    identically-named helper for the pagination rationale: both durable log
+    """Read the full durable log, oldest -> newest (both durable log
     backends have a gapless, contiguous ``seq``, so unfiltered paging never
     skips or re-reads rows regardless of how large the log grows)."""
     events: list = []
     since_seq = 0
     while True:
-        page = svc.log.read(since_seq=since_seq, limit=_LOG_READ_PAGE)
+        page = _log.read(since_seq=since_seq, limit=_LOG_READ_PAGE)
         if not page:
             break
         events.extend(page)
@@ -144,7 +189,17 @@ def _day_bounds_ms(period: str) -> tuple[int, int]:
     return start * 1000, (start + day_s) * 1000
 
 
-@svc.read_tool(
+def _register_read_tool(name: str, description: str, schema: dict[str, str]):
+    """Decorator: register a fastmcp tool and its `describe` bookkeeping."""
+
+    def deco(fn):
+        _READ_TOOLS[name] = {"description": description, "schema": schema}
+        return mcp.tool(name=name, description=description)(fn)
+
+    return deco
+
+
+@_register_read_tool(
     "get_queue_depth",
     description="Current kiosk queue depth (people waiting) and status (LOW/MEDIUM/HIGH).",
     schema={},
@@ -158,7 +213,7 @@ def get_queue_depth() -> dict[str, Any]:
     return {"available": True, **snapshot}
 
 
-@svc.read_tool(
+@_register_read_tool(
     "get_queue_history",
     description=(
         "Queue-depth trend for a period (today|yesterday|all|YYYY-MM-DD): "
@@ -183,7 +238,7 @@ def get_queue_history(period: str = "today") -> dict[str, Any]:
     }
 
 
-@svc.read_tool(
+@_register_read_tool(
     "get_order_stats",
     description=(
         "Order activity for a period (today|yesterday|all|YYYY-MM-DD): "
@@ -245,7 +300,7 @@ def _order_date_filter(period: str) -> tuple[str, tuple]:
     return "AND date(created_at) = date(?)", (period,)
 
 
-@svc.read_tool(
+@_register_read_tool(
     "get_board_state",
     description="Current kiosk menu-board mode (full|simplified) and when/why it last changed.",
     schema={},
@@ -258,23 +313,47 @@ def get_board_state() -> dict[str, Any]:
 # Act tool — the only actuator this service exposes
 # ---------------------------------------------------------------------------
 
-
-@svc.act_tool(
-    "set_board_mode",
-    level=GateLevel.AUTOMATIC,
-    description=(
-        "Simplify or restore the kiosk's on-screen menu board "
-        "(qsr-design action #6: deep queue -> simplify board)."
-    ),
-    schema={"mode": "str ('full'|'simplified')", "reason": "str|None"},
-    max_calls=20,
-    per_seconds=60.0,
+_SET_BOARD_MODE_DESCRIPTION = (
+    "Simplify or restore the kiosk's on-screen menu board "
+    "(qsr-design action #6: deep queue -> simplify board)."
 )
-def set_board_mode(mode: str, reason: Optional[str] = None) -> dict[str, Any]:
+_SET_BOARD_MODE_SCHEMA = {"mode": "str ('full'|'simplified')", "reason": "str|None"}
+
+_policy.register(
+    "set_board_mode", GateLevel.AUTOMATIC, max_calls=20, per_seconds=60.0
+)
+_ACT_TOOLS["set_board_mode"] = {
+    "description": _SET_BOARD_MODE_DESCRIPTION,
+    "schema": _SET_BOARD_MODE_SCHEMA,
+    "gate": GateLevel.AUTOMATIC.value,
+}
+
+
+def _set_board_mode_impl(mode: str, reason: Optional[str] = None) -> dict[str, Any]:
     snapshot = board_state.set_mode(mode, reason)
     if MCP_SERVICE_ENABLED:
         try:
-            svc.emit("board_mode_changed", {"mode": mode, "reason": reason})
+            emit("board_mode_changed", {"mode": mode, "reason": reason})
         except Exception:
             logger.exception("[QSR-MCP] Failed to emit board_mode_changed")
     return snapshot
+
+
+@mcp.tool(
+    name="set_board_mode",
+    description=f"[gate={GateLevel.AUTOMATIC.value}] {_SET_BOARD_MODE_DESCRIPTION}",
+)
+def set_board_mode(mode: str, reason: Optional[str] = None) -> dict[str, Any]:
+    """Run ``set_board_mode`` THROUGH the policy gate — the only path to
+    acting, matching the old SDK's ``ServiceServer.call_action`` wire
+    contract: ``{"executed", "level", "result"}`` on success or
+    ``{"executed": False, "level", "reason"}`` when gated/rate-limited."""
+    decision = _policy.evaluate("set_board_mode", {"mode": mode, "reason": reason})
+    if not decision.allowed:
+        return {
+            "executed": False,
+            "level": decision.level.value,
+            "reason": decision.reason,
+        }
+    result = _set_board_mode_impl(mode, reason)
+    return {"executed": True, "level": decision.level.value, "result": result}

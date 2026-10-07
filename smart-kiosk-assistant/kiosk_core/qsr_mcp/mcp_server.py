@@ -32,7 +32,7 @@ from kiosk_core.qsr_mcp.mcp_service import (
     MCP_TRANSPORT,
     _queue_client,
     emit_queue_sample,
-    svc,
+    mcp,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,11 +49,10 @@ def run_mcp_server() -> None:
         MCP_HOST,
         MCP_PORT,
     )
-    app = svc.to_mcp()
     if MCP_TRANSPORT == "stdio":
-        app.run("stdio")
+        mcp.run("stdio")
     else:
-        app.run(MCP_TRANSPORT, host=MCP_HOST, port=MCP_PORT)
+        mcp.run(MCP_TRANSPORT, host=MCP_HOST, port=MCP_PORT)
 
 
 def _poll_queue_forever(interval_seconds: float) -> None:

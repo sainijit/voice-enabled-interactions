@@ -157,8 +157,10 @@ services:
   # GPU), Intel NPU tool, Intel PCM (power), sar (CPU), and free (memory).
   #
   # Endpoints (reachable by other containers as http://metrics-collector:9000):
-  #   GET /health         -> liveness probe
-  #   GET /metrics        -> cpu/gpu/npu/memory/power time-series JSON
+  #   GET /metrics        -> cpu/gpu/npu/memory/power time-series JSON (used
+  #                          as the healthcheck/liveness probe below — the
+  #                          published image has no real /health route, see
+  #                          note in the metrics-collector block)
   #   GET /platform-info  -> processor, iGPU, NPU, memory, storage summary
   #   GET /memory         -> latest memory snapshot
   # ---------------------------------------------------------------------------
@@ -177,12 +179,22 @@ services:
     # the dashboard's /metrics poll take 20-40 s), and let qmassa's JSON grow
     # without bound (~596 MB/hour).
     #
-    # Those fixes (FastAPI + uvicorn, /health, bounded qmassa collection via
-    # collect_gpu.sh) have since been merged back into the edge-ai-suites
-    # source, published as hl-ai-metrics-collector:2026.2.0, so this
-    # service can go back to pulling the shared image instead of shadowing it
-    # with a locally-built one. Override the tag with METRICS_COLLECTOR_TAG in
-    # .env if a newer version is published.
+    # The bounded qmassa collection fix (collect_gpu.sh) has been merged back
+    # into the edge-ai-suites source and published as
+    # hl-ai-metrics-collector:2026.2.0, so this service can go back to
+    # pulling the shared image instead of shadowing it with a locally-built
+    # one. Override the tag with METRICS_COLLECTOR_TAG in .env if a newer
+    # version is published.
+    #
+    # NOTE (verified 2026-10-06): the published 2026.2.0 image still ships
+    # the old single-threaded http.server app (no FastAPI/uvicorn) and has
+    # NO /health route at all (confirmed via `docker pull` + inspecting
+    # /app/app.py's MetricsHandler.do_GET: only /metrics, /platform-info,
+    # /memory, /device-config are handled; anything else — including
+    # /health — 404s unconditionally). The docker-compose healthcheck below
+    # therefore targets /metrics instead, which this image does serve. If a
+    # future image tag adds a real /health endpoint, switch the healthcheck
+    # back and update the endpoint list above.
     # Deliberately NOT ${REGISTRY}: that variable selects where the images we
     # build locally are tagged/pushed (e.g. REGISTRY=false while iterating), but
     # this image is only ever pulled from upstream, so following REGISTRY just
@@ -211,7 +223,7 @@ services:
       - /proc:/proc
     healthcheck:
       test: ["CMD", "python3", "-c",
-             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=5).read()"]
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/metrics', timeout=5).read()"]
       interval: 10s
       timeout: 5s
       start_period: 20s
@@ -713,6 +725,16 @@ services:
       KIOSK_CORE_ANALYZER_URL: http://audio-analyzer:8010/v1/audio/transcriptions
       KIOSK_CORE_RAG_URL:      http://rag-service:8020/api/v1/query
       KIOSK_CORE_TTS_URL:      http://text-to-speech:8011/v1/audio/speech
+      # kiosk_core.config.DEFAULT_ASR_LANGUAGE falls back to "en" when this is
+      # unset, which crashes the currently-deployed English-only ASR
+      # checkpoint (distil-whisper/distil-small.en): OpenVINO GenAI's Whisper
+      # pipeline rejects ANY language token, including "en", for a
+      # non-multilingual model ("Cannot specify 'language' for not
+      # multilingual model"). .env sets this to empty so AnalyzerClient omits
+      # the language hint (confirmed fix, 2026-10-07) — this explicit mapping
+      # is required because compose does not auto-forward .env values into a
+      # container; only variables listed here are passed through.
+      KIOSK_CORE_ASR_LANGUAGE: ${KIOSK_CORE_ASR_LANGUAGE:-}
       # "Ryan" was the SpeechT5/Qwen-era default (US English male, bright and
       # projecting). The engine has since moved to Kokoro (see
       # configs/text-to-speech/config.yaml), which has no "Ryan" voice — this

@@ -1,16 +1,27 @@
 # Smart Kiosk — QSR MCP Surface
 
 Exposes kiosk-core to the Central QSR Agent (retail-use-cases#100/#103,
-`qsr-design`) via `mcp_service_sdk`, following the same pattern as Order
-Accuracy's dine-in/take-away MCP services. This is a **separate** MCP
-surface from `kiosk_core/ordering/mcp_server.py`'s `/mcp` mount, which is
-only for the internal rag-service ordering agent.
+`qsr-design`) directly via `fastmcp` — the same MCP framework already used
+by `kiosk_core/ordering/mcp_server.py`'s internal `/mcp` mount. This is a
+**separate** MCP surface from that ordering mount, which is only for the
+internal rag-service ordering agent.
+
+Previously this surface was built on the external `mcp-service-sdk`
+package (as Order Accuracy's dine-in/take-away MCP services still are).
+It has since been migrated to a direct `fastmcp` implementation that owns
+its own durable event log, delivery fan-out, and action policy gate
+in-tree (see Module layout), removing the `mcp-service-sdk` dependency
+entirely. Tool names, descriptions, input schemas, event types, and the
+durable SQLite/JSONL log's on-disk format are unchanged by this migration.
 
 ## Module layout
 
 | File | Responsibility |
 |---|---|
-| `kiosk_core/qsr_mcp/mcp_service.py` | `ServiceServer` config, event types, read/act tool implementations |
+| `kiosk_core/qsr_mcp/mcp_service.py` | `fastmcp.FastMCP` app, event types, read/act tool implementations |
+| `kiosk_core/qsr_mcp/event_log.py` | Durable event log (SQLite/JSONL), same on-disk format as the former `mcp_service_sdk` log |
+| `kiosk_core/qsr_mcp/delivery.py` | Optional webhook event delivery with retry (off by default) |
+| `kiosk_core/qsr_mcp/policy.py` | Action policy gate (`GateLevel`, rate limiting) for `set_board_mode` |
 | `kiosk_core/qsr_mcp/mcp_server.py` | Runs the MCP app + queue-depth sampling poller on background threads |
 | `kiosk_core/qsr_mcp/board_state.py` | Durable (JSON-file) kiosk menu-board mode: `full` / `simplified` |
 | `kiosk_core/queue_client.py` | HTTP client to the standalone `queue-service` |
@@ -39,7 +50,15 @@ streamable-http transport) — distinct from the ordering feature's `/mcp`.
 **Act tool** (gate: `AUTOMATIC`, rate-limited to 20 calls/60s)
 - `set_board_mode(mode, reason=None)` — `mode` is `"full"` or `"simplified"`.
   Implements qsr-design's autonomous action #6: "Kiosk queue deep/short ->
-  Kiosk board simplify".
+  Kiosk board simplify". The actual MCP wire response wraps the result:
+  `{"executed": true, "level": "automatic", "result": {...}}` on success, or
+  `{"executed": false, "level": "automatic", "reason": "rate limit exceeded"}`
+  when the 20-calls/60s limit is hit.
+
+Also exposed (unchanged by the migration): `describe()` (self-description)
+and `subscribe(event_type, condition, callback_url)` (records a
+subscription; Kiosk — unlike Order Accuracy's sensor-only services — has no
+restriction against exposing `subscribe`).
 
 ## Configuration
 
@@ -54,3 +73,7 @@ See `kiosk_core/config.py` (`QSR_MCP_*` constants) / `.env.example` for all
   text once accessible.
 - `set_board_mode` only flips a backend flag today; wiring kiosk-ui to
   visibly react to `board_mode` is a follow-up.
+- An existing, populated `qsr_mcp_events.db` (or JSONL log file) from before
+  the `fastmcp` migration keeps working unmodified: the SQLite table/columns
+  and JSONL record shape in `event_log.py` are byte-for-byte identical to the
+  former `mcp_service_sdk`-backed log.
