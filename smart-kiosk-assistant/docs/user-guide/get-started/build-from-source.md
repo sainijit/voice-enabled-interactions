@@ -30,7 +30,7 @@ This release depends on **specific commits** of two other repositories.
 | Repository | Pinned commit | Why |
 | --- | --- | --- |
 | [`intel-retail/performance-tools`](https://github.com/intel-retail/performance-tools) | `2595194` | Provides `benchmark_smart_kiosk_v2v.py`, the voice-to-voice benchmark orchestrator, and the natural-endpointing measurement mode. Tracked as a Git **submodule**, so the commit is recorded in this repository — you do not pick it manually. |
-| [`open-edge-platform/edge-ai-libraries`](https://github.com/open-edge-platform/edge-ai-libraries) | `62468e8` | Source for the `audio-analyzer` and `text-to-speech` images. You do **not** build these two services here — they are always pulled pre-built from the registry (Docker Hub `intel/audio-analyzer` and `intel/text-to-speech` by default). The published images are built from this upstream `main` commit, which includes everything this release relies on: `TEXT_TO_SPEECH_WORKERS`, the Kokoro TTS engine, the ASR preview pool, forwarding an empty ASR language to English-only checkpoints, and the realtime low-latency mode. |
+| [`open-edge-platform/edge-ai-libraries`](https://github.com/open-edge-platform/edge-ai-libraries) | `62468e8` | Source for the `audio-analyzer` and `text-to-speech` images. You do **not** build these two services here — they are always pulled pre-built from the registry (Docker Hub `intel/audio-analyzer` and `intel/text-to-speech` by default). The published images are built from this upstream `main` commit, which includes everything this release relies on: `TEXT_TO_SPEECH_WORKERS`, the Kokoro TTS engine, the ASR preview pool, forwarding an empty ASR language to English-only checkpoints, and the realtime low-latency mode. The `audio-analyzer` image additionally carries two fixes on top of this commit: `e6a510a7c` (Level Zero loader 1.34.0 — the 1.32.0 package is no longer downloadable, so `62468e8` alone no longer builds) and the speechbrain 1.1.2 bump from [open-edge-platform/edge-ai-libraries#3950](https://github.com/open-edge-platform/edge-ai-libraries/pull/3950), without which the service fails to start when speaker diarization is enabled. |
 
 `audio-analyzer` and `text-to-speech` have **no `build:` section** in
 `docker-compose.yml` — neither `docker compose build` nor
@@ -190,6 +190,10 @@ git clone --filter=blob:none --sparse \
 git -C edge-ai-libraries sparse-checkout set \
   microservices/audio-analyzer microservices/text-to-speech
 git -C edge-ai-libraries checkout 62468e8
+# audio-analyzer only: apply the two fixes this release's image carries
+# (Level Zero 1.34.0, and speechbrain 1.1.2 so diarization can start).
+git -C edge-ai-libraries fetch origin main pull/3950/head:speechbrain-fix
+git -C edge-ai-libraries cherry-pick e6a510a7c speechbrain-fix
 
 # audio-analyzer (its Dockerfile lives in docker/)
 docker build -t intel/audio-analyzer:latest \
